@@ -385,10 +385,12 @@ function Edit-TelegramKeyboard {
 function Send-TelegramAction {
     param(
         [int64]$chatId,
-        [string]$action = "typing"
+        [string]$action = "typing",
+        [int]$messageThreadId = 0
     )
     $url = "https://api.telegram.org/bot$botToken/sendChatAction"
     $bodyObj = @{ chat_id = $chatId; action = $action }
+    if ($messageThreadId -gt 0) { $bodyObj["message_thread_id"] = $messageThreadId }
     $jsonBody = $bodyObj | ConvertTo-Json -Compress
     try {
         Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($jsonBody)) -TimeoutSec 5 | Out-Null
@@ -691,7 +693,10 @@ function Get-QueueButtons {
 # --- KIỂM TRA VÀ CHẠY TIẾP PROMPT TRONG HÀNG ĐỢI ---
 
 function Check-And-Run-Next-In-Queue {
-    param([int64]$chatId)
+    param(
+        [int64]$chatId,
+        [int]$messageThreadId = 0
+    )
 
     if ($global:promptQueue.Count -gt 0) {
         $next = $global:promptQueue[0]
@@ -700,8 +705,11 @@ function Check-And-Run-Next-In-Queue {
         $remCount = $global:promptQueue.Count
         $remNotice = if ($remCount -gt 0) { "`n*(Còn lại trong hàng chờ: $remCount prompt)*" } else { "" }
 
-        Send-TelegramMessage -chatId $chatId -text "🚀 Đang thực thi prompt tiếp theo từ hàng đợi:`n""pro: $($next.preview)""$remNotice"
-        Execute-UserPrompt -chatId $chatId -text $next.text
+        $tChatId = if ($next.chatId) { [int64]$next.chatId } else { $chatId }
+        $tThreadId = if ($next.threadId) { [int]$next.threadId } else { $messageThreadId }
+
+        Send-TelegramMessage -chatId $tChatId -text "🚀 Đang thực thi prompt tiếp theo từ hàng đợi:`n""pro: $($next.preview)""$remNotice" -messageThreadId $tThreadId
+        Execute-UserPrompt -chatId $tChatId -text $next.text -messageThreadId $tThreadId
     } else {
         $global:isExecuting = $false
         $global:currentExecutingPrompt = ""
@@ -1085,7 +1093,8 @@ function Process-PendingMediaGroups {
 function Execute-UserPrompt {
     param(
         [int64]$chatId,
-        [string]$text
+        [string]$text,
+        [int]$messageThreadId = 0
     )
 
     $global:isExecuting = $true
@@ -1201,7 +1210,7 @@ function Execute-UserPrompt {
         $global:promptReadingPreview = $preview
         $global:lastReadingSec = 1
         $safePrev = [System.Net.WebUtility]::HtmlEncode($preview)
-        Send-TelegramAction -chatId $chatId -action "typing"
+        Send-TelegramAction -chatId $chatId -action "typing" -messageThreadId $messageThreadId
 
         if (Test-Path $syncBridgePath) {
             try {
@@ -1209,6 +1218,9 @@ function Execute-UserPrompt {
                 $br | Add-Member -NotePropertyName "promptReadingMsgId" -NotePropertyValue $global:promptReadingMsgId -Force
                 $br | Add-Member -NotePropertyName "promptReadingStart" -NotePropertyValue ([DateTime]::Now.ToString("o")) -Force
                 $br | Add-Member -NotePropertyName "promptReadingPreview" -NotePropertyValue $preview -Force
+                $br | Add-Member -NotePropertyName "activeChatId" -NotePropertyValue $chatId -Force
+                $br | Add-Member -NotePropertyName "activeThreadId" -NotePropertyValue $messageThreadId -Force
+                $br | Add-Member -NotePropertyName "isWorking" -NotePropertyValue $true -Force
                 $br | ConvertTo-Json -Depth 5 | Set-Content $syncBridgePath -Encoding UTF8
             } catch {}
         }
@@ -1217,6 +1229,7 @@ function Execute-UserPrompt {
         Append-SyncMessage -sender "phone" -text $text
         Send-ToAntigravityChat -text $text
         Show-ScreenNotification -title "📱 Tin Nhắn Đồng Bộ Từ Điện Thoại" -msg "$preview" -durationSec 3
+        $global:isExecuting = $false
         return
     }
 
@@ -1249,10 +1262,12 @@ while ($true) {
         try {
             if (Test-Path $syncBridgePath) {
                 $brData = Get-Content $syncBridgePath -Raw -Encoding UTF8 | ConvertFrom-Json
-                if ($brData.isWorking -eq $false -and $global:isExecuting -eq $true -and $null -eq $global:currentJob) {
+                if ($brData.isWorking -eq $false -and ($global:isExecuting -eq $true -or $global:promptQueue.Count -gt 0) -and $null -eq $global:currentJob) {
                     $global:isExecuting = $false
                     $global:currentExecutingPrompt = ""
-                    Check-And-Run-Next-In-Queue -chatId $allowedChatId
+                    $tChatId = if ($brData.activeChatId) { [int64]$brData.activeChatId } else { $allowedChatId }
+                    $tThreadId = if ($brData.activeThreadId) { [int]$brData.activeThreadId } else { 0 }
+                    Check-And-Run-Next-In-Queue -chatId $tChatId -messageThreadId $tThreadId
                 }
             }
         } catch {}
@@ -1847,10 +1862,11 @@ while ($true) {
 
                 $msg = $item.message
                 $chatId = [int64]$msg.chat.id
+                $threadId = if ($msg.message_thread_id) { [int]$msg.message_thread_id } else { 0 }
 
                 $fromId = if ($msg.from) { [int64]$msg.from.id } else { 0 }
                 if ($chatId -ne $allowedChatId -and $fromId -ne $allowedChatId) {
-                    Send-TelegramMessage -chatId $chatId -text "Xin lỗi, bạn không có quyền điều khiển máy tính này!"
+                    Send-TelegramMessage -chatId $chatId -text "Xin lỗi, bạn không có quyền điều khiển máy tính này!" -messageThreadId $threadId
                     continue
                 }
 
@@ -2320,7 +2336,8 @@ while ($true) {
                 }
 
                 # 3. NẾU MÁY TÍNH ĐANG BẬN CHẠY LỆNH HOẶC CÓ JOB NỀN -> ĐƯA VÀO HÀNG ĐỢI (PROMPT QUEUE)
-                if ($global:isExecuting -eq $true -or $global:currentJob -ne $null) {
+                # CHỈ đưa vào hàng đợi nếu đang ở chế độ Standalone (KHÔNG kết nối Antigravity) VÀ đang có Job chạy ngầm
+                if (-not (Check-SyncBridgeStatus) -and ($global:isExecuting -eq $true -or $global:currentJob -ne $null)) {
                     $qId = [System.Guid]::NewGuid().ToString('N').Substring(0, 6)
                     $preview = if ($text.Length -gt 35) { $text.Substring(0, 35) + "..." } else { $text }
 
@@ -2329,6 +2346,8 @@ while ($true) {
                         text = $text
                         addedAt = (Get-Date -Format "HH:mm:ss")
                         preview = $preview
+                        chatId = $chatId
+                        threadId = $threadId
                     }
                     $global:promptQueue.Add($qItem)
 
@@ -2336,7 +2355,7 @@ while ($true) {
                     $queueNotice = "⏳ Đã thêm prompt: ""$preview"" vào hàng đợi, xin bạn chờ một lát!`n`n$currentNotice"
                     $queueButtons = Get-QueueButtons -targetId $qId
 
-                    Send-TelegramKeyboard -chatId $chatId -text $queueNotice -buttons $queueButtons
+                    Send-TelegramKeyboard -chatId $chatId -text $queueNotice -buttons $queueButtons -messageThreadId $threadId
                     continue
                 }
 
@@ -2482,7 +2501,7 @@ while ($true) {
                 }
 
                 # 5. NẾU RẢNH RỖI (IDLE) -> THỰC THI NGAY PROMPT
-                Execute-UserPrompt -chatId $chatId -text $text
+                Execute-UserPrompt -chatId $chatId -text $text -messageThreadId $threadId
             }
         }
         Process-PendingMediaGroups

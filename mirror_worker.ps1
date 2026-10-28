@@ -87,18 +87,35 @@ function Split-TelegramText {
     return ,($chunks.ToArray())
 }
 
+function Get-CurrentTgTarget {
+    $targetChatId = $chatId
+    $targetThreadId = 0
+    if (Test-Path $syncBridgePath) {
+        try {
+            $brInfo = Get-Content $syncBridgePath -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($brInfo.activeChatId) { $targetChatId = [int64]$brInfo.activeChatId }
+            if ($brInfo.activeThreadId) { $targetThreadId = [int]$brInfo.activeThreadId }
+        } catch {}
+    }
+    return [PSCustomObject]@{
+        chatId = $targetChatId
+        threadId = $targetThreadId
+    }
+}
+
 function Send-TgLiveStatus {
     param([string]$text, [string]$parseMode = "HTML")
     if ([string]::IsNullOrWhiteSpace($text)) { return $null }
-    # Không cắt bớt tin nhắn - tự động chia phần
 
+    $target = Get-CurrentTgTarget
     $url = "https://api.telegram.org/bot$botToken/sendMessage"
     $bodyObj = @{
-        chat_id = $chatId
+        chat_id = $target.chatId
         text = $text
         disable_web_page_preview = $true
     }
     if ($parseMode) { $bodyObj["parse_mode"] = $parseMode }
+    if ($target.threadId -gt 0) { $bodyObj["message_thread_id"] = $target.threadId }
     $jsonBody = $bodyObj | ConvertTo-Json -Compress
     try {
         $res = Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($jsonBody)) -TimeoutSec 10
@@ -121,8 +138,9 @@ function Send-TgLiveStatus {
 function Delete-TgMessage {
     param([int]$messageId)
     if (-not $messageId) { return }
+    $target = Get-CurrentTgTarget
     $url = "https://api.telegram.org/bot$botToken/deleteMessage"
-    $bodyObj = @{ chat_id = $chatId; message_id = $messageId }
+    $bodyObj = @{ chat_id = $target.chatId; message_id = $messageId }
     $jsonBody = $bodyObj | ConvertTo-Json -Compress
     try {
         Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($jsonBody)) -TimeoutSec 5 | Out-Null
@@ -132,9 +150,10 @@ function Delete-TgMessage {
 function Edit-TgMessage {
     param([int]$messageId, [string]$text, [string]$parseMode = "HTML")
     if (-not $messageId -or [string]::IsNullOrWhiteSpace($text)) { return }
+    $target = Get-CurrentTgTarget
     $url = "https://api.telegram.org/bot$botToken/editMessageText"
     $bodyObj = @{
-        chat_id = $chatId
+        chat_id = $target.chatId
         message_id = $messageId
         text = $text
         disable_web_page_preview = $true
