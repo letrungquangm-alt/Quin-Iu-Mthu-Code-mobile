@@ -1,7 +1,7 @@
-﻿﻿# ========================================================
-# Telegram Remote Coder - Live Activity Mirror Worker v2.2
+﻿# ========================================================
+# Telegram Remote Coder - Live Activity Mirror Worker v2.3
 # Tự động hiển thị tiến trình: Thinking, Working, Sửa/Tạo file chuẩn quy tắc (+ / -)
-# và TỰ ĐỘNG XÓA tin nhắn tạm thời khi câu trả lời hoàn tất!
+# Hiển thị trực tiếp toolSummary ngay lập tức, không có khoảng lặng Working!
 # ========================================================
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -49,17 +49,6 @@ function Delete-TgMessage {
     try {
         Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($jsonBody)) -TimeoutSec 5 | Out-Null
     } catch {}
-}
-
-function Set-SyncBridgeWorkingStatus {
-    param([bool]$working)
-    if (Test-Path $syncBridgePath) {
-        try {
-            $br = Get-Content $syncBridgePath -Raw -Encoding UTF8 | ConvertFrom-Json
-            $br | Add-Member -NotePropertyName "isWorking" -NotePropertyValue $working -Force
-            $br | ConvertTo-Json -Depth 5 | Set-Content $syncBridgePath -Encoding UTF8
-        } catch {}
-    }
 }
 
 function Edit-TgMessage {
@@ -121,29 +110,28 @@ if (Test-Path $syncBridgePath) {
 $transcriptPath = "$env:USERPROFILE\.gemini\antigravity\brain\$conversationId\.system_generated\logs\transcript.jsonl"
 
 Write-Host "==========================================================" -ForegroundColor Cyan
-Write-Host " Live Mirror Worker v2.2 (Thinking & Accurate Diff Stats) đang chạy..." -ForegroundColor Cyan
+Write-Host " Live Mirror Worker v2.3 (Zero-Silence & Live Summaries) đang chạy..." -ForegroundColor Cyan
 Write-Host " Theo dõi transcript: $transcriptPath" -ForegroundColor DarkCyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 
-# Bỏ qua các byte cũ trước thời điểm bật (Streaming Byte Offset - 0% CPU, Siêu tốc)
+# Bắt đầu theo dõi từ cuối file hiện tại (không đọc lặp lại lệnh cũ)
 $lastByteOffset = 0
-$lastProcessedStep = 0
 if (Test-Path $transcriptPath) {
     try {
         $fileInfo = Get-Item $transcriptPath -ErrorAction SilentlyContinue
         if ($fileInfo) {
-            $lastByteOffset = [math]::Max(0, ($fileInfo.Length - 8192))
-            Write-Host "Bắt đầu theo dõi từ byte offset: $lastByteOffset" -ForegroundColor Yellow
+            $lastByteOffset = $fileInfo.Length
+            Write-Host "Bắt đầu theo dõi từ byte offset hiện tại: $lastByteOffset" -ForegroundColor Yellow
         }
     } catch {}
 }
 
-$lastReportedCmd = ""
 # Danh sách lưu các Message ID tạm thời trong lượt Working hiện tại (sẽ xóa sạch khi xong)
 $tempWorkingMsgIds = New-Object System.Collections.Generic.List[int]
 $global:mirrorThinkingMsgId = $null
 $global:mirrorThinkingStart = $null
 $global:lastMirrorSec = 0
+$global:lastThinkingSnippet = ""
 
 $global:activeWorkingStart = $null
 $global:activeWorkingMsgId = $null
@@ -175,7 +163,16 @@ function Stop-WorkingTracker {
 
 while ($true) {
     try {
-        # Đếm giây liên tục cho tác vụ Working đang chạy ngầm trên máy tính (Cập nhật 2s/lần)
+        # 1. Đếm giây liên tục cho Thinking nếu AI đang suy nghĩ
+        if ($global:mirrorThinkingStart -and $global:mirrorThinkingMsgId) {
+            $currThinkSec = [math]::Max(1, [int]([DateTime]::Now - $global:mirrorThinkingStart).TotalSeconds)
+            if ($currThinkSec -ge ($global:lastMirrorSec + 2)) {
+                $global:lastMirrorSec = $currThinkSec
+                Edit-TgMessage -messageId $global:mirrorThinkingMsgId -text "🧠 [AI ĐANG SUY NGHĨ (${currThinkSec}s)]:$global:lastThinkingSnippet"
+            }
+        }
+
+        # 2. Đếm giây liên tục cho tác vụ Working đang chạy ngầm trên máy tính (Cập nhật 2s/lần)
         if ($global:activeWorkingStart -and $global:activeWorkingMsgId) {
             $currSec = [math]::Max(1, [int]([DateTime]::Now - $global:activeWorkingStart).TotalSeconds)
             if ($currSec -ge ($global:lastWorkingSec + 2)) {
@@ -197,8 +194,8 @@ while ($true) {
                     try {
                         $entry = $line | ConvertFrom-Json
 
-                        # 1. BẮT SUY NGHĨ CỦA AI (CHẠY THEO GIÂY LIÊN TỤC VÀ TRÍCH XUẤT NỘI DUNG SUY NGHĨ)
-                        if ($entry.thinking) {
+                        # A. BẮT SUY NGHĨ CỦA AI (CHỈ KHI ĐANG SUY NGHĨ THUẦN TÚY, CHƯA CÓ TOOL CALL)
+                        if ($entry.thinking -and -not $entry.tool_calls) {
                             Set-SyncBridgeWorkingStatus -working $true
                             
                             $cleanThinking = ""
@@ -208,63 +205,43 @@ while ($true) {
                                 $cleanThinking = ($thinkLines | Select-Object -First 2) -join " "
                                 if ($cleanThinking.Length -gt 150) { $cleanThinking = $cleanThinking.Substring(0, 150) + "..." }
                             }
-                            $thinkSnippet = if ($cleanThinking) { "`n💭 `"$cleanThinking`"" } else { "" }
+                            $global:lastThinkingSnippet = if ($cleanThinking) { "`n💭 `"$cleanThinking`"" } else { "" }
 
                             if (-not $global:mirrorThinkingStart) {
                                 $global:mirrorThinkingStart = [DateTime]::Now
                                 $global:lastMirrorSec = 1
-                                $global:mirrorThinkingMsgId = Send-TgLiveStatus -text "🧠 [AI ĐANG SUY NGHĨ (1s)]:$thinkSnippet"
+                                $global:mirrorThinkingMsgId = Send-TgLiveStatus -text "🧠 [AI ĐANG SUY NGHĨ (1s)]:$global:lastThinkingSnippet"
                                 if ($global:mirrorThinkingMsgId) { $tempWorkingMsgIds.Add($global:mirrorThinkingMsgId) }
-                            } else {
-                                $elapsedSec = [math]::Max(1, [int]([DateTime]::Now - $global:mirrorThinkingStart).TotalSeconds)
-                                if ($elapsedSec -ge ($global:lastMirrorSec + 2)) {
-                                    $global:lastMirrorSec = $elapsedSec
-                                    Edit-TgMessage -messageId $global:mirrorThinkingMsgId -text "🧠 [AI ĐANG SUY NGHĨ (${elapsedSec}s)]:$thinkSnippet"
-                                }
                             }
                         }
 
-                        # 2. BẮT TRẠNG THÁI WORKING / TOOL CALLS (KẾT THÚC SUY NGHĨ NẾU CÓ)
+                        # B. BẮT TRẠNG THÁI WORKING / TOOL CALLS (HIỂN THỊ NGAY TOOL SUMMARY ĐẦU DÒNG, KHÔNG KHOẢNG LẶNG)
                         if ($entry.tool_calls) {
                             Set-SyncBridgeWorkingStatus -working $true
-                            if ($global:mirrorThinkingStart) {
+                            if ($global:mirrorThinkingStart -and $global:mirrorThinkingMsgId) {
                                 $elapsedSec = [math]::Max(1, [int]([DateTime]::Now - $global:mirrorThinkingStart).TotalSeconds)
                                 Edit-TgMessage -messageId $global:mirrorThinkingMsgId -text "🧠 [AI ĐÃ SUY NGHĨ XONG - ${elapsedSec}s]"
                                 $global:mirrorThinkingStart = $null
                                 $global:mirrorThinkingMsgId = $null
                                 $global:lastMirrorSec = 0
                             }
+
                             foreach ($tc in $entry.tool_calls) {
                                 $toolName = $tc.name
-                                $summary = if ($tc.args.toolSummary) { $tc.args.toolSummary.ToString().Trim('"', ' ') } else { "" }
+                                $rawSummary = if ($tc.args.toolSummary) { $tc.args.toolSummary.ToString().Trim('"', ' ') } else { "" }
+                                $actionSummary = ""
+                                $actionDetail = ""
 
                                 if ($toolName -eq "run_command") {
                                     $cmd = if ($tc.args.CommandLine) { $tc.args.CommandLine.ToString().Trim('"', ' ') } else { "" }
-
-                                    # Bỏ qua các lệnh nội bộ tự kiểm tra
-                                    if ($cmd -like "*transcript.jsonl*" -or $cmd -like "*mirror_worker*") {
-                                        continue
-                                    }
-
-                                    $displayCmd = if ($cmd.Length -gt 250) { $cmd.Substring(0, 250) + "... [dài]" } else { $cmd }
-
-                                    if ($cmd -ne $lastReportedCmd) {
-                                        $lastReportedCmd = $cmd
-                                        $msg = @(
-                                            "⚡ [MÁY TÍNH ĐANG CHẠY / WORKING]",
-                                            "▶️ Lệnh: $displayCmd",
-                                            $(if ($summary) { "📋 Thao tác: $summary" } else { "" })
-                                        ) -join "`n"
-
-                                        Write-Host "[MIRROR] Tool call: $summary" -ForegroundColor Cyan
-                                        $sumInfo = if ($summary) { "`n📋 Thao tác: $summary" } else { "" }; Start-WorkingTracker -title "▶️ Lệnh: $displayCmd$sumInfo"
-                                    }
+                                    $displayCmd = if ($cmd.Length -gt 200) { $cmd.Substring(0, 200) + "... [dài]" } else { $cmd }
+                                    $actionSummary = if ($rawSummary) { $rawSummary } else { "Chạy lệnh hệ thống" }
+                                    $actionDetail = "▶️ Lệnh: $displayCmd"
                                 }
                                 elseif ($toolName -eq "edit_file") {
                                     $rawPath = if ($tc.args.Path) { $tc.args.Path.ToString().Trim('"', ' ') } else { "file" }
                                     $fileName = Split-Path $rawPath -Leaf
 
-                                    # edit_file luôn là sửa file cũ và luôn có phần code bị xóa/thay thế (dấu -)
                                     $linesRemoved = 0
                                     $linesAdded = 0
                                     if ($tc.args.Target) {
@@ -279,16 +256,8 @@ while ($true) {
                                     [void]$projectKnownFiles.Add($fileName)
 
                                     $diffStat = "(+$linesAdded -$linesRemoved)"
-                                    $actionTag = "[SỬA FILE CŨ]"
-
-                                    $msg = @(
-                                        "✍️ [MÁY TÍNH ĐANG THỰC HIỆN / WORKING]",
-                                        "📁 File: $fileName $actionTag $diffStat",
-                                        $(if ($summary) { "📋 Thao tác: $summary" } else { "" })
-                                    ) -join "`n"
-
-                                    Write-Host "[MIRROR] File edit: $fileName $actionTag $diffStat" -ForegroundColor Green
-                                    $sumInfo = if ($summary) { "`n📋 Thao tác: $summary" } else { "" }; Start-WorkingTracker -title "📁 File: $fileName $actionTag $diffStat$sumInfo"
+                                    $actionSummary = if ($rawSummary) { $rawSummary } else { "Chỉnh sửa code $fileName" }
+                                    $actionDetail = "📁 File: $fileName [SỬA FILE CŨ] $diffStat"
                                 }
                                 elseif ($toolName -eq "write_file") {
                                     $rawPath = if ($tc.args.Path) { $tc.args.Path.ToString().Trim('"', ' ') } else { "file" }
@@ -304,7 +273,6 @@ while ($true) {
                                     $isExisted = $isOverwrite -or $isAppend -or ($projectKnownFiles.Contains($rawPath)) -or ($projectKnownFiles.Contains($fileName)) -or (Test-Path $rawPath)
 
                                     if ($isExisted) {
-                                        # File đã tồn tại -> SỬA FILE CŨ (có dấu trừ: +xxx -yyy)
                                         $oldLineCount = 0
                                         if (Test-Path $rawPath) {
                                             try {
@@ -320,23 +288,17 @@ while ($true) {
                                         $linesAdded = $contentLines
                                         $diffStat = "(+$linesAdded -$linesRemoved)"
                                         $actionTag = "[SỬA FILE CŨ]"
+                                        $defaultSum = "Cập nhật file $fileName"
                                     } else {
-                                        # File hoàn toàn mới -> TẠO FILE MỚI (+xxx -0)
                                         $diffStat = "(+$contentLines -0)"
                                         $actionTag = "[TẠO FILE MỚI]"
+                                        $defaultSum = "Tạo mới file $fileName"
                                         [void]$projectKnownFiles.Add($rawPath)
                                         [void]$projectKnownFiles.Add($fileName)
                                     }
 
-                                    $msg = @(
-                                        "✍️ [MÁY TÍNH ĐANG THỰC HIỆN / WORKING]",
-                                        "📁 File: $fileName $actionTag $diffStat",
-                                        $(if ($summary) { "📋 Thao tác: $summary" } else { "" })
-                                    ) -join "`n"
-
-                                    Write-Host "[MIRROR] File write: $fileName $actionTag $diffStat" -ForegroundColor Green
-                                    $mid = Send-TgLiveStatus -text $msg.Trim()
-                                    if ($mid) { $tempWorkingMsgIds.Add($mid) }
+                                    $actionSummary = if ($rawSummary) { $rawSummary } else { $defaultSum }
+                                    $actionDetail = "📁 File: $fileName $actionTag $diffStat"
                                 }
                                 elseif ($toolName -eq "read_file") {
                                     $rawPath = if ($tc.args.Path) { $tc.args.Path.ToString().Trim('"', ' ') } else { "file" }
@@ -344,7 +306,6 @@ while ($true) {
                                     [void]$projectKnownFiles.Add($rawPath)
                                     [void]$projectKnownFiles.Add($fileName)
                                     
-                                    # Xác định đoạn dòng (range) đang được đọc
                                     $rangeInfo = ""
                                     $sLine = if ($tc.args.StartLine) { $tc.args.StartLine.ToString().Trim('"', ' ') } else { "" }
                                     $eLine = if ($tc.args.EndLine) { $tc.args.EndLine.ToString().Trim('"', ' ') } else { "" }
@@ -359,13 +320,26 @@ while ($true) {
                                         $rangeInfo = " (Đọc toàn bộ file)"
                                     }
 
-                                    $msg = "📖 [MÁY TÍNH ĐANG ĐỌC FILE / WORKING]`n📄 File: $fileName$rangeInfo"
-                                    Write-Host "[MIRROR] Read file: $fileName$rangeInfo" -ForegroundColor DarkGray
-                                    Start-WorkingTracker -title "📖 Đọc file: $fileName$rangeInfo"
+                                    $actionSummary = if ($rawSummary) { $rawSummary } else { "Đọc nội dung $fileName" }
+                                    $actionDetail = "📄 File: $fileName$rangeInfo"
                                 }
+                                elseif ($toolName -eq "manage_task") {
+                                    $action = if ($tc.args.Action) { $tc.args.Action.ToString().Trim('"', ' ') } else { "" }
+                                    $taskId = if ($tc.args.TaskId) { $tc.args.TaskId.ToString().Trim('"', ' ') } else { "" }
+                                    $actionSummary = if ($rawSummary) { $rawSummary } else { "Quản lý tác vụ ngầm ($action)" }
+                                    $actionDetail = "⚙️ Task: $action $(if ($taskId) { $taskId } else { '' })".Trim()
+                                }
+                                else {
+                                    $actionSummary = if ($rawSummary) { $rawSummary } else { "Thực thi $toolName" }
+                                    $actionDetail = "🔧 Công cụ: $toolName"
+                                }
+
+                                $title = "📋 Thao tác: $actionSummary`n$actionDetail"
+                                Write-Host "[MIRROR] Tool call: $actionSummary" -ForegroundColor Cyan
+                                Start-WorkingTracker -title $title
                             }
                         }
-                        # 3. BẮT KẾT QUẢ OUTPUT CỦA LỆNH (GENERIC output)
+                        # C. BẮT KẾT QUẢ OUTPUT CỦA LỆNH (GENERIC output)
                         elseif ($entry.type -eq "GENERIC" -and $entry.content) {
                             Stop-WorkingTracker
                             $content = $entry.content.ToString()
@@ -384,10 +358,10 @@ while ($true) {
                                 }
                             }
                         }
-                        # 4. BẮT KẾT QUẢ TRẢ LỜI CUỐI CÙNG (RESPONSE TO USER) -> HOÀN THÀNH LƯỢT WORKING
+                        # D. BẮT KẾT QUẢ TRẢ LỜI CUỐI CÙNG (RESPONSE TO USER) -> HOÀN THÀNH LƯỢT WORKING
                         elseif ($entry.type -eq "PLANNER_RESPONSE" -and $entry.content -and -not $entry.tool_calls) {
                             Stop-WorkingTracker
-                            if ($global:mirrorThinkingStart) {
+                            if ($global:mirrorThinkingStart -and $global:mirrorThinkingMsgId) {
                                 $elapsedSec = [math]::Max(1, [int]([DateTime]::Now - $global:mirrorThinkingStart).TotalSeconds)
                                 Edit-TgMessage -messageId $global:mirrorThinkingMsgId -text "🧠 [AI ĐÃ SUY NGHĨ XONG - ${elapsedSec}s]"
                                 $global:mirrorThinkingStart = $null
@@ -405,10 +379,10 @@ while ($true) {
                             Send-TgLiveStatus -text $doneMsg
                             Set-SyncBridgeWorkingStatus -working $false
 
-                            # TỰ ĐỘNG XÓA SẠCH CÁC TIN NHẮN TIẾN TRÌNH TẠM THỜI (để giữ box chat Telegram gọn gàng sạch sẽ)
+                            # TỰ ĐỘNG XÓA SẠCH CÁC TIN NHẮN TIẾN TRÌNH TẠM THỜI SAU 3 GIÂY
                             if ($tempWorkingMsgIds.Count -gt 0) {
-                                Write-Host "[MIRROR] Đang tự động dọn dẹp $($tempWorkingMsgIds.Count) tin nhắn Working tạm thời..." -ForegroundColor Yellow
-                                Start-Sleep -Milliseconds 800
+                                Write-Host "[MIRROR] Đang tự động dọn dẹp $($tempWorkingMsgIds.Count) tin nhắn Working tạm thời sau 3 giây..." -ForegroundColor Yellow
+                                Start-Sleep -Seconds 3
                                 foreach ($mid in $tempWorkingMsgIds) {
                                     Delete-TgMessage -messageId $mid
                                 }
