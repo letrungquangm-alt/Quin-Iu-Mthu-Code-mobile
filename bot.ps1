@@ -129,10 +129,52 @@ function Show-ScreenNotification {
 
 # --- CÁC HÀM GIAO TIẾP TELEGRAM & INLINE KEYBOARD ---
 
+function Convert-MdToTgHtml {
+    param([string]$text)
+    if ([string]::IsNullOrWhiteSpace($text)) { return "" }
+    
+    $codeBlocks = New-Object System.Collections.Generic.List[string]
+    $codeBlockPattern = '(?s)```([a-zA-Z0-9_\-\+]*)\r?\n([\s\S]*?)```'
+    $text = [regex]::Replace($text, $codeBlockPattern, [System.Text.RegularExpressions.MatchEvaluator]{
+        param($m)
+        $lang = $m.Groups[1].Value.Trim()
+        if (-not $lang) { $lang = "powershell" }
+        $c = [System.Net.WebUtility]::HtmlEncode($m.Groups[2].Value)
+        $idx = $codeBlocks.Count
+        $codeBlocks.Add("<pre><code class=""language-$lang"">$c</code></pre>")
+        return "___TG_CODE_BLOCK_${idx}___"
+    })
+
+    $inlineCodes = New-Object System.Collections.Generic.List[string]
+    $inlinePattern = '`([^`\r\n]+)`'
+    $text = [regex]::Replace($text, $inlinePattern, [System.Text.RegularExpressions.MatchEvaluator]{
+        param($m)
+        $c = [System.Net.WebUtility]::HtmlEncode($m.Groups[1].Value)
+        $idx = $inlineCodes.Count
+        $inlineCodes.Add("<code>$c</code>")
+        return "___TG_INLINE_CODE_${idx}___"
+    })
+
+    $text = [System.Net.WebUtility]::HtmlEncode($text)
+    $text = [regex]::Replace($text, '\*\*([^\*\r\n]+)\*\*', '<b>$1</b>')
+    $text = [regex]::Replace($text, '(?<!\w)\*([^\*\r\n]+)\*(?!\w)', '<i>$1</i>')
+    $text = [regex]::Replace($text, '(?m)^&gt;\s*([^\r\n]+)', '<blockquote>$1</blockquote>')
+
+    for ($i = 0; $i -lt $codeBlocks.Count; $i++) {
+        $text = $text.Replace("___TG_CODE_BLOCK_${i}___", $codeBlocks[$i])
+    }
+    for ($i = 0; $i -lt $inlineCodes.Count; $i++) {
+        $text = $text.Replace("___TG_INLINE_CODE_${i}___", $inlineCodes[$i])
+    }
+
+    return $text
+}
+
 function Send-TelegramMessage {
     param(
         [int64]$chatId,
-        [string]$text
+        [string]$text,
+        [string]$parseMode = "HTML"
     )
     $url = "https://api.telegram.org/bot$botToken/sendMessage"
     if ($text.Length -gt 3800) {
@@ -143,6 +185,7 @@ function Send-TelegramMessage {
         text = $text
         disable_web_page_preview = $true
     }
+    if ($parseMode) { $bodyObj["parse_mode"] = $parseMode }
     $jsonBody = $bodyObj | ConvertTo-Json -Compress
     try {
         $res = Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($jsonBody)) -TimeoutSec 15
@@ -150,6 +193,14 @@ function Send-TelegramMessage {
             return $res.result.message_id
         }
     } catch {
+        if ($parseMode) {
+            try {
+                $bodyObj.Remove("parse_mode")
+                $plainBody = $bodyObj | ConvertTo-Json -Compress
+                $res = Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($plainBody)) -TimeoutSec 10
+                if ($res.ok -and $res.result) { return $res.result.message_id }
+            } catch {}
+        }
         Write-Host "Lỗi gửi tin nhắn: $_" -ForegroundColor Red
     }
     return $null
@@ -159,7 +210,8 @@ function Edit-TelegramMessage {
     param(
         [int64]$chatId,
         [int]$messageId,
-        [string]$text
+        [string]$text,
+        [string]$parseMode = "HTML"
     )
     $url = "https://api.telegram.org/bot$botToken/editMessageText"
     if ($text.Length -gt 3800) {
@@ -171,12 +223,21 @@ function Edit-TelegramMessage {
         text = $text
         disable_web_page_preview = $true
     }
+    if ($parseMode) { $bodyObj["parse_mode"] = $parseMode }
     $jsonBody = $bodyObj | ConvertTo-Json -Compress
     try {
         $res = Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($jsonBody)) -TimeoutSec 15
         return $res.ok
     } catch {
-        Send-TelegramMessage -chatId $chatId -text $text | Out-Null
+        if ($parseMode) {
+            try {
+                $bodyObj.Remove("parse_mode")
+                $plainBody = $bodyObj | ConvertTo-Json -Compress
+                $res = Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($plainBody)) -TimeoutSec 10
+                return $res.ok
+            } catch {}
+        }
+        Send-TelegramMessage -chatId $chatId -text $text -parseMode "" | Out-Null
     }
     return $false
 }
@@ -199,7 +260,8 @@ function Send-TelegramKeyboard {
     param(
         [int64]$chatId,
         [string]$text,
-        [array]$buttons
+        [array]$buttons,
+        [string]$parseMode = "HTML"
     )
     $url = "https://api.telegram.org/bot$botToken/sendMessage"
     $bodyObj = @{
@@ -210,6 +272,7 @@ function Send-TelegramKeyboard {
             inline_keyboard = $buttons
         }
     }
+    if ($parseMode) { $bodyObj["parse_mode"] = $parseMode }
     $jsonBody = $bodyObj | ConvertTo-Json -Depth 6 -Compress
     try {
         $res = Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($jsonBody)) -TimeoutSec 15
@@ -217,6 +280,14 @@ function Send-TelegramKeyboard {
             return $res.result.message_id
         }
     } catch {
+        if ($parseMode) {
+            try {
+                $bodyObj.Remove("parse_mode")
+                $plainBody = $bodyObj | ConvertTo-Json -Depth 6 -Compress
+                $res = Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($plainBody)) -TimeoutSec 10
+                if ($res.ok -and $res.result) { return $res.result.message_id }
+            } catch {}
+        }
         Write-Host "Lỗi gửi bàn phím: $_" -ForegroundColor Red
     }
     return $null
@@ -227,7 +298,8 @@ function Edit-TelegramKeyboard {
         [int64]$chatId,
         [int]$messageId,
         [string]$text,
-        [array]$buttons = $null
+        [array]$buttons = $null,
+        [string]$parseMode = "HTML"
     )
     $url = "https://api.telegram.org/bot$botToken/editMessageText"
     $bodyObj = @{
@@ -241,10 +313,18 @@ function Edit-TelegramKeyboard {
             inline_keyboard = $buttons
         }
     }
+    if ($parseMode) { $bodyObj["parse_mode"] = $parseMode }
     $jsonBody = $bodyObj | ConvertTo-Json -Depth 6 -Compress
     try {
         Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($jsonBody)) -TimeoutSec 15 | Out-Null
     } catch {
+        if ($parseMode) {
+            try {
+                $bodyObj.Remove("parse_mode")
+                $plainBody = $bodyObj | ConvertTo-Json -Depth 6 -Compress
+                Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($plainBody)) -TimeoutSec 10 | Out-Null
+            } catch {}
+        }
         Write-Host "Lỗi sửa bàn phím: $_" -ForegroundColor Red
     }
 }

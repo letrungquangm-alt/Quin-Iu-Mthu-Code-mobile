@@ -1,7 +1,6 @@
 ﻿# ========================================================
-# Telegram Remote Coder - Live Activity Mirror Worker v2.3
-# Tự động hiển thị tiến trình: Thinking, Working, Sửa/Tạo file chuẩn quy tắc (+ / -)
-# Hiển thị trực tiếp toolSummary ngay lập tức, không có khoảng lặng Working!
+# Telegram Remote Coder - Live Activity Mirror Worker v2.4 (Rich HTML & Syntax Colors)
+# Tự động hiển thị tiến trình: In đậm, Tô màu cú pháp Code, Quote viền màu & Live Ticking
 # ========================================================
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -19,8 +18,49 @@ $config = Get-Content $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $botToken = $config.BOT_TOKEN
 $chatId = [int64]$config.ALLOWED_CHAT_ID
 
-function Send-TgLiveStatus {
+function Convert-MdToTgHtml {
     param([string]$text)
+    if ([string]::IsNullOrWhiteSpace($text)) { return "" }
+    
+    $codeBlocks = New-Object System.Collections.Generic.List[string]
+    $codeBlockPattern = '(?s)```([a-zA-Z0-9_\-\+]*)\r?\n([\s\S]*?)```'
+    $text = [regex]::Replace($text, $codeBlockPattern, [System.Text.RegularExpressions.MatchEvaluator]{
+        param($m)
+        $lang = $m.Groups[1].Value.Trim()
+        if (-not $lang) { $lang = "powershell" }
+        $c = [System.Net.WebUtility]::HtmlEncode($m.Groups[2].Value)
+        $idx = $codeBlocks.Count
+        $codeBlocks.Add("<pre><code class=""language-$lang"">$c</code></pre>")
+        return "___TG_CODE_BLOCK_${idx}___"
+    })
+
+    $inlineCodes = New-Object System.Collections.Generic.List[string]
+    $inlinePattern = '`([^`\r\n]+)`'
+    $text = [regex]::Replace($text, $inlinePattern, [System.Text.RegularExpressions.MatchEvaluator]{
+        param($m)
+        $c = [System.Net.WebUtility]::HtmlEncode($m.Groups[1].Value)
+        $idx = $inlineCodes.Count
+        $inlineCodes.Add("<code>$c</code>")
+        return "___TG_INLINE_CODE_${idx}___"
+    })
+
+    $text = [System.Net.WebUtility]::HtmlEncode($text)
+    $text = [regex]::Replace($text, '\*\*([^\*\r\n]+)\*\*', '<b>$1</b>')
+    $text = [regex]::Replace($text, '(?<!\w)\*([^\*\r\n]+)\*(?!\w)', '<i>$1</i>')
+    $text = [regex]::Replace($text, '(?m)^&gt;\s*([^\r\n]+)', '<blockquote>$1</blockquote>')
+
+    for ($i = 0; $i -lt $codeBlocks.Count; $i++) {
+        $text = $text.Replace("___TG_CODE_BLOCK_${i}___", $codeBlocks[$i])
+    }
+    for ($i = 0; $i -lt $inlineCodes.Count; $i++) {
+        $text = $text.Replace("___TG_INLINE_CODE_${i}___", $inlineCodes[$i])
+    }
+
+    return $text
+}
+
+function Send-TgLiveStatus {
+    param([string]$text, [string]$parseMode = "HTML")
     if ([string]::IsNullOrWhiteSpace($text)) { return $null }
     if ($text.Length -gt 3800) { $text = $text.Substring(0, 3800) + "`n`n...[Output đã được rút gọn]" }
 
@@ -30,13 +70,23 @@ function Send-TgLiveStatus {
         text = $text
         disable_web_page_preview = $true
     }
+    if ($parseMode) { $bodyObj["parse_mode"] = $parseMode }
     $jsonBody = $bodyObj | ConvertTo-Json -Compress
     try {
         $res = Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($jsonBody)) -TimeoutSec 10
         if ($res.ok -and $res.result) {
             return [int]$res.result.message_id
         }
-    } catch {}
+    } catch {
+        if ($parseMode) {
+            try {
+                $bodyObj.Remove("parse_mode")
+                $plainBody = $bodyObj | ConvertTo-Json -Compress
+                $res = Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($plainBody)) -TimeoutSec 10
+                if ($res.ok -and $res.result) { return [int]$res.result.message_id }
+            } catch {}
+        }
+    }
     return $null
 }
 
@@ -52,7 +102,7 @@ function Delete-TgMessage {
 }
 
 function Edit-TgMessage {
-    param([int]$messageId, [string]$text)
+    param([int]$messageId, [string]$text, [string]$parseMode = "HTML")
     if (-not $messageId -or [string]::IsNullOrWhiteSpace($text)) { return }
     $url = "https://api.telegram.org/bot$botToken/editMessageText"
     $bodyObj = @{
@@ -61,10 +111,19 @@ function Edit-TgMessage {
         text = $text
         disable_web_page_preview = $true
     }
+    if ($parseMode) { $bodyObj["parse_mode"] = $parseMode }
     $jsonBody = $bodyObj | ConvertTo-Json -Compress
     try {
         Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($jsonBody)) -TimeoutSec 5 | Out-Null
-    } catch {}
+    } catch {
+        if ($parseMode) {
+            try {
+                $bodyObj.Remove("parse_mode")
+                $plainBody = $bodyObj | ConvertTo-Json -Compress
+                Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($plainBody)) -TimeoutSec 5 | Out-Null
+            } catch {}
+        }
+    }
 }
 
 function Set-SyncBridgeWorkingStatus {
@@ -110,7 +169,7 @@ if (Test-Path $syncBridgePath) {
 $transcriptPath = "$env:USERPROFILE\.gemini\antigravity\brain\$conversationId\.system_generated\logs\transcript.jsonl"
 
 Write-Host "==========================================================" -ForegroundColor Cyan
-Write-Host " Live Mirror Worker v2.3 (Zero-Silence & Live Summaries) đang chạy..." -ForegroundColor Cyan
+Write-Host " Live Mirror Worker v2.4 (Rich HTML & Syntax Colors) đang chạy..." -ForegroundColor Cyan
 Write-Host " Theo dõi transcript: $transcriptPath" -ForegroundColor DarkCyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 
@@ -121,7 +180,7 @@ if (Test-Path $transcriptPath) {
         $fileInfo = Get-Item $transcriptPath -ErrorAction SilentlyContinue
         if ($fileInfo) {
             $lastByteOffset = $fileInfo.Length
-            Write-Host "Bắt đầu theo dõi từ byte offset hiện tại: $lastByteOffset" -ForegroundColor Yellow
+            Write-Host "Bắt đầu theo dõi từ byte offset: $lastByteOffset" -ForegroundColor Yellow
         }
     } catch {}
 }
@@ -142,19 +201,19 @@ function Start-WorkingTracker {
     param([string]$title)
     if ($global:activeWorkingStart -and $global:activeWorkingMsgId) {
         $prevSec = [math]::Max(1, [int]([DateTime]::Now - $global:activeWorkingStart).TotalSeconds)
-        Edit-TgMessage -messageId $global:activeWorkingMsgId -text "✅ [MÁY TÍNH ĐÃ HOÀN TẤT - ${prevSec}s]`n$($global:activeWorkingTitle)"
+        Edit-TgMessage -messageId $global:activeWorkingMsgId -text "✅ <b>[MÁY TÍNH ĐÃ HOÀN TẤT - ${prevSec}s]</b>`n$($global:activeWorkingTitle)"
     }
     $global:activeWorkingStart = [DateTime]::Now
     $global:lastWorkingSec = 1
     $global:activeWorkingTitle = $title
-    $global:activeWorkingMsgId = Send-TgLiveStatus -text "⚡ [MÁY TÍNH ĐANG THỰC HIỆN (1s)...]`n$title"
+    $global:activeWorkingMsgId = Send-TgLiveStatus -text "⚡ <b>[MÁY TÍNH ĐANG THỰC HIỆN (1s)...]</b>`n$title"
     if ($global:activeWorkingMsgId) { $tempWorkingMsgIds.Add($global:activeWorkingMsgId) }
 }
 
 function Stop-WorkingTracker {
     if ($global:activeWorkingStart -and $global:activeWorkingMsgId) {
         $doneSec = [math]::Max(1, [int]([DateTime]::Now - $global:activeWorkingStart).TotalSeconds)
-        Edit-TgMessage -messageId $global:activeWorkingMsgId -text "✅ [MÁY TÍNH ĐÃ HOÀN TẤT - ${doneSec}s]`n$($global:activeWorkingTitle)"
+        Edit-TgMessage -messageId $global:activeWorkingMsgId -text "✅ <b>[MÁY TÍNH ĐÃ HOÀN TẤT - ${doneSec}s]</b>`n$($global:activeWorkingTitle)"
         $global:activeWorkingStart = $null
         $global:activeWorkingMsgId = $null
         $global:lastWorkingSec = 0
@@ -168,7 +227,7 @@ while ($true) {
             $currThinkSec = [math]::Max(1, [int]([DateTime]::Now - $global:mirrorThinkingStart).TotalSeconds)
             if ($currThinkSec -ge ($global:lastMirrorSec + 2)) {
                 $global:lastMirrorSec = $currThinkSec
-                Edit-TgMessage -messageId $global:mirrorThinkingMsgId -text "🧠 [AI ĐANG SUY NGHĨ (${currThinkSec}s)]:$global:lastThinkingSnippet"
+                Edit-TgMessage -messageId $global:mirrorThinkingMsgId -text "🧠 <b>[AI ĐANG SUY NGHĨ (${currThinkSec}s)]</b>$global:lastThinkingSnippet"
             }
         }
 
@@ -177,7 +236,7 @@ while ($true) {
             $currSec = [math]::Max(1, [int]([DateTime]::Now - $global:activeWorkingStart).TotalSeconds)
             if ($currSec -ge ($global:lastWorkingSec + 2)) {
                 $global:lastWorkingSec = $currSec
-                Edit-TgMessage -messageId $global:activeWorkingMsgId -text "⚡ [MÁY TÍNH ĐANG THỰC HIỆN (${currSec}s)...]`n$($global:activeWorkingTitle)"
+                Edit-TgMessage -messageId $global:activeWorkingMsgId -text "⚡ <b>[MÁY TÍNH ĐANG THỰC HIỆN (${currSec}s)...]</b>`n$($global:activeWorkingTitle)"
             }
         }
 
@@ -205,12 +264,13 @@ while ($true) {
                                 $cleanThinking = ($thinkLines | Select-Object -First 2) -join " "
                                 if ($cleanThinking.Length -gt 150) { $cleanThinking = $cleanThinking.Substring(0, 150) + "..." }
                             }
-                            $global:lastThinkingSnippet = if ($cleanThinking) { "`n💭 `"$cleanThinking`"" } else { "" }
+                            $safeThinking = [System.Net.WebUtility]::HtmlEncode($cleanThinking)
+                            $global:lastThinkingSnippet = if ($safeThinking) { "`n<blockquote expandable>💭 `"$safeThinking`"</blockquote>" } else { "" }
 
                             if (-not $global:mirrorThinkingStart) {
                                 $global:mirrorThinkingStart = [DateTime]::Now
                                 $global:lastMirrorSec = 1
-                                $global:mirrorThinkingMsgId = Send-TgLiveStatus -text "🧠 [AI ĐANG SUY NGHĨ (1s)]:$global:lastThinkingSnippet"
+                                $global:mirrorThinkingMsgId = Send-TgLiveStatus -text "🧠 <b>[AI ĐANG SUY NGHĨ (1s)]</b>$global:lastThinkingSnippet"
                                 if ($global:mirrorThinkingMsgId) { $tempWorkingMsgIds.Add($global:mirrorThinkingMsgId) }
                             }
                         }
@@ -220,7 +280,7 @@ while ($true) {
                             Set-SyncBridgeWorkingStatus -working $true
                             if ($global:mirrorThinkingStart -and $global:mirrorThinkingMsgId) {
                                 $elapsedSec = [math]::Max(1, [int]([DateTime]::Now - $global:mirrorThinkingStart).TotalSeconds)
-                                Edit-TgMessage -messageId $global:mirrorThinkingMsgId -text "🧠 [AI ĐÃ SUY NGHĨ XONG - ${elapsedSec}s]"
+                                Edit-TgMessage -messageId $global:mirrorThinkingMsgId -text "🧠 <b>[AI ĐÃ SUY NGHĨ XONG - ${elapsedSec}s]</b>"
                                 $global:mirrorThinkingStart = $null
                                 $global:mirrorThinkingMsgId = $null
                                 $global:lastMirrorSec = 0
@@ -230,13 +290,14 @@ while ($true) {
                                 $toolName = $tc.name
                                 $rawSummary = if ($tc.args.toolSummary) { $tc.args.toolSummary.ToString().Trim('"', ' ') } else { "" }
                                 $actionSummary = ""
-                                $actionDetail = ""
+                                $actionDetailHtml = ""
 
                                 if ($toolName -eq "run_command") {
                                     $cmd = if ($tc.args.CommandLine) { $tc.args.CommandLine.ToString().Trim('"', ' ') } else { "" }
-                                    $displayCmd = if ($cmd.Length -gt 200) { $cmd.Substring(0, 200) + "... [dài]" } else { $cmd }
+                                    $displayCmd = if ($cmd.Length -gt 250) { $cmd.Substring(0, 250) + "... [dài]" } else { $cmd }
                                     $actionSummary = if ($rawSummary) { $rawSummary } else { "Chạy lệnh hệ thống" }
-                                    $actionDetail = "▶️ Lệnh: $displayCmd"
+                                    $safeCmd = [System.Net.WebUtility]::HtmlEncode($displayCmd)
+                                    $actionDetailHtml = "▶️ <b>Lệnh:</b> <pre><code class=""language-powershell"">$safeCmd</code></pre>"
                                 }
                                 elseif ($toolName -eq "edit_file") {
                                     $rawPath = if ($tc.args.Path) { $tc.args.Path.ToString().Trim('"', ' ') } else { "file" }
@@ -257,7 +318,7 @@ while ($true) {
 
                                     $diffStat = "(+$linesAdded -$linesRemoved)"
                                     $actionSummary = if ($rawSummary) { $rawSummary } else { "Chỉnh sửa code $fileName" }
-                                    $actionDetail = "📁 File: $fileName [SỬA FILE CŨ] $diffStat"
+                                    $actionDetailHtml = "📁 <b>File:</b> <code>$fileName</code> <b>[SỬA FILE CŨ]</b> <code>$diffStat</code>"
                                 }
                                 elseif ($toolName -eq "write_file") {
                                     $rawPath = if ($tc.args.Path) { $tc.args.Path.ToString().Trim('"', ' ') } else { "file" }
@@ -298,7 +359,7 @@ while ($true) {
                                     }
 
                                     $actionSummary = if ($rawSummary) { $rawSummary } else { $defaultSum }
-                                    $actionDetail = "📁 File: $fileName $actionTag $diffStat"
+                                    $actionDetailHtml = "📁 <b>File:</b> <code>$fileName</code> <b>$actionTag</b> <code>$diffStat</code>"
                                 }
                                 elseif ($toolName -eq "read_file") {
                                     $rawPath = if ($tc.args.Path) { $tc.args.Path.ToString().Trim('"', ' ') } else { "file" }
@@ -321,20 +382,21 @@ while ($true) {
                                     }
 
                                     $actionSummary = if ($rawSummary) { $rawSummary } else { "Đọc nội dung $fileName" }
-                                    $actionDetail = "📄 File: $fileName$rangeInfo"
+                                    $actionDetailHtml = "📄 <b>File:</b> <code>$fileName</code> <i>$rangeInfo</i>"
                                 }
                                 elseif ($toolName -eq "manage_task") {
                                     $action = if ($tc.args.Action) { $tc.args.Action.ToString().Trim('"', ' ') } else { "" }
                                     $taskId = if ($tc.args.TaskId) { $tc.args.TaskId.ToString().Trim('"', ' ') } else { "" }
                                     $actionSummary = if ($rawSummary) { $rawSummary } else { "Quản lý tác vụ ngầm ($action)" }
-                                    $actionDetail = "⚙️ Task: $action $(if ($taskId) { $taskId } else { '' })".Trim()
+                                    $actionDetailHtml = "⚙️ <b>Task:</b> <code>$action $(if ($taskId) { $taskId } else { '' })</code>".Trim()
                                 }
                                 else {
                                     $actionSummary = if ($rawSummary) { $rawSummary } else { "Thực thi $toolName" }
-                                    $actionDetail = "🔧 Công cụ: $toolName"
+                                    $actionDetailHtml = "🔧 <b>Công cụ:</b> <code>$toolName</code>"
                                 }
 
-                                $title = "📋 Thao tác: $actionSummary`n$actionDetail"
+                                $safeSummary = [System.Net.WebUtility]::HtmlEncode($actionSummary)
+                                $title = "📋 <b>Thao tác:</b> <code>$safeSummary</code>`n$actionDetailHtml"
                                 Write-Host "[MIRROR] Tool call: $actionSummary" -ForegroundColor Cyan
                                 Start-WorkingTracker -title $title
                             }
@@ -351,7 +413,8 @@ while ($true) {
                                     $shortOut = ($previewLines -join "`n").Trim()
                                     if ($linesOut.Count -gt 5) { $shortOut += "`n... [còn $($linesOut.Count - 5) dòng]" }
 
-                                    $outMsg = "📤 [KẾT QUẢ OUTPUT]:`n$shortOut"
+                                    $safeOut = [System.Net.WebUtility]::HtmlEncode($shortOut)
+                                    $outMsg = "📤 <b>[KẾT QUẢ OUTPUT]:</b>`n<pre><code class=""language-powershell"">$safeOut</code></pre>"
                                     Write-Host "[MIRROR] Output captured" -ForegroundColor DarkGreen
                                     $mid = Send-TgLiveStatus -text $outMsg
                                     if ($mid) { $tempWorkingMsgIds.Add($mid) }
@@ -363,7 +426,7 @@ while ($true) {
                             Stop-WorkingTracker
                             if ($global:mirrorThinkingStart -and $global:mirrorThinkingMsgId) {
                                 $elapsedSec = [math]::Max(1, [int]([DateTime]::Now - $global:mirrorThinkingStart).TotalSeconds)
-                                Edit-TgMessage -messageId $global:mirrorThinkingMsgId -text "🧠 [AI ĐÃ SUY NGHĨ XONG - ${elapsedSec}s]"
+                                Edit-TgMessage -messageId $global:mirrorThinkingMsgId -text "🧠 <b>[AI ĐÃ SUY NGHĨ XONG - ${elapsedSec}s]</b>"
                                 $global:mirrorThinkingStart = $null
                                 $global:mirrorThinkingMsgId = $null
                                 $global:lastMirrorSec = 0
@@ -372,7 +435,8 @@ while ($true) {
                             if ($replyText.Length -gt 3500) {
                                 $replyText = $replyText.Substring(0, 3500) + "`n`n... [Xem tiếp trên màn hình máy tính]"
                             }
-                            $doneMsg = "🤖 [MÁY TÍNH PHẢN HỒI XONG]:`n`n$replyText"
+                            $formattedReply = Convert-MdToTgHtml -text $replyText
+                            $doneMsg = "🤖 <b>[MÁY TÍNH PHẢN HỒI XONG]:</b>`n`n$formattedReply"
                             Write-Host "[MIRROR] Model final response mirrored" -ForegroundColor Magenta
                             
                             # Gửi tin nhắn phản hồi chính thức
