@@ -1,4 +1,4 @@
-﻿config.json
+config.json
 chat_history.json
 sync_bridge.json
 *.log
@@ -7,3 +7,10 @@ req.json
 test_*.json
 test_*.ps1
 test_*.txt
+node_modules/
+temp_*/
+*.mp4
+*.zip
+*.tar.gz
+tunnel_state.json
+stream_state.json

@@ -1,4 +1,4 @@
-# ========================================================
+﻿# ========================================================
 # Telegram Remote Coder - Live Activity Mirror Worker v2.6
 # Chữ có màu thật (Diff Syntax: + Xanh lá, ! Cam, - Đỏ)
 # Đồng hồ bấm giây live cho mọi khoảng lặng & Nhận diện ĐÃ ĐỌC PROMPT

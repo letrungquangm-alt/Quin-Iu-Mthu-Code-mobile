@@ -1,4 +1,4 @@
-param([string]$text, [string]$parseMode = "HTML")
+﻿param([string]$text, [string]$parseMode = "HTML")
 
 function Split-TelegramText {
     param([string]$text, [int]$maxLen = 3500)
