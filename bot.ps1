@@ -1467,6 +1467,80 @@ while ($true) {
                     }
                     continue
                 }
+
+                # 2.6 TỰ ĐỘNG NHẬN TOKEN VERCEL ĐỂ DEPLOY WEB
+                if ($text -match '(vcp_[a-zA-Z0-9]{30,})') {
+                    $vToken = $matches[1]
+                    $cfg = Get-Content $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+                    $cfg.VERCEL_TOKEN = $vToken
+                    $cfg.VERCEL_TEAM_ID = "team_ItjW6FczErxCHeZsipuwaeI7"
+                    $cfg | ConvertTo-Json | Set-Content $configPath -Encoding UTF8
+                    Send-TelegramMessage -chatId $chatId -text "🎉 ĐÃ KẾT NỐI VERCEL TOKEN THÀNH CÔNG!`n`nTài khoản: letrungquangm-alt`nTrang web: https://quiniumthucode.vercel.app`n`nHệ thống đã sẵn sàng tự động xuất bản (deploy) website mỗi khi bạn code xong!"
+                    continue
+                }
+                elseif ($text -match '(?i)^(/deploy|/vercel|deploy|xuất bản|xuat ban)$') {
+                    Send-TelegramMessage -chatId $chatId -text "🚀 Đang tiến hành xuất bản website lên Vercel..."
+                    $cfg = Get-Content $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+                    $vToken = $cfg.VERCEL_TOKEN
+                    $teamId = $cfg.VERCEL_TEAM_ID
+                    $targetPath = $cfg.CURRENT_PROJECT_PATH
+                    
+                    if (-not $vToken) {
+                        Send-TelegramMessage -chatId $chatId -text "⚠️ Chưa cấu hình Vercel Token. Hãy dán token (bắt đầu bằng vcp_...) vào đây để tiếp tục!"
+                        continue
+                    }
+
+                    $indexPath = Join-Path $targetPath "index.html"
+                    if (-not (Test-Path $indexPath)) {
+                        Send-TelegramMessage -chatId $chatId -text "⚠️ Không tìm thấy file index.html trong thư mục dự án: $targetPath"
+                        continue
+                    }
+
+                    $htmlBytes = [System.IO.File]::ReadAllBytes($indexPath)
+                    $base64 = [Convert]::ToBase64String($htmlBytes)
+
+                    $body = @{
+                        name = "quiniumthucode"
+                        target = "production"
+                        files = @(
+                            @{
+                                file = "index.html"
+                                data = $base64
+                                encoding = "base64"
+                            }
+                        )
+                        projectSettings = @{ framework = $null }
+                    } | ConvertTo-Json -Depth 5
+
+                    $tempReq = Join-Path $env:TEMP "vercel_prod_req.json"
+                    $noBom = New-Object System.Text.UTF8Encoding($false)
+                    [System.IO.File]::WriteAllText($tempReq, $body, $noBom)
+
+                    $deployRes = curl.exe -s -X POST "https://api.vercel.com/v13/deployments?teamId=$teamId" -H "Authorization: Bearer $vToken" -H "Content-Type: application/json" -d "@$tempReq"
+                    
+                    try {
+                        $dObj = $deployRes | ConvertFrom-Json
+                        if ($dObj.url -or $dObj.readyState -eq "READY") {
+                            $liveMsg = @(
+                                "🎉 XUẤT BẢN THÀNH CÔNG LÊN VERCEL!",
+                                "",
+                                "🌐 Link website trực tiếp:",
+                                "👉 https://quiniumthucode.vercel.app",
+                                "",
+                                "🔗 Repository GitHub:",
+                                "👉 https://github.com/letrungquangm-alt/Quin-Iu-Mthu-Code-mobile",
+                                "",
+                                "Trang web đã sẵn sàng hoạt động 24/7 trên toàn thế giới!"
+                            ) -join "`n"
+                            Send-TelegramMessage -chatId $chatId -text $liveMsg
+                        } else {
+                            Send-TelegramMessage -chatId $chatId -text "❌ Lỗi xuất bản Vercel:`n$deployRes"
+                        }
+                    } catch {
+                        Send-TelegramMessage -chatId $chatId -text "❌ Phản hồi Vercel không hợp lệ:`n$deployRes"
+                    }
+                    continue
+                }
                 elseif ($text -match '(?i)^(push|push github|đẩy code|day code|/push)$') {
                     $guide = @(
                         "🚀 HƯỚNG DẪN PUSH CODE LÊN GITHUB:",
