@@ -207,7 +207,8 @@ function Send-TelegramMessage {
     param(
         [int64]$chatId,
         [string]$text,
-        [string]$parseMode = "HTML"
+        [string]$parseMode = "HTML",
+        [int]$messageThreadId = 0
     )
     if ([string]::IsNullOrWhiteSpace($text)) { return $null }
 
@@ -228,6 +229,7 @@ function Send-TelegramMessage {
             disable_web_page_preview = $true
         }
         if ($parseMode) { $bodyObj["parse_mode"] = $parseMode }
+        if ($messageThreadId -gt 0) { $bodyObj["message_thread_id"] = $messageThreadId }
         $jsonBody = $bodyObj | ConvertTo-Json -Compress
 
         try {
@@ -257,7 +259,8 @@ function Edit-TelegramMessage {
         [int64]$chatId,
         [int]$messageId,
         [string]$text,
-        [string]$parseMode = "HTML"
+        [string]$parseMode = "HTML",
+        [int]$messageThreadId = 0
     )
     $url = "https://api.telegram.org/bot$botToken/editMessageText"
     if ($text.Length -gt 3800) {
@@ -307,7 +310,8 @@ function Send-TelegramKeyboard {
         [int64]$chatId,
         [string]$text,
         [array]$buttons,
-        [string]$parseMode = "HTML"
+        [string]$parseMode = "HTML",
+        [int]$messageThreadId = 0
     )
     $url = "https://api.telegram.org/bot$botToken/sendMessage"
     $bodyObj = @{
@@ -319,6 +323,7 @@ function Send-TelegramKeyboard {
         }
     }
     if ($parseMode) { $bodyObj["parse_mode"] = $parseMode }
+    if ($messageThreadId -gt 0) { $bodyObj["message_thread_id"] = $messageThreadId }
     $jsonBody = $bodyObj | ConvertTo-Json -Depth 6 -Compress
     try {
         $res = Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($jsonBody)) -TimeoutSec 15
@@ -345,7 +350,8 @@ function Edit-TelegramKeyboard {
         [int]$messageId,
         [string]$text,
         [array]$buttons = $null,
-        [string]$parseMode = "HTML"
+        [string]$parseMode = "HTML",
+        [int]$messageThreadId = 0
     )
     $url = "https://api.telegram.org/bot$botToken/editMessageText"
     $bodyObj = @{
@@ -360,6 +366,7 @@ function Edit-TelegramKeyboard {
         }
     }
     if ($parseMode) { $bodyObj["parse_mode"] = $parseMode }
+    if ($messageThreadId -gt 0) { $bodyObj["message_thread_id"] = $messageThreadId }
     $jsonBody = $bodyObj | ConvertTo-Json -Depth 6 -Compress
     try {
         Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($jsonBody)) -TimeoutSec 15 | Out-Null
@@ -1385,7 +1392,8 @@ while ($true) {
                     $cbMsgId = [int]$cb.message.message_id
                     $data = $cb.data.Trim()
 
-                    if ($cbChatId -ne $allowedChatId) {
+                    $cbFromId = if ($cb.from) { [int64]$cb.from.id } else { 0 }
+                    if ($cbChatId -ne $allowedChatId -and $cbFromId -ne $allowedChatId) {
                         Answer-TelegramCallback -callbackId $cbId -text "Bạn không có quyền!"
                         continue
                     }
@@ -1840,7 +1848,8 @@ while ($true) {
                 $msg = $item.message
                 $chatId = [int64]$msg.chat.id
 
-                if ($chatId -ne $allowedChatId) {
+                $fromId = if ($msg.from) { [int64]$msg.from.id } else { 0 }
+                if ($chatId -ne $allowedChatId -and $fromId -ne $allowedChatId) {
                     Send-TelegramMessage -chatId $chatId -text "Xin lỗi, bạn không có quyền điều khiển máy tính này!"
                     continue
                 }
