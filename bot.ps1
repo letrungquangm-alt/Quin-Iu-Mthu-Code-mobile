@@ -35,6 +35,10 @@ $projectsRootDir = if ($config.PROJECTS_ROOT_DIR) { $config.PROJECTS_ROOT_DIR.To
 $currentProject = if ($config.CURRENT_PROJECT) { $config.CURRENT_PROJECT.ToString().Trim() } else { "telegram-remote-coder" }
 $currentProjectPath = if ($config.CURRENT_PROJECT_PATH) { $config.CURRENT_PROJECT_PATH.ToString().Trim() } else { $rootDir }
 $global:waitingForNewProjectName = $false
+$global:tempNewProjName = ""
+$global:waitingForSuperAdminPassword = $false
+$global:isSuperAdmin = $false
+$global:projNewClicks = [System.Collections.Generic.List[DateTime]]::new()
 
 # --- QUẢN LÝ HÀNG ĐỢI PROMPT & TRẠNG THÁI THỰC THI ---
 $global:isExecuting = $false
@@ -1132,7 +1136,34 @@ while ($true) {
                     # --- CÁC NÚT CÀI ĐẶT HỆ THỐNG CŨ ---
                                         # --- XỬ LÝ CÁC NÚT DỰ ÁN (PROJECT WORKFLOW - BƯỚC 1) ---
                     if ($data -eq "proj:new") {
-                        Answer-TelegramCallback -callbackId $cbId
+                        # 1. KIỂM TRA EASTER EGG (NHẤP 7 LẦN TRONG 2.5 GIÂY)
+                        $now = [DateTime]::Now
+                        if ($null -eq $global:projNewClicks) { $global:projNewClicks = [System.Collections.Generic.List[DateTime]]::new() }
+                        $global:projNewClicks.Add($now)
+                        
+                        $recentClicks = $global:projNewClicks | Where-Object { ($now - $_).TotalSeconds -le 2.5 }
+                        $global:projNewClicks = [System.Collections.Generic.List[DateTime]]::new()
+                        foreach ($c in $recentClicks) { $global:projNewClicks.Add($c) }
+                        
+                        if ($global:projNewClicks.Count -ge 7) {
+                            $global:projNewClicks.Clear()
+                            $global:waitingForSuperAdminPassword = $true
+                            Answer-TelegramCallback -callbackId $cbId -text "🚨 SYSTEM OVERRIDE DETECTED!"
+                            
+                            $secPrompt = @(
+                                "🔒 [HỆ THỐNG BẢO MẬT QUINLOVERIN ROOT]",
+                                "",
+                                "Phát hiện 7 thao tác nhấp liên tiếp!",
+                                "Hệ thống đang chuyển sang chế độ xác thực tối cao.",
+                                "",
+                                "👉 Vui lòng nhập mật khẩu bảo mật để mở khóa toàn quyền hệ sinh thái:"
+                            ) -join "`n"
+                            Send-TelegramMessage -chatId $cbChatId -text $secPrompt
+                            continue
+                        }
+
+                        # 2. XỬ LÝ BÌNH THƯỜNG (KHI CHƯA ĐỦ 7 LẦN)
+                        Answer-TelegramCallback -callbackId $cbId -text "Đang mở trình tạo dự án..."
                         $global:waitingForNewProjectName = $true
                         $promptNewProj = @(
                             "✨ TẠO PROJECT MỚI (Tương đương Ctrl+Shift+N):",
@@ -1140,9 +1171,138 @@ while ($true) {
                             "Bạn hãy gõ TÊN PROJECT bên dưới để khởi tạo:",
                             "Ví dụ: game_caro, website_shop, discord_bot, app_mobile...",
                             "",
-                            "Bot sẽ tự động tạo thư mục riêng trong 'model/<tên_project>' và mở giao diện chọn Model!"
+                            "Sau khi nhập tên, bạn sẽ được chọn ổ đĩa lưu trữ và chế độ kết nối với máy tính!"
                         ) -join "`n"
                         Send-TelegramMessage -chatId $cbChatId -text $promptNewProj
+                        continue
+                    }
+                    elseif ($data.StartsWith("proj:drive:")) {
+                        $drv = $data.Substring(11).Trim()
+                        Answer-TelegramCallback -callbackId $cbId
+                        
+                        $pName = if ($global:tempNewProjName) { $global:tempNewProjName } else { "project_" + (Get-Date -Format "yyyyMMdd_HHmmss") }
+                        
+                        $targetFolder = ""
+                        if ($drv -eq "DEFAULT") {
+                            $targetFolder = Join-Path $projectsRootDir $pName
+                        } else {
+                            $targetFolder = "$($drv):\Projects\$pName"
+                        }
+                        
+                        if (-not (Test-Path $targetFolder)) {
+                            New-Item -ItemType Directory -Path $targetFolder -Force | Out-Null
+                        }
+                        
+                        $currentProject = $pName
+                        $currentProjectPath = $targetFolder
+                        $config.CURRENT_PROJECT = $currentProject
+                        $config.CURRENT_PROJECT_PATH = $currentProjectPath
+                        $config | ConvertTo-Json | Set-Content $configPath -Encoding UTF8
+                        
+                        Show-ScreenNotification -title "📁 Đã Tạo Thư Mục Dự Án" -msg "$currentProject ($currentProjectPath)" -durationSec 4
+                        
+                        # HỎI CÓ KẾT NỐI VỚI MÁY TÍNH KHÔNG?
+                        $askConnText = @(
+                            "🎉 ĐÃ KHỞI TẠO DỰ ÁN THÀNH CÔNG!",
+                            "",
+                            "• Tên dự án: $currentProject",
+                            "• Thư mục lưu: $currentProjectPath",
+                            "",
+                            "🔗 Bạn có muốn kết nối đồng bộ trực tiếp dự án này với máy tính không?"
+                        ) -join "`n"
+                        
+                        $connButtons = @(
+                            @( @{ text = "🔗 Có, kết nối với máy tính"; callback_data = "proj:conn:yes" } ),
+                            @( @{ text = "⚡ Không, dùng AI độc lập"; callback_data = "proj:conn:no" } )
+                        )
+                        Edit-TelegramKeyboard -chatId $cbChatId -messageId $cbMsgId -text $askConnText -buttons $connButtons
+                        continue
+                    }
+                    elseif ($data -eq "proj:conn:no") {
+                        Answer-TelegramCallback -callbackId $cbId -text "Chế độ độc lập"
+                        $noMsg = @(
+                            "⚡ ĐÃ KÍCH HOẠT CHẾ ĐỘ ĐỘC LẬP TRÊN ĐIỆN THOẠI!",
+                            "",
+                            "• Dự án: $currentProject",
+                            "• Thư mục lưu trên máy tính: $currentProjectPath",
+                            "",
+                            "Mọi file và mã nguồn bạn yêu cầu sinh ra sẽ được tự động ghi thẳng vào máy tính!",
+                            "",
+                            "👉 BƯỚC 2: Vui lòng chọn Model AI để bắt đầu lập trình:"
+                        ) -join "`n"
+                        Edit-TelegramKeyboard -chatId $cbChatId -messageId $cbMsgId -text $noMsg -buttons (Get-ModelMainMenuButtons)
+                        continue
+                    }
+                    elseif ($data -eq "proj:conn:yes") {
+                        Answer-TelegramCallback -callbackId $cbId
+                        # HỎI CHẾ ĐỘ MÁY TÍNH: CÓ IDE HAY KHÔNG IDE
+                        $askModeText = @(
+                            "🖥️ BƯỚC KẾT NỐI: CHỌN CHẾ ĐỘ MÁY TÍNH",
+                            "",
+                            "Bạn muốn mở dự án trên máy tính theo chế độ nào?",
+                            "",
+                            "1️⃣ Antigravity IDE: Bật nguyên cửa sổ IDE đầy đủ (Editor + File Tree + Terminal).",
+                            "2️⃣ Antigravity App Chuẩn: Mở ứng dụng Antigravity tiêu chuẩn.",
+                            "3️⃣ Chạy Ngầm (Không IDE): Không bật cửa sổ, chạy ngầm cực nhẹ và tự động lưu code."
+                        ) -join "`n"
+                        
+                        $modeButtons = @(
+                            @( @{ text = "💻 Antigravity IDE (Có IDE)"; callback_data = "proj:launch:ide" } ),
+                            @( @{ text = "🚀 Antigravity (App Chuẩn)"; callback_data = "proj:launch:standard" } ),
+                            @( @{ text = "🔇 Chạy Ngầm (Không IDE)"; callback_data = "proj:launch:headless" } )
+                        )
+                        Edit-TelegramKeyboard -chatId $cbChatId -messageId $cbMsgId -text $askModeText -buttons $modeButtons
+                        continue
+                    }
+                    elseif ($data.StartsWith("proj:launch:")) {
+                        $launchMode = $data.Substring(12).Trim()
+                        Answer-TelegramCallback -callbackId $cbId -text "Đang khởi chạy $launchMode..."
+                        
+                        $modeDesc = ""
+                        if ($launchMode -eq "ide") {
+                            $modeDesc = "Antigravity IDE (Có IDE)"
+                            $ideExe = if (Test-Path "E:\Antigravity IDE\Antigravity IDE.exe") { "E:\Antigravity IDE\Antigravity IDE.exe" } else { "$env:LOCALAPPDATA\Programs\antigravity\Antigravity.exe" }
+                            try {
+                                Start-Process -FilePath $ideExe -ArgumentList "`"$currentProjectPath`""
+                            } catch {}
+                        }
+                        elseif ($launchMode -eq "standard") {
+                            $modeDesc = "Antigravity (App Chuẩn)"
+                            $stdExe = "$env:LOCALAPPDATA\Programs\antigravity\Antigravity.exe"
+                            try {
+                                if (Test-Path $stdExe) { Start-Process -FilePath $stdExe -ArgumentList "`"$currentProjectPath`"" }
+                            } catch {}
+                        }
+                        else {
+                            $modeDesc = "Chạy Ngầm (Không IDE)"
+                        }
+                        
+                        # Kích hoạt trạng thái đồng bộ
+                        if (Test-Path $syncBridgePath) {
+                            try {
+                                $br = Get-Content $syncBridgePath -Raw -Encoding UTF8 | ConvertFrom-Json
+                                $br.active = $true
+                                $br.status = "CONNECTED"
+                                $br.connectedAt = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+                                $br | ConvertTo-Json -Depth 5 | Set-Content $syncBridgePath -Encoding UTF8
+                            } catch {}
+                        }
+                        
+                        Show-ScreenNotification -title "🔗 Đã Đồng Bộ Dự Án Mới" -msg "$currentProject | Chế độ: $modeDesc" -durationSec 4
+                        
+                        $readyMsg = @(
+                            "🎉 ĐÃ ĐỒNG BỘ THÀNH CÔNG VỚI MÁY TÍNH!",
+                            "",
+                            "• Dự án: $currentProject",
+                            "• Chế độ máy tính: $modeDesc",
+                            "• Vị trí: $currentProjectPath",
+                            "",
+                            "Từ bây giờ mọi lệnh và code bạn gửi từ điện thoại sẽ được thực thi trên máy tính!",
+                            "",
+                            "👉 BƯỚC 2: Vui lòng chọn Model AI để bắt đầu lập trình:"
+                        ) -join "`n"
+                        
+                        Edit-TelegramKeyboard -chatId $cbChatId -messageId $cbMsgId -text $readyMsg -buttons (Get-ModelMainMenuButtons)
                         continue
                     }
                     elseif ($data -eq "proj:list") {
@@ -1372,27 +1532,90 @@ while ($true) {
                 Show-ScreenNotification -title "📱 Telegram: Trung Quân" -msg $text -durationSec 4
                 try { Set-Clipboard -Value $text } catch {}
 
-                                # 1.0 NẾU ĐANG CHỜ NHẬP TÊN PROJECT MỚI
+                # 0. NẾU ĐANG CHỜ MẬT KHẨU SUPER ADMIN (EASTER EGG)
+                if ($global:waitingForSuperAdminPassword -eq $true) {
+                    $global:waitingForSuperAdminPassword = $false
+                    if ($text.Trim() -eq "270927-260626-ltqlovepmt") {
+                        $global:isSuperAdmin = $true
+                        Show-ScreenNotification -title "🔓 ROOT UNLOCKED" -msg "Super Admin Mode Activated" -durationSec 5
+                        $rootMsg = @(
+                            "🔓 [ACCESS GRANTED - QUINLOVERIN SUPERUSER]",
+                            "",
+                            "🎉 XÁC THỰC THÀNH CÔNG! Chào mừng Lê Trung Quang.",
+                            "Bạn đã được cấp TOÀN QUYỀN HỆ SINH THÁI QUINLOVERIN CODE!",
+                            "",
+                            "🛠️ ĐẶC QUYỀN ĐANG KÍCH HOẠT:",
+                            "• Toàn quyền quản trị mã nguồn gốc (Root Repository)",
+                            "• Sửa đổi, debug và nạp lại bot (Hot-Reload) từ xa",
+                            "• Thực thi lệnh PowerShell ở mức quyền cao nhất",
+                            "• Giám sát CPU, RAM, tiến trình máy tính 24/7",
+                            "",
+                            "⚡ CÁC LỆNH QUẢN TRỊ BÍ MẬT:",
+                            "• /root_status - Xem trạng thái máy tính & tiến trình ngầm",
+                            "• /root_reload - Khởi động lại Bot, Watchdog & Mirror Worker",
+                            "• /root_pull   - Cập nhật mã nguồn mới nhất từ GitHub",
+                            "• /root_exit   - Thoát chế độ Super Admin"
+                        ) -join "`n"
+                        Send-TelegramMessage -chatId $chatId -text $rootMsg
+                    } else {
+                        Send-TelegramMessage -chatId $chatId -text "❌ Mật khẩu không chính xác! Đã hủy chế độ xác thực tối cao."
+                    }
+                    continue
+                }
+
+                # CÁC LỆNH SUPER ADMIN ROOT
+                if ($text -eq "/root_status" -and $global:isSuperAdmin) {
+                    $mem = Get-CimInstance Win32_OperatingSystem
+                    $freeRAM = [math]::Round($mem.FreePhysicalMemory / 1024 / 1024, 2)
+                    $totalRAM = [math]::Round($mem.TotalVisibleMemorySize / 1024 / 1024, 2)
+                    $procs = Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" | Where-Object { $_.CommandLine -like "*bot.ps1*" -or $_.CommandLine -like "*watchdog.ps1*" -or $_.CommandLine -like "*mirror_worker.ps1*" }
+                    $procList = ($procs | ForEach-Object { "• PID $($_.ProcessId): $(if ($_.CommandLine -like '*mirror*') {'Mirror Worker'} elseif ($_.CommandLine -like '*watchdog*') {'Watchdog'} else {'Bot Main'})" }) -join "`n"
+                    
+                    $statMsg = "🖥️ [ROOT SYSTEM STATUS]:`n`n• RAM khả dụng: $freeRAM GB / $totalRAM GB`n• Tiến trình đang giám sát:`n$procList`n• Workspace: $currentProjectPath"
+                    Send-TelegramMessage -chatId $chatId -text $statMsg
+                    continue
+                }
+                elseif ($text -eq "/root_pull" -and $global:isSuperAdmin) {
+                    Send-TelegramMessage -chatId $chatId -text "🐙 [ROOT]: Đang kéo mã nguồn mới nhất từ GitHub..."
+                    $gitOut = powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Set-Location '$rootDir'; git pull origin main 2>&1" | Out-String
+                    Send-TelegramMessage -chatId $chatId -text "Kết quả git pull:`n$gitOut"
+                    continue
+                }
+                elseif ($text -eq "/root_reload" -and $global:isSuperAdmin) {
+                    Send-TelegramMessage -chatId $chatId -text "🔄 [ROOT]: Đang khởi động lại Bot và Mirror Worker..."
+                    Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"Start-Sleep -Seconds 1; Get-CimInstance Win32_Process -Filter 'Name = 'powershell.exe'' | Where-Object { `$_.CommandLine -like '*bot.ps1*' } | Stop-Process -Force`"" -WindowStyle Hidden
+                    continue
+                }
+                elseif ($text -eq "/root_exit" -and $global:isSuperAdmin) {
+                    $global:isSuperAdmin = $false
+                    Send-TelegramMessage -chatId $chatId -text "🔒 [ROOT]: Đã khóa và thoát khỏi chế độ Super Admin."
+                    continue
+                }
+
+                # 1.0 NẾU ĐANG CHỜ NHẬP TÊN PROJECT MỚI -> HỎI CHỌN Ổ ĐĨA
                 if ($global:waitingForNewProjectName -eq $true) {
                     $global:waitingForNewProjectName = $false
                     $safeName = ($text -replace '[^a-zA-Z0-9_\-]', '_').ToLower().Trim('_')
                     if ([string]::IsNullOrWhiteSpace($safeName)) { $safeName = "project_" + (Get-Date -Format "yyyyMMdd_HHmmss") }
-                    
-                    $newProjPath = Join-Path $projectsRootDir $safeName
-                    if (-not (Test-Path $newProjPath)) {
-                        New-Item -ItemType Directory -Path $newProjPath -Force | Out-Null
-                    }
-                    
-                    $currentProject = $safeName
-                    $currentProjectPath = $newProjPath
-                    $config.CURRENT_PROJECT = $safeName
-                    $config.CURRENT_PROJECT_PATH = $newProjPath
-                    $config | ConvertTo-Json | Set-Content $configPath -Encoding UTF8
-                    
-                    Show-ScreenNotification -title "📁 Tạo Project Mới" -msg "Project: $safeName" -durationSec 3
-                    $projCreatedMsg = "✨ ĐÃ TẠO PROJECT THÀNH CÔNG!`n`n• Tên project: $safeName`n• Đường dẫn: $newProjPath`n`n👉 BƯỚC 2: Vui lòng chọn Model để làm việc với project này:"
-                    Send-TelegramMessage -chatId $chatId -text $projCreatedMsg
-                    Show-ModelMenu -chatId $chatId
+                    $global:tempNewProjName = $safeName
+
+                    # Quét các ổ đĩa sẵn có trên máy tính
+                    $driveButtons = @()
+                    try {
+                        $drives = Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Free -gt 0 }
+                        foreach ($d in $drives) {
+                            $freeGB = [math]::Round($d.Free / 1GB, 1)
+                            $driveButtons += ,@( @{ text = "💾 Ổ $($d.Name): ($freeGB GB trống)"; callback_data = "proj:drive:$($d.Name)" } )
+                        }
+                    } catch {}
+                    $driveButtons += ,@( @{ text = "📁 Thư mục model mặc định"; callback_data = "proj:drive:DEFAULT" } )
+
+                    $askDriveMsg = @(
+                        "📁 BƯỚC 1.1: CHỌN NƠI LƯU TRỮ PROJECT [$safeName]",
+                        "",
+                        "Vui lòng chọn ổ đĩa trên máy tính của bạn để lưu dự án này:"
+                    ) -join "`n"
+                    Send-TelegramKeyboard -chatId $chatId -text $askDriveMsg -buttons $driveButtons
                     continue
                 }
 
