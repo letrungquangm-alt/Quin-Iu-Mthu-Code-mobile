@@ -364,7 +364,8 @@ function Rollback-ToPreviousBackup {
 
 function Initialize-SyncBridge {
     param([int64]$chatId)
-    $randomCode = "SYNC-" + (Get-Random -Minimum 1000 -Maximum 9999).ToString()
+    $randNum = (Get-Random -Minimum 1000 -Maximum 9999).ToString()
+    $randomCode = "GM_${randNum}_Mthu"
     
     $bridgeData = @{
         syncCode = $randomCode
@@ -376,15 +377,16 @@ function Initialize-SyncBridge {
     }
     $bridgeData | ConvertTo-Json -Depth 5 | Set-Content $syncBridgePath -Encoding UTF8
 
-    Show-ScreenNotification -title "🔗 Yêu Cầu Kết Nối Đồng Bộ" -msg "Mã từ Telegram: $randomCode" -durationSec 5
+    Show-ScreenNotification -title "🔗 Yêu Cầu Kết Nối Đồng Bộ" -msg "Mã: $randomCode" -durationSec 5
 
     $msg = @(
         "🔗 MÃ KẾT NỐI ĐỒNG BỘ: $randomCode",
         "",
         "Bạn hãy copy mã trên và dán vào ô chat Antigravity trên máy tính để kết nối!",
         "",
-        "Khi đã kết nối, mọi tin nhắn bạn gửi ở đây sẽ NHẢY LÊN MÀN HÌNH MÁY TÍNH trong thời gian thực.",
-        "(Để ngắt kết nối bất cứ lúc nào, chỉ cần nói: 'ngắt kết nối')"
+        "✨ Định dạng mã: GM_<mã số>_Mthu (hỗ trợ cả chữ thường gm_..._mthu).",
+        "Khi đã kết nối, toàn bộ lệnh và code bạn gửi từ điện thoại sẽ được chuyển thẳng sang máy tính và lưu vào đúng thư mục dự án!",
+        "(Để ngắt kết nối: chỉ cần gõ đúng từ 'ngắt kết nối' hoặc /disconnect)"
     ) -join "`n"
 
     Send-TelegramMessage -chatId $chatId -text $msg
@@ -904,8 +906,13 @@ while ($true) {
                         $cmdToRun = $resObj.cmdToRun
                         $autoOutput = $resObj.autoOutput
                         $execMode = $resObj.executionMode
+                        $savedFiles = $resObj.savedFiles
+                        $curProjPath = $resObj.currentProjectPath
                         
-                        if ($cleanReply.Length -gt 150) { 
+                        if ($savedFiles -and $savedFiles.Count -gt 0) {
+                            $fileListStr = $savedFiles -join ", "
+                            Show-ScreenNotification -title "💾 File Đã Lưu Vào Máy Tính" -msg "$fileListStr" -durationSec 5
+                        } elseif ($cleanReply.Length -gt 150) { 
                             Show-ScreenNotification -title "🤖 AI Phản Hồi -> Máy tính" -msg ($cleanReply.Substring(0, 150) + "...") -durationSec 4 
                         }
 
@@ -926,12 +933,21 @@ while ($true) {
                                 continue
                             } else {
                                 $outText = "$cleanReply`n`n⚡ [ĐÃ TỰ ĐỘNG THỰC THI]:`n$autoOutput"
+                                if ($savedFiles -and $savedFiles.Count -gt 0) {
+                                    $fileListStr = $savedFiles -join ", "
+                                    $outText += "`n`n💾 [FILE ĐÃ LƯU TRÊN MÁY TÍNH]:`n📄 $fileListStr`n📁 $curProjPath"
+                                }
                                 $tokenEnd = Format-TokenFooter -tokensThisCall ($resObj.tokensUsed)
                                 Send-TelegramMessage -chatId $allowedChatId -text "$outText`n`n$tokenEnd"
                             }
                         } else {
+                            $outText = $cleanReply
+                            if ($savedFiles -and $savedFiles.Count -gt 0) {
+                                $fileListStr = $savedFiles -join ", "
+                                $outText += "`n`n💾 [FILE ĐÃ LƯU TRÊN MÁY TÍNH]:`n📄 $fileListStr`n📁 $curProjPath"
+                            }
                             $tokenEnd = Format-TokenFooter -tokensThisCall ($resObj.tokensUsed)
-                            Send-TelegramMessage -chatId $allowedChatId -text "$cleanReply`n`n$tokenEnd"
+                            Send-TelegramMessage -chatId $allowedChatId -text "$outText`n`n$tokenEnd"
                         }
                     }
                     else {
@@ -1362,13 +1378,28 @@ while ($true) {
                     continue
                 }
 
-                # 2. XỬ LÝ LỆNH ĐỒNG BỘ TRỰC TIẾP
-                if ($text -match '(?i)(kết nối.*đoạn chat|kết nối.*code|đồng bộ|dong bo|/connect|/sync)') {
+                # 2. XỬ LÝ LỆNH ĐỒNG BỘ TRỰC TIẾP (Neo chính xác ^...$ để câu nói dài không kích hoạt nhầm)
+                if ($text -match '^(?i)(/connect|/sync|kết nối|đồng bộ)$') {
                     Initialize-SyncBridge -chatId $chatId
                     continue
                 }
-                elseif ($text -match '(?i)(ngắt kết nối|ngat ket noi|hủy kết nối|disconnect|/disconnect)') {
+                elseif ($text -match '^(?i)(/disconnect|ngắt kết nối|hủy kết nối)$') {
                     Disconnect-SyncBridge -chatId $chatId
+                    continue
+                }
+                elseif ($text -match '(?i)^gm_(\d{3,8})_mthu$') {
+                    $codeNum = $matches[1]
+                    $fullCode = "GM_${codeNum}_Mthu"
+                    if (Test-Path $syncBridgePath) {
+                        $bridge = Get-Content $syncBridgePath -Raw -Encoding UTF8 | ConvertFrom-Json
+                        $bridge.syncCode = $fullCode
+                        $bridge.status = "CONNECTED"
+                        $bridge.active = $true
+                        $bridge.connectedAt = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+                        $bridge | ConvertTo-Json -Depth 5 | Set-Content $syncBridgePath -Encoding UTF8
+                    }
+                    Show-ScreenNotification -title "🔗 Đã Kết Nối Đồng Bộ PC!" -msg "Mã: $fullCode" -durationSec 5
+                    Send-TelegramMessage -chatId $chatId -text "🎉 KẾT NỐI ĐỒNG BỘ THÀNH CÔNG!`n`nĐã liên kết với máy tính qua mã $fullCode.`nTừ bây giờ, mọi mã nguồn và file được sinh ra sẽ tự động chuyển thẳng sang máy tính và lưu vào đúng thư mục dự án!"
                     continue
                 }
 
