@@ -48,6 +48,7 @@ $global:currentJobPrompt = ""
 $global:promptQueue = [System.Collections.Generic.List[PSObject]]::new()
 $global:waitingForEditPromptId = ""
 $pendingCommands = @{}
+$global:pendingMediaGroups = @{}
 
 if ([string]::IsNullOrWhiteSpace($botToken)) {
     Write-Host "[CẢNH BÁO] BOT_TOKEN đang trống!" -ForegroundColor Yellow
@@ -833,6 +834,187 @@ function Ask-GeminiVision {
 
 # --- HÀM THỰC THI CHÍNH CỦA PROMPT (EXECUTE ENGINE) ---
 
+function Ask-GeminiVisionMulti {
+    param(
+        [string]$userText,
+        [string[]]$imagePaths
+    )
+    if ([string]::IsNullOrWhiteSpace($userText)) {
+        $userText = "Hãy quan sát toàn bộ các bức ảnh này và phân tích chi tiết giúp tôi. Nếu có code hoặc thông báo lỗi, hãy đọc nội dung và hướng dẫn xử lý."
+    }
+
+    $sysPrompt = "Bạn là trợ lý lập trình AI có thị giác siêu việt (Multimodal Vision) điều khiển máy tính từ xa. Hãy quan sát kỹ lưỡng tất cả các bức ảnh được gửi và trả lời lời khuyên/giải pháp bằng Tiếng Việt có dấu rõ ràng, chuẩn xác."
+
+    $partsList = [System.Collections.Generic.List[Object]]::new()
+    $partsList.Add(@{ text = $userText })
+
+    foreach ($p in $imagePaths) {
+        if (Test-Path $p) {
+            try {
+                $imgBytes = [System.IO.File]::ReadAllBytes($p)
+                $b64 = [System.Convert]::ToBase64String($imgBytes)
+                $ext = [System.IO.Path]::GetExtension($p).ToLower()
+                $mime = switch ($ext) {
+                    ".png"  { "image/png" }
+                    ".webp" { "image/webp" }
+                    ".gif"  { "image/gif" }
+                    default { "image/jpeg" }
+                }
+                $partsList.Add(@{
+                    inlineData = @{
+                        mimeType = $mime
+                        data = $b64
+                    }
+                })
+            } catch {}
+        }
+    }
+
+    $payload = @{
+        systemInstruction = @{
+            parts = @(@{ text = $sysPrompt })
+        }
+        contents = @(
+            @{
+                role = "user"
+                parts = $partsList
+            }
+        )
+    }
+
+    $postBytes = [System.Text.Encoding]::UTF8.GetBytes(($payload | ConvertTo-Json -Depth 6 -Compress))
+    $modelsToTry = @("gemini-2.5-flash", "gemini-flash-latest", "gemini-flash-lite-latest")
+    $tokensUsedThisCall = 40 * [math]::Max(1, $imagePaths.Count)
+    $responseText = ""
+
+    foreach ($m in $modelsToTry) {
+        $url = "https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=$geminiApiKey"
+        try {
+            $parsed = Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body $postBytes -TimeoutSec 35
+            if ($parsed.candidates -and $parsed.candidates[0].content.parts) {
+                $responseText = $parsed.candidates[0].content.parts[0].text
+                if ($parsed.usageMetadata -and $parsed.usageMetadata.totalTokenCount) {
+                    $tokensUsedThisCall = [int]$parsed.usageMetadata.totalTokenCount
+                }
+                break
+            }
+        } catch {}
+    }
+
+    if ([string]::IsNullOrWhiteSpace($responseText)) {
+        return "AI Vision đang tạm thời bận, bạn hãy thử gửi lại ảnh nhé!"
+    }
+
+    $tokenFooter = Format-TokenFooter -tokensThisCall $tokensUsedThisCall
+    return "$responseText`n`n$tokenFooter"
+}
+
+# --- XỬ LÝ ALBUM ĐA ẢNH (MEDIA GROUP PROCESSOR) ---
+function Process-PendingMediaGroups {
+    if (-not $global:pendingMediaGroups -or $global:pendingMediaGroups.Count -eq 0) { return }
+
+    $now = [DateTime]::Now
+    $readyKeys = @()
+    foreach ($key in @($global:pendingMediaGroups.Keys)) {
+        $grp = $global:pendingMediaGroups[$key]
+        if (($now - $grp.lastUpdated).TotalMilliseconds -ge 700) {
+            $readyKeys += $key
+        }
+    }
+
+    foreach ($key in $readyKeys) {
+        $grp = $global:pendingMediaGroups[$key]
+        $global:pendingMediaGroups.Remove($key)
+
+        $chatId = $grp.chatId
+        $total = $grp.items.Count
+        $userCaption = if (-not [string]::IsNullOrWhiteSpace($grp.caption)) { $grp.caption.Trim() } else { "Hãy quan sát tất cả $total bức ảnh này và phân tích, hỗ trợ tôi." }
+        $safeCaption = [System.Net.WebUtility]::HtmlEncode($userCaption)
+
+        # Cập nhật trạng thái đang tải ảnh
+        Edit-TelegramMessage -chatId $chatId -messageId $grp.statusMsgId -text "📥 <b>[ĐÃ NHẬN ĐỦ $total ẢNH - ĐANG TẢI VỀ MÁY TÍNH...]</b>`n<blockquote><i>`"$safeCaption`"</i></blockquote>" | Out-Null
+
+        # Tải tất cả các ảnh về thư mục uploads
+        $uploadDir = Join-Path $currentProjectPath "uploads"
+        if (-not (Test-Path $uploadDir)) { New-Item -ItemType Directory -Path $uploadDir -Force | Out-Null }
+
+        $savedImgPaths = @()
+        $idx = 1
+        $stamp = (Get-Date -Format 'yyyyMMdd_HHmmss')
+        foreach ($item in $grp.items) {
+            $fId = $item.fileId
+            $ext = if ($item.ext) { $item.ext } else { ".jpg" }
+            $targetFile = Join-Path $uploadDir "album_${key}_${idx}_${stamp}${ext}"
+            try {
+                $getFileUrl = "https://api.telegram.org/bot$botToken/getFile?file_id=$fId"
+                $fileInfo = Invoke-RestMethod -Uri $getFileUrl -Method Get
+                if ($fileInfo.ok -and $fileInfo.result.file_path) {
+                    $dlUrl = "https://api.telegram.org/file/bot$botToken/$($fileInfo.result.file_path)"
+                    & curl.exe -s -o $targetFile $dlUrl
+                    if (Test-Path $targetFile) {
+                        $savedImgPaths += $targetFile
+                    }
+                }
+            } catch {}
+            $idx++
+        }
+
+        if ($savedImgPaths.Count -eq 0) {
+            Edit-TelegramMessage -chatId $chatId -messageId $grp.statusMsgId -text "❌ Không thể tải các ảnh trong album về máy tính!"
+            continue
+        }
+
+        # Nếu đang kết nối đồng bộ Antigravity PC:
+        if (Check-SyncBridgeStatus) {
+            $pathsList = @()
+            for ($k = 0; $k -lt $savedImgPaths.Count; $k++) {
+                $pathsList += "$($k + 1). $($savedImgPaths[$k])"
+            }
+            $pathsStr = $pathsList -join "`n"
+            $fullPrompt = "[Điện thoại gửi album $($savedImgPaths.Count) ảnh]: $userCaption`nDanh sách file ảnh trên máy tính:`n$pathsStr"
+
+            # Thiết lập Stopwatch Prompt Reading
+            $global:promptReadingStart = [DateTime]::Now
+            $global:promptReadingPreview = "[Album $($savedImgPaths.Count) ảnh] $userCaption"
+            $global:lastReadingSec = 1
+            $global:promptReadingMsgId = $grp.statusMsgId
+
+            Edit-TelegramMessage -chatId $chatId -messageId $grp.statusMsgId -text "📷 <b>[ĐÃ NHẬN ĐỦ $($savedImgPaths.Count) ẢNH - ĐANG PHÂN TÍCH (1s)...]</b>`n<blockquote expandable><i>`"$safeCaption`"</i></blockquote>" | Out-Null
+
+            Append-SyncMessage -sender "phone" -text $fullPrompt
+            Send-ToAntigravityChat -text $fullPrompt
+            Show-ScreenNotification -title "📷 Telegram: Album $($savedImgPaths.Count) Ảnh" -msg "$userCaption" -durationSec 4
+
+            if (Test-Path $syncBridgePath) {
+                try {
+                    $br = Get-Content $syncBridgePath -Raw -Encoding UTF8 | ConvertFrom-Json
+                    $br | Add-Member -NotePropertyName "promptReadingMsgId" -NotePropertyValue $grp.statusMsgId -Force
+                    $br | Add-Member -NotePropertyName "promptReadingStart" -NotePropertyValue ([DateTime]::Now.ToString("o")) -Force
+                    $br | Add-Member -NotePropertyName "promptReadingPreview" -NotePropertyValue "[Album $($savedImgPaths.Count) ảnh] $userCaption" -Force
+                    $br | ConvertTo-Json -Depth 5 | Set-Content $syncBridgePath -Encoding UTF8
+                } catch {}
+            }
+            continue
+        }
+
+        # Nếu chế độ độc lập (Standalone Gemini Vision):
+        $loadingMsgId = Send-TelegramMessage -chatId $chatId -text "🧠 <b>[ĐANG PHÂN TÍCH $($savedImgPaths.Count) ẢNH QUA VISION (1s)...]</b>"
+        try {
+            $visionAnswer = Ask-GeminiVisionMulti -userText $userCaption -imagePaths $savedImgPaths
+            $formattedVision = Convert-MdToTgHtml -text $visionAnswer
+            if ($loadingMsgId) {
+                Edit-TelegramMessage -chatId $chatId -messageId $loadingMsgId -text $formattedVision
+            } else {
+                Send-TelegramMessage -chatId $chatId -text $formattedVision
+            }
+        } catch {
+            if ($loadingMsgId) {
+                Edit-TelegramMessage -chatId $chatId -messageId $loadingMsgId -text "Lỗi phân tích album ảnh: $_"
+            }
+        }
+    }
+}
+
 function Execute-UserPrompt {
     param(
         [int64]$chatId,
@@ -1124,7 +1306,8 @@ while ($true) {
 
     # 2. LẮNG NGHE TIN NHẮN TỪ TELEGRAM (TIMEOUT NHANH 1S NẾU ĐANG CHẠY ĐỂ BẮT HÀNG ĐỢI)
     try {
-        $pollTimeout = if ($global:isExecuting -or $global:currentJob) { 1 } else { 12 }
+        Process-PendingMediaGroups
+        $pollTimeout = if ($global:isExecuting -or $global:currentJob -or ($global:pendingMediaGroups -and $global:pendingMediaGroups.Count -gt 0)) { 1 } else { 12 }
         $updatesUrl = "https://api.telegram.org/bot$botToken/getUpdates?offset=$offset&timeout=$pollTimeout"
         $response = Invoke-RestMethod -Uri $updatesUrl -Method Get -TimeoutSec ($pollTimeout + 10)
 
@@ -1596,15 +1779,69 @@ while ($true) {
                     continue
                 }
 
-                # --- XỬ LÝ ẢNH (VISION) ---
-                if ($msg.photo) {
-                    $largestPhoto = $msg.photo | Sort-Object file_size -Descending | Select-Object -First 1
-                    $fileId = $largestPhoto.file_id
-                    $userCaption = if ($msg.caption) { $msg.caption.Trim() } else { "Hãy quan sát bức ảnh này và phân tích, hỗ trợ tôi." }
+                # --- XỬ LÝ ẢNH (VISION) & ALBUM ĐA PHƯƠNG TIỆN ---
+                $isPhoto = ($null -ne $msg.photo) -and ($msg.photo.Count -gt 0)
+                $isDocImage = ($null -ne $msg.document) -and (
+                    ($msg.document.mime_type -like "image/*") -or 
+                    ($msg.document.file_name -match "\.(png|jpg|jpeg|gif|webp|bmp)$")
+                )
+
+                if ($isPhoto -or $isDocImage) {
+                    $fileId = ""
+                    $ext = ".jpg"
+                    if ($isPhoto) {
+                        $largestPhoto = $msg.photo | Sort-Object file_size -Descending | Select-Object -First 1
+                        $fileId = $largestPhoto.file_id
+                        $ext = ".jpg"
+                    } else {
+                        $fileId = $msg.document.file_id
+                        $ext = [System.IO.Path]::GetExtension($msg.document.file_name)
+                        if ([string]::IsNullOrWhiteSpace($ext)) { $ext = ".jpg" }
+                    }
+
+                    $hasCaption = [bool]$msg.caption
+                    $userCaption = if ($hasCaption) { $msg.caption.Trim() } else { "" }
+
+                    # A. NẾU LÀ ALBUM NHIỀU ẢNH (MEDIA GROUP)
+                    if ($msg.media_group_id) {
+                        $mgId = [string]$msg.media_group_id
+                        if (-not $global:pendingMediaGroups.ContainsKey($mgId)) {
+                            # Gửi ACK tức thì ngay ảnh đầu tiên (< 0.5s)
+                            $previewCaption = if ($hasCaption) { $userCaption } else { "Album ảnh từ điện thoại" }
+                            $safeCaption = [System.Net.WebUtility]::HtmlEncode($previewCaption)
+                            $statusMsgId = Send-TelegramMessage -chatId $chatId -text "📷 <b>[ĐÃ NHẬN ALBUM ẢNH (1 ảnh)...]</b>`n<blockquote><i>`"$safeCaption`"</i></blockquote>"
+                            
+                            $groupObj = [PSCustomObject]@{
+                                chatId = $chatId
+                                statusMsgId = $statusMsgId
+                                caption = $userCaption
+                                items = [System.Collections.ArrayList]@([PSCustomObject]@{ fileId = $fileId; ext = $ext })
+                                lastUpdated = [DateTime]::Now
+                                firstReceived = [DateTime]::Now
+                            }
+                            $global:pendingMediaGroups[$mgId] = $groupObj
+                        } else {
+                            $groupObj = $global:pendingMediaGroups[$mgId]
+                            [void]$groupObj.items.Add([PSCustomObject]@{ fileId = $fileId; ext = $ext })
+                            if ($hasCaption -and [string]::IsNullOrWhiteSpace($groupObj.caption)) {
+                                $groupObj.caption = $userCaption
+                            }
+                            $groupObj.lastUpdated = [DateTime]::Now
+                            
+                            $count = $groupObj.items.Count
+                            $dispCaption = if ($groupObj.caption) { $groupObj.caption } else { "Album ảnh từ điện thoại" }
+                            $safeCaption = [System.Net.WebUtility]::HtmlEncode($dispCaption)
+                            Edit-TelegramMessage -chatId $chatId -messageId $groupObj.statusMsgId -text "📷 <b>[ĐÃ NHẬN ALBUM ẢNH ($count ảnh)...]</b>`n<blockquote><i>`"$safeCaption`"</i></blockquote>" | Out-Null
+                        }
+                        continue
+                    }
+
+                    # B. NẾU LÀ 1 ẢNH ĐƠN LẺ (SINGLE PHOTO)
+                    $userCaption = if ($hasCaption) { $msg.caption.Trim() } else { "Hãy quan sát bức ảnh này và phân tích, hỗ trợ tôi." }
 
                     # 1. GỬI NGAY THÔNG BÁO TỨC THÌ ĐẦU TIÊN (< 0.5s) CHO TELEGRAM
                     $global:promptReadingStart = [DateTime]::Now
-                    $global:promptReadingPreview = if ($msg.caption) { "[Ảnh] $userCaption" } else { "[Ảnh] Phân tích hình ảnh" }
+                    $global:promptReadingPreview = if ($hasCaption) { "[Ảnh] $userCaption" } else { "[Ảnh] Phân tích hình ảnh" }
                     $global:lastReadingSec = 1
                     $safeCaption = [System.Net.WebUtility]::HtmlEncode($userCaption)
                     $global:promptReadingMsgId = Send-TelegramMessage -chatId $chatId -text "📷 <b>[ĐÃ NHẬN ẢNH - ĐANG TẢI & PHÂN TÍCH (1s)...]</b>`n<blockquote expandable><i>`"$safeCaption`"</i></blockquote>"
@@ -1612,7 +1849,7 @@ while ($true) {
                     # 2. Tải ảnh từ Telegram API về máy tính trong nền
                     $uploadDir = Join-Path $currentProjectPath "uploads"
                     if (-not (Test-Path $uploadDir)) { New-Item -ItemType Directory -Path $uploadDir -Force | Out-Null }
-                    $imgFileName = "photo_$(Get-Date -Format 'yyyyMMdd_HHmmss').jpg"
+                    $imgFileName = "photo_$(Get-Date -Format 'yyyyMMdd_HHmmss')$ext"
                     $savedImgPath = Join-Path $uploadDir $imgFileName
 
                     $downloadOk = $false
@@ -1656,7 +1893,13 @@ while ($true) {
                     try {
                         $imgBytes = [System.IO.File]::ReadAllBytes($savedImgPath)
                         $base64 = [System.Convert]::ToBase64String($imgBytes)
-                        $visionAnswer = Ask-GeminiVision -userText $userCaption -base64Image $base64 -mimeType "image/jpeg"
+                        $mimeType = switch ($ext.ToLower()) {
+                            ".png"  { "image/png" }
+                            ".webp" { "image/webp" }
+                            ".gif"  { "image/gif" }
+                            default { "image/jpeg" }
+                        }
+                        $visionAnswer = Ask-GeminiVision -userText $userCaption -base64Image $base64 -mimeType $mimeType
                         $formattedVision = Convert-MdToTgHtml -text $visionAnswer
                         if ($loadingMsgId) {
                             Edit-TelegramMessage -chatId $chatId -messageId $loadingMsgId -text $formattedVision
@@ -2119,6 +2362,7 @@ while ($true) {
                 Execute-UserPrompt -chatId $chatId -text $text
             }
         }
+        Process-PendingMediaGroups
     }
     catch {
         Write-Host "Lỗi kết nối Telegram: $_" -ForegroundColor DarkGray
