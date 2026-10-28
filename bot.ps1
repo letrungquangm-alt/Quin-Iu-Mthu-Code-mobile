@@ -1194,7 +1194,7 @@ function Execute-UserPrompt {
         $global:promptReadingPreview = $preview
         $global:lastReadingSec = 1
         $safePrev = [System.Net.WebUtility]::HtmlEncode($preview)
-        $global:promptReadingMsgId = Send-TelegramMessage -chatId $chatId -text "📖 <b>[ĐANG ĐỌC PROMPT CỦA BẠN (1s)...]</b>`n<blockquote expandable><i>`"$safePrev`"</i></blockquote>"
+        Send-TelegramAction -chatId $chatId -action "typing"
 
         if (Test-Path $syncBridgePath) {
             try {
@@ -1267,7 +1267,7 @@ while ($true) {
             if ($currReadSec -ge ($global:lastReadingSec + 2)) {
                 $global:lastReadingSec = $currReadSec
                 $safePrev = [System.Net.WebUtility]::HtmlEncode($global:promptReadingPreview)
-                Edit-TelegramMessage -chatId $allowedChatId -messageId $global:promptReadingMsgId -text "📖 <b>[ĐANG ĐỌC PROMPT CỦA BẠN (${currReadSec}s)...]</b>`n<blockquote expandable><i>`"$safePrev`"</i></blockquote>" | Out-Null
+                # Da bo thong bao doc prompt theo yeu cau cua bro
             }
         }
     }

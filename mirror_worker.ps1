@@ -1,4 +1,4 @@
-﻿# ========================================================
+# ========================================================
 # Telegram Remote Coder - Live Activity Mirror Worker v2.6
 # Chữ có màu thật (Diff Syntax: + Xanh lá, ! Cam, - Đỏ)
 # Đồng hồ bấm giây live cho mọi khoảng lặng & Nhận diện ĐÃ ĐỌC PROMPT
@@ -173,7 +173,7 @@ function Finish-PromptReadingStatus {
                 $pStart = [DateTime]::Parse($br.promptReadingStart)
                 $readSec = [math]::Max(1, [int]([DateTime]::Now - $pStart).TotalSeconds)
                 $pPrev = if ($br.promptReadingPreview) { [System.Net.WebUtility]::HtmlEncode($br.promptReadingPreview) } else { "" }
-                Edit-TgMessage -messageId ([int]$br.promptReadingMsgId) -text "✅ <b>[ĐÃ ĐỌC XONG PROMPT - ${readSec}s]</b>`n<blockquote expandable><i>`"$pPrev`"</i></blockquote>"
+                Delete-TgMessage -messageId ([int]$br.promptReadingMsgId)
                 
                 $br.promptReadingMsgId = $null
                 $br.promptReadingStart = $null
