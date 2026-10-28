@@ -1395,6 +1395,12 @@ while ($true) {
                     # --- XỬ LÝ CÁC NÚT TRONG HÀNG ĐỢI PROMPT (QUEUE ACTIONS) ---
 
                     # Nút 1: Ưu tiên dùng prompt này (Send now)
+                    if ($data -eq "tunnel:stop") {
+                        Answer-TelegramCallback -callbackId $cbId -text "Đang đóng xem trước web..."
+                        Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$rootDir\preview_tunnel.ps1`" -action stop -chatId $cbChatId" -WindowStyle Hidden
+                        continue
+                    }
+
                     if ($data.StartsWith("q_now:")) {
                         $targetId = $data.Substring(6).Trim()
                         $foundItem = $global:promptQueue | Where-Object { $_.id -eq $targetId } | Select-Object -First 1
@@ -2055,6 +2061,37 @@ while ($true) {
                     $targetDir = if ($currentProjectPath -and (Test-Path $currentProjectPath)) { $currentProjectPath } else { $rootDir }
                     $gitOut = powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Set-Location '$targetDir'; git pull 2>&1" | Out-String
                     Send-TelegramMessage -chatId $chatId -text "✅ <b>[KẾT QUẢ ĐỒNG BỘ GITHUB]:</b>`n<pre><code>$gitOut</code></pre>`n📁 <i>Thư mục: $targetDir</i>"
+                    continue
+                }
+                # --- TÍNH NĂNG DEMO & LIVE TEST WEB (1, 2, 4) ---
+                elseif ($text -match '^(?i)(/preview|/tunnel|xem trước web|xem truoc web|demo web)$') {
+                    Send-TelegramMessage -chatId $chatId -text "🌐 Đang khởi tạo đường truyền Cloudflare Tunnel xem trước web trên điện thoại..."
+                    Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$rootDir\preview_tunnel.ps1`" -action start -chatId $chatId" -WindowStyle Hidden
+                    continue
+                }
+                elseif ($text -match '^(?i)(/stoppreview|/stoptunnel|dừng xem trước|dung xem truoc)$') {
+                    Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$rootDir\preview_tunnel.ps1`" -action stop -chatId $chatId" -WindowStyle Hidden
+                    continue
+                }
+                elseif ($text -match '^(?i)(/testvideo|/record|quay video test|quay clip test|quay video)$') {
+                    Send-TelegramMessage -chatId $chatId -text "🎬 Đang mở trình duyệt kiểm thử tự động và quay video mô phỏng thao tác người dùng..."
+                    Start-Process node -ArgumentList "`"$rootDir\record_test_video.js`"" -WorkingDirectory $rootDir -WindowStyle Hidden
+                    continue
+                }
+                elseif ($text -match '^(?i)/stream(?:\s+(.+))?$') {
+                    $streamArgs = $matches[1]
+                    if ([string]::IsNullOrWhiteSpace($streamArgs)) {
+                        Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$rootDir\stream_to_telegram.ps1`" -action start -chatId $chatId" -WindowStyle Hidden
+                    } else {
+                        $parts = $streamArgs.Trim() -split '\s+'
+                        $u = $parts[0]
+                        $k = if ($parts.Count -gt 1) { $parts[1] } else { "" }
+                        Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$rootDir\stream_to_telegram.ps1`" -action start -rtmpUrl `"$u`" -streamKey `"$k`" -chatId $chatId" -WindowStyle Hidden
+                    }
+                    continue
+                }
+                elseif ($text -match '^(?i)(/stopstream|dừng stream|dung stream)$') {
+                    Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$rootDir\stream_to_telegram.ps1`" -action stop -chatId $chatId" -WindowStyle Hidden
                     continue
                 }
                 elseif ($text -eq "/root_exit" -and $global:isSuperAdmin) {
