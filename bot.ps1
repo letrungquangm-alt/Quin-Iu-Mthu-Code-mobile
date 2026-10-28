@@ -1541,6 +1541,39 @@ while ($true) {
                     }
                     continue
                 }
+                elseif ($text -match '(?i)(cài đặt tool QuinloveRin Code|cài đặt.*tool.*QuinloveRin|cài đặt tool|cai dat tool|setup máy mới|setup may moi|cài máy mới|/install|/setup)') {
+                    $cfg = Get-Content $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+                    $bToken = $cfg.BOT_TOKEN
+                    $gKey = $cfg.GEMINI_API_KEY
+                    $ghTok = $cfg.GITHUB_TOKEN
+                    $vTok = $cfg.VERCEL_TOKEN
+                    $vTeam = $cfg.VERCEL_TEAM_ID
+
+                    $installGuide = @(
+                        "⚡ BẠN ĐANG NGỒI QUÁN NET HOẶC MÁY TÍNH MỚI?",
+                        "",
+                        "Dưới đây là ĐOẠN PROMPT ĐỘC QUYỀN để bạn nhờ chính Antigravity trên máy tính mới cài đặt toàn bộ hệ thống trong 10 giây và TỰ ĐỘNG KẾT NỐI SẴN với điện thoại của bạn!",
+                        "",
+                        "👉 BƯỚC DUY NHẤT: Copy toàn bộ đoạn bên dưới và DÁN VÀO Ô CHAT ANTIGRAVITY trên máy tính mới:",
+                        "──────────────────────",
+                        "Hãy cài đặt và thiết lập toàn diện hệ sinh thái QuinloveRin Code trên máy tính này cho tôi theo các bước tự động sau:",
+                        "",
+                        "1. Tạo thư mục làm việc:",
+                        "New-Item -ItemType Directory -Path 'C:\Users\Administrator\.gemini\antigravity\scratch\telegram-remote-coder' -Force",
+                        "New-Item -ItemType Directory -Path 'C:\Users\Administrator\.gemini\antigravity\scratch\model\Quin-Iu-Mthu' -Force",
+                        "",
+                        "2. Tải và chạy script cài đặt tự động từ GitHub:",
+                        "Set-Location 'C:\Users\Administrator\.gemini\antigravity\scratch\telegram-remote-coder'",
+                        "git clone https://github.com/letrungquangm-alt/Quin-Iu-Mthu-Code-mobile.git .",
+                        "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -BotToken '$bToken' -GeminiKey '$gKey' -GhToken '$ghTok' -VercelToken '$vTok' -VercelTeam '$vTeam'",
+                        "",
+                        "3. Sau khi chạy xong, hãy xác nhận hệ thống đã kết nối đồng bộ sẵn sàng với Telegram của tôi!",
+                        "──────────────────────"
+                    ) -join "`n"
+                    
+                    Send-TelegramMessage -chatId $chatId -text $installGuide
+                    continue
+                }
                 elseif ($text -match '(?i)^(push|push github|đẩy code|day code|/push)$') {
                     $guide = @(
                         "🚀 HƯỚNG DẪN PUSH CODE LÊN GITHUB:",
