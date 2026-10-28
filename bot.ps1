@@ -941,6 +941,7 @@ function Process-PendingMediaGroups {
         $savedImgPaths = @()
         $idx = 1
         $stamp = (Get-Date -Format 'yyyyMMdd_HHmmss')
+        $downloadItems = @()
         foreach ($item in $grp.items) {
             $fId = $item.fileId
             $ext = if ($item.ext) { $item.ext } else { ".jpg" }
@@ -950,13 +951,27 @@ function Process-PendingMediaGroups {
                 $fileInfo = Invoke-RestMethod -Uri $getFileUrl -Method Get
                 if ($fileInfo.ok -and $fileInfo.result.file_path) {
                     $dlUrl = "https://api.telegram.org/file/bot$botToken/$($fileInfo.result.file_path)"
-                    & curl.exe -s -o $targetFile $dlUrl
-                    if (Test-Path $targetFile) {
-                        $savedImgPaths += $targetFile
+                    $downloadItems += [PSCustomObject]@{
+                        url = $dlUrl
+                        targetPath = $targetFile
                     }
                 }
             } catch {}
             $idx++
+        }
+
+        # Tải toàn bộ ảnh cùng lúc qua cơ chế song song (curl -Z HTTP/2 Multiplexing)
+        if ($downloadItems.Count -gt 0) {
+            $curlArgs = @("-Z", "-s")
+            foreach ($di in $downloadItems) {
+                $curlArgs += @("-o", $di.targetPath, $di.url)
+            }
+            & curl.exe @curlArgs
+            foreach ($di in $downloadItems) {
+                if (Test-Path $di.targetPath) {
+                    $savedImgPaths += $di.targetPath
+                }
+            }
         }
 
         if ($savedImgPaths.Count -eq 0) {
