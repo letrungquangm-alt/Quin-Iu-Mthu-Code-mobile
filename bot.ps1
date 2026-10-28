@@ -50,6 +50,11 @@ $global:waitingForEditPromptId = ""
 $pendingCommands = @{}
 $global:pendingMediaGroups = @{}
 
+# Gỡ Webhook Cloud nếu có để máy tính tiếp quản Long Polling
+try {
+    Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/deleteWebhook" -Method Get -TimeoutSec 5 | Out-Null
+} catch {}
+
 if ([string]::IsNullOrWhiteSpace($botToken)) {
     Write-Host "[CẢNH BÁO] BOT_TOKEN đang trống!" -ForegroundColor Yellow
     exit 1
@@ -171,40 +176,80 @@ function Convert-MdToTgHtml {
     return $text
 }
 
+function Split-TelegramText {
+    param([string]$text, [int]$maxLen = 3500)
+    $chunks = [System.Collections.Generic.List[string]]::new()
+    if ([string]::IsNullOrWhiteSpace($text)) { return $chunks }
+
+    while ($text.Length -gt $maxLen) {
+        $splitIdx = $text.LastIndexOf("`n`n", $maxLen)
+        if ($splitIdx -lt ($maxLen / 2)) {
+            $splitIdx = $text.LastIndexOf("`n", $maxLen)
+        }
+        if ($splitIdx -lt ($maxLen / 2)) {
+            $splitIdx = $text.LastIndexOf(". ", $maxLen)
+        }
+        if ($splitIdx -lt ($maxLen / 2)) {
+            $splitIdx = $maxLen
+        } else {
+            $splitIdx += 1
+        }
+
+        $chunk = $text.Substring(0, $splitIdx).Trim()
+        if ($chunk) { $chunks.Add($chunk) }
+        $text = $text.Substring($splitIdx).Trim()
+    }
+    if ($text) { $chunks.Add($text) }
+    return $chunks
+}
+
 function Send-TelegramMessage {
     param(
         [int64]$chatId,
         [string]$text,
         [string]$parseMode = "HTML"
     )
-    $url = "https://api.telegram.org/bot$botToken/sendMessage"
-    if ($text.Length -gt 3800) {
-        $text = $text.Substring(0, 3800) + "`n`n...[Output đã bị cắt bớt do quá dài]"
-    }
-    $bodyObj = @{
-        chat_id = $chatId
-        text = $text
-        disable_web_page_preview = $true
-    }
-    if ($parseMode) { $bodyObj["parse_mode"] = $parseMode }
-    $jsonBody = $bodyObj | ConvertTo-Json -Compress
-    try {
-        $res = Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($jsonBody)) -TimeoutSec 15
-        if ($res.ok -and $res.result) {
-            return $res.result.message_id
+    if ([string]::IsNullOrWhiteSpace($text)) { return $null }
+
+    $chunks = Split-TelegramText -text $text -maxLen 3500
+    $lastMsgId = $null
+    $totalParts = $chunks.Count
+
+    for ($i = 0; $i -lt $totalParts; $i++) {
+        $chunkText = $chunks[$i]
+        if ($totalParts -gt 1) {
+            $chunkText = "<b>[Phần $($i + 1)/$totalParts]</b>`n" + $chunkText
         }
-    } catch {
-        if ($parseMode) {
-            try {
-                $bodyObj.Remove("parse_mode")
-                $plainBody = $bodyObj | ConvertTo-Json -Compress
-                $res = Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($plainBody)) -TimeoutSec 10
-                if ($res.ok -and $res.result) { return $res.result.message_id }
-            } catch {}
+
+        $url = "https://api.telegram.org/bot$botToken/sendMessage"
+        $bodyObj = @{
+            chat_id = $chatId
+            text = $chunkText
+            disable_web_page_preview = $true
         }
-        Write-Host "Lỗi gửi tin nhắn: $_" -ForegroundColor Red
+        if ($parseMode) { $bodyObj["parse_mode"] = $parseMode }
+        $jsonBody = $bodyObj | ConvertTo-Json -Compress
+
+        try {
+            $res = Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($jsonBody)) -TimeoutSec 15
+            if ($res.ok -and $res.result) { $lastMsgId = $res.result.message_id }
+        } catch {
+            if ($parseMode) {
+                try {
+                    $bodyObj.Remove("parse_mode")
+                    $plainBody = $bodyObj | ConvertTo-Json -Compress
+                    $res = Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($plainBody)) -TimeoutSec 10
+                    if ($res.ok -and $res.result) { $lastMsgId = $res.result.message_id }
+                } catch {}
+            }
+            Write-Host "Lỗi gửi tin nhắn: $_" -ForegroundColor Red
+        }
+
+        if ($totalParts -gt 1 -and $i -lt ($totalParts - 1)) {
+            Start-Sleep -Milliseconds 150
+        }
     }
-    return $null
+    return $lastMsgId
 }
 
 function Edit-TelegramMessage {
@@ -1993,6 +2038,16 @@ while ($true) {
                 elseif ($text -eq "/root_reload" -and $global:isSuperAdmin) {
                     Send-TelegramMessage -chatId $chatId -text "🔄 [ROOT]: Đang khởi động lại Bot và Mirror Worker..."
                     Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"Start-Sleep -Seconds 1; Get-CimInstance Win32_Process -Filter 'Name = 'powershell.exe'' | Where-Object { `$_.CommandLine -like '*bot.ps1*' } | Stop-Process -Force`"" -WindowStyle Hidden
+                    continue
+                }
+                elseif ($text -eq "/cloud" -or $text -eq "/switch_cloud") {
+                    $cloudUrl = "https://quiniumthucode.vercel.app/api/webhook"
+                    try {
+                        $setRes = Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/setWebhook?url=$cloudUrl" -Method Get
+                        Send-TelegramMessage -chatId $chatId -text "☁️ <b>[ĐÃ CHUYỂN SANG VERCEL CLOUD 24/7]</b>`n──────────────────────`nWebhook đã chuyển sang Vercel Serverless thành công!`nBây giờ bro có thể tắt máy tính hoặc cúp điện thoải mái mà bot vẫn trò chuyện và code bình thường 24/7!`n`n👉 Khi bật lại máy tính, gõ <code>/pc</code> để chuyển quyền lại cho máy tính."
+                    } catch {
+                        Send-TelegramMessage -chatId $chatId -text "Lỗi chuyển sang Cloud: $_"
+                    }
                     continue
                 }
                 elseif ($text -eq "/root_exit" -and $global:isSuperAdmin) {

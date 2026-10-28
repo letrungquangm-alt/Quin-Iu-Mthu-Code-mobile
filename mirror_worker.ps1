@@ -60,10 +60,37 @@ function Convert-MdToTgHtml {
     return $text
 }
 
+function Split-TelegramText {
+    param([string]$text, [int]$maxLen = 3500)
+    $chunks = [System.Collections.Generic.List[string]]::new()
+    if ([string]::IsNullOrWhiteSpace($text)) { return $chunks }
+
+    while ($text.Length -gt $maxLen) {
+        $splitIdx = $text.LastIndexOf("`n`n", $maxLen)
+        if ($splitIdx -lt ($maxLen / 2)) {
+            $splitIdx = $text.LastIndexOf("`n", $maxLen)
+        }
+        if ($splitIdx -lt ($maxLen / 2)) {
+            $splitIdx = $text.LastIndexOf(". ", $maxLen)
+        }
+        if ($splitIdx -lt ($maxLen / 2)) {
+            $splitIdx = $maxLen
+        } else {
+            $splitIdx += 1
+        }
+
+        $chunk = $text.Substring(0, $splitIdx).Trim()
+        if ($chunk) { $chunks.Add($chunk) }
+        $text = $text.Substring($splitIdx).Trim()
+    }
+    if ($text) { $chunks.Add($text) }
+    return $chunks
+}
+
 function Send-TgLiveStatus {
     param([string]$text, [string]$parseMode = "HTML")
     if ([string]::IsNullOrWhiteSpace($text)) { return $null }
-    if ($text.Length -gt 3800) { $text = $text.Substring(0, 3800) + "`n`n...[Output đã được rút gọn]" }
+    # Không cắt bớt tin nhắn - tự động chia phần
 
     $url = "https://api.telegram.org/bot$botToken/sendMessage"
     $bodyObj = @{
@@ -511,15 +538,20 @@ while ($true) {
                                 $global:lastMirrorSec = 0
                             }
                             $replyText = $entry.content.ToString().Trim()
-                            if ($replyText.Length -gt 3500) {
-                                $replyText = $replyText.Substring(0, 3500) + "`n`n... [Xem tiếp trên màn hình máy tính]"
-                            }
                             $formattedReply = Convert-MdToTgHtml -text $replyText
-                            $doneMsg = "🤖 <b>[MÁY TÍNH PHẢN HỒI XONG]:</b>`n`n$formattedReply"
-                            Write-Host "[MIRROR] Model final response mirrored" -ForegroundColor Magenta
-                            
-                            # Gửi tin nhắn phản hồi chính thức
-                            Send-TgLiveStatus -text $doneMsg
+                            $chunks = Split-TelegramText -text $formattedReply -maxLen 3500
+                            $totalParts = $chunks.Count
+
+                            Write-Host "[MIRROR] Model final response mirrored ($totalParts phần)" -ForegroundColor Magenta
+                            for ($pIdx = 0; $pIdx -lt $totalParts; $pIdx++) {
+                                $partHeader = if ($totalParts -gt 1) { "<b>[Phần $($pIdx + 1)/$totalParts]</b>`n" } else { "" }
+                                $prefix = if ($pIdx -eq 0) { "🤖 <b>[MÁY TÍNH PHẢN HỒI XONG]:</b>`n`n" } else { "" }
+                                $partMsg = "$prefix$partHeader$($chunks[$pIdx])"
+                                Send-TgLiveStatus -text $partMsg
+                                if ($totalParts -gt 1 -and $pIdx -lt ($totalParts - 1)) {
+                                    Start-Sleep -Milliseconds 150
+                                }
+                            }
                             Set-SyncBridgeWorkingStatus -working $false
 
                             # TỰ ĐỘNG XÓA SẠCH CÁC TIN NHẮN TIẾN TRÌNH TẠM THỜI SAU 3 GIÂY
