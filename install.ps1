@@ -1,4 +1,4 @@
-﻿# ========================================================
+# ========================================================
 # QuinloveRin Code - Trình Cài Đặt Tự Động 1-Click Cho Máy Tính Mới
 # ========================================================
 
@@ -8,14 +8,20 @@ param(
     [string]$GhToken = "",
     [string]$VercelToken = "",
     [string]$VercelTeam = "team_ItjW6FczErxCHeZsipuwaeI7",
-    [int64]$AllowedChatId = 2029333412
+    [int64]$AllowedChatId = 2029333412,
+    [string]$ConversationId = "7f7131ce-dc72-490f-97bd-4a675f9dd0c7"
 )
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
-$targetDir = "C:\Users\Administrator\.gemini\antigravity\scratch\telegram-remote-coder"
-$modelDir = "C:\Users\Administrator\.gemini\antigravity\scratch\model\Quin-Iu-Mthu"
+$userProfile = $env:USERPROFILE
+$targetDir = if ($PSScriptRoot) { $PSScriptRoot } else { "$userProfile\.gemini\antigravity\scratch\telegram-remote-coder" }
+$projectsRootDir = Join-Path (Split-Path $targetDir -Parent) "model"
+if (-not (Test-Path $projectsRootDir)) {
+    $projectsRootDir = "$userProfile\.gemini\antigravity\scratch\model"
+}
+$modelDir = Join-Path $projectsRootDir "Quin-Iu-Mthu"
 $repoUrl = "https://github.com/letrungquangm-alt/Quin-Iu-Mthu-Code-mobile.git"
 
 Write-Host "==========================================================" -ForegroundColor Cyan
@@ -28,8 +34,8 @@ if (-not (Test-Path $modelDir)) { New-Item -ItemType Directory -Path $modelDir -
 
 # 2. Tải mã nguồn mới nhất từ GitHub
 $gitExe = "git"
-if (Test-Path "C:\Users\Administrator\.gemini\antigravity\bin\git\cmd\git.exe") {
-    $gitExe = "C:\Users\Administrator\.gemini\antigravity\bin\git\cmd\git.exe"
+if (Test-Path "$userProfile\.gemini\antigravity\bin\git\cmd\git.exe") {
+    $gitExe = "$userProfile\.gemini\antigravity\bin\git\cmd\git.exe"
 }
 
 Set-Location $targetDir
@@ -59,7 +65,7 @@ if (-not (Test-Path $configPath) -and $BotToken) {
         EXECUTION_MODE = "auto"
         MAX_TOKENS = 1000000000
         USED_TOKENS = 160774
-        PROJECTS_ROOT_DIR = "C:\Users\Administrator\.gemini\antigravity\scratch\model"
+        PROJECTS_ROOT_DIR = $projectsRootDir
         CURRENT_PROJECT = "Quin-Iu-Mthu"
         CURRENT_PROJECT_PATH = $modelDir
     }
@@ -73,7 +79,7 @@ $syncData = @{
     messages = @()
     active = $true
     syncCode = "GM_6585_Mthu"
-    conversationId = ""
+    conversationId = $ConversationId
     status = "CONNECTED"
     isWorking = $false
     connectedAt = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")

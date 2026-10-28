@@ -31,7 +31,7 @@ $selectedModel = if ($config.SELECTED_MODEL) { $config.SELECTED_MODEL.ToString()
 $modelId = if ($config.MODEL_ID) { $config.MODEL_ID.ToString().Trim() } else { "gemini-3.8-flash" }
 $thinkingLevel = if ($config.THINKING_LEVEL) { $config.THINKING_LEVEL.ToString().Trim() } else { "high" }
 $executionMode = if ($config.EXECUTION_MODE) { $config.EXECUTION_MODE.ToString().Trim() } else { "auto" }
-$projectsRootDir = if ($config.PROJECTS_ROOT_DIR) { $config.PROJECTS_ROOT_DIR.ToString().Trim() } else { "C:\Users\Administrator\.gemini\antigravity\scratch\model" }
+$projectsRootDir = if ($config.PROJECTS_ROOT_DIR) { $config.PROJECTS_ROOT_DIR.ToString().Trim() } else { "$env:USERPROFILE\.gemini\antigravity\scratch\model" }
 $currentProject = if ($config.CURRENT_PROJECT) { $config.CURRENT_PROJECT.ToString().Trim() } else { "telegram-remote-coder" }
 $currentProjectPath = if ($config.CURRENT_PROJECT_PATH) { $config.CURRENT_PROJECT_PATH.ToString().Trim() } else { $rootDir }
 $global:waitingForNewProjectName = $false
@@ -429,7 +429,7 @@ function Send-ToAntigravityChat {
         try {
             $bridge = Get-Content $syncBridgePath -Raw -Encoding UTF8 | ConvertFrom-Json
             if ($bridge.active -and $bridge.conversationId) {
-                $langServer = "C:\Users\Administrator\AppData\Local\Programs\antigravity\resources\bin\language_server.exe"
+                $langServer = if (Test-Path "$env:LOCALAPPDATA\Programs\antigravity\resources\bin\language_server.exe") { "$env:LOCALAPPDATA\Programs\antigravity\resources\bin\language_server.exe" } else { "C:\Users\Administrator\AppData\Local\Programs\antigravity\resources\bin\language_server.exe" }
                 if (Test-Path $langServer) {
                     & $langServer agentapi send-message $bridge.conversationId "[Điện thoại gửi]: $text" 2>&1 | Out-Null
                     return $true
@@ -1454,7 +1454,7 @@ while ($true) {
                 if ($text -match '(ghp_[a-zA-Z0-9]{30,}|github_pat_[a-zA-Z0-9_]{30,})') {
                     $token = $matches[1]
                     Send-TelegramMessage -chatId $chatId -text "🔑 Đã nhận GitHub Token! Đang tiến hành push toàn bộ mã nguồn lên GitHub..."
-                    $gitExe = "C:\Users\Administrator\.gemini\antigravity\bin\git\cmd\git.exe"
+                    $gitExe = if (Get-Command git -ErrorAction SilentlyContinue) { "git" } else { "$env:USERPROFILE\.gemini\antigravity\bin\git\cmd\git.exe" }
                     $pushUrl = "https://$token@github.com/letrungquangm-alt/Quin-Iu-Mthu-Code-mobile.git"
                     
                     Set-Location $rootDir
@@ -1559,11 +1559,11 @@ while ($true) {
                         "Hãy cài đặt và thiết lập toàn diện hệ sinh thái QuinloveRin Code trên máy tính này cho tôi theo các bước tự động sau:",
                         "",
                         "1. Tạo thư mục làm việc:",
-                        "New-Item -ItemType Directory -Path 'C:\Users\Administrator\.gemini\antigravity\scratch\telegram-remote-coder' -Force",
-                        "New-Item -ItemType Directory -Path 'C:\Users\Administrator\.gemini\antigravity\scratch\model\Quin-Iu-Mthu' -Force",
+                        "New-Item -ItemType Directory -Path "$env:USERPROFILE\.gemini\antigravity\scratch\telegram-remote-coder" -Force",
+                        "New-Item -ItemType Directory -Path "$env:USERPROFILE\.gemini\antigravity\scratch\model\Quin-Iu-Mthu" -Force",
                         "",
                         "2. Tải và chạy script cài đặt tự động từ GitHub:",
-                        "Set-Location 'C:\Users\Administrator\.gemini\antigravity\scratch\telegram-remote-coder'",
+                        "Set-Location "$env:USERPROFILE\.gemini\antigravity\scratch\telegram-remote-coder"",
                         "git clone https://github.com/letrungquangm-alt/Quin-Iu-Mthu-Code-mobile.git .",
                         "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -BotToken '$bToken' -GeminiKey '$gKey' -GhToken '$ghTok' -VercelToken '$vTok' -VercelTeam '$vTeam'",
                         "",

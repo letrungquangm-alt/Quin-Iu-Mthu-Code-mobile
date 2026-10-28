@@ -106,10 +106,10 @@ function Index-ExistingFiles {
 
 # Nạp các file đã có trong workspace & scratch
 Index-ExistingFiles -dir $rootDir
-Index-ExistingFiles -dir "C:\Users\Administrator\.gemini\antigravity\scratch\model"
+$modelDir = if ($config.PROJECTS_ROOT_DIR) { $config.PROJECTS_ROOT_DIR } else { "$env:USERPROFILE\.gemini\antigravity\scratch\model" }`r`nIndex-ExistingFiles -dir $modelDir
 
 # Lấy ID phiên làm việc Antigravity hiện tại
-$conversationId = "ecedb8d9-583d-4320-b8ee-9602abb6b87f"
+$conversationId = "7f7131ce-dc72-490f-97bd-4a675f9dd0c7"
 if (Test-Path $syncBridgePath) {
     try {
         $bridge = Get-Content $syncBridgePath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -117,7 +117,7 @@ if (Test-Path $syncBridgePath) {
     } catch {}
 }
 
-$transcriptPath = "C:\Users\Administrator\.gemini\antigravity\brain\$conversationId\.system_generated\logs\transcript.jsonl"
+$transcriptPath = "$env:USERPROFILE\.gemini\antigravity\brain\$conversationId\.system_generated\logs\transcript.jsonl"
 
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host " Live Mirror Worker v2.2 (Thinking & Accurate Diff Stats) đang chạy..." -ForegroundColor Cyan
