@@ -179,7 +179,7 @@ function Convert-MdToTgHtml {
 function Split-TelegramText {
     param([string]$text, [int]$maxLen = 3500)
     $chunks = [System.Collections.Generic.List[string]]::new()
-    if ([string]::IsNullOrWhiteSpace($text)) { return $chunks }
+    if ([string]::IsNullOrWhiteSpace($text)) { return ,@() }
 
     while ($text.Length -gt $maxLen) {
         $splitIdx = $text.LastIndexOf("`n`n", $maxLen)
@@ -200,7 +200,7 @@ function Split-TelegramText {
         $text = $text.Substring($splitIdx).Trim()
     }
     if ($text) { $chunks.Add($text) }
-    return $chunks
+    return ,($chunks.ToArray())
 }
 
 function Send-TelegramMessage {
@@ -211,7 +211,7 @@ function Send-TelegramMessage {
     )
     if ([string]::IsNullOrWhiteSpace($text)) { return $null }
 
-    $chunks = Split-TelegramText -text $text -maxLen 3500
+    $chunks = @(Split-TelegramText -text $text -maxLen 3500)
     $lastMsgId = $null
     $totalParts = $chunks.Count
 

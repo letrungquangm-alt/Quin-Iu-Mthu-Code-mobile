@@ -3,7 +3,7 @@ param([string]$text, [string]$parseMode = "HTML")
 function Split-TelegramText {
     param([string]$text, [int]$maxLen = 3500)
     $chunks = [System.Collections.Generic.List[string]]::new()
-    if ([string]::IsNullOrWhiteSpace($text)) { return $chunks }
+    if ([string]::IsNullOrWhiteSpace($text)) { return ,@() }
 
     while ($text.Length -gt $maxLen) {
         $splitIdx = $text.LastIndexOf("`n`n", $maxLen)
@@ -24,14 +24,14 @@ function Split-TelegramText {
         $text = $text.Substring($splitIdx).Trim()
     }
     if ($text) { $chunks.Add($text) }
-    return $chunks
+    return ,($chunks.ToArray())
 }
 
 $configPath = Join-Path $PSScriptRoot "config.json"
 if (Test-Path $configPath) {
     $cfg = Get-Content $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
     $url = "https://api.telegram.org/bot$($cfg.BOT_TOKEN)/sendMessage"
-    $chunks = Split-TelegramText -text $text -maxLen 3500
+    $chunks = @(Split-TelegramText -text $text -maxLen 3500)
     $total = $chunks.Count
 
     for ($i = 0; $i -lt $total; $i++) {

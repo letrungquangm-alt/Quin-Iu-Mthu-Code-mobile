@@ -63,7 +63,7 @@ function Convert-MdToTgHtml {
 function Split-TelegramText {
     param([string]$text, [int]$maxLen = 3500)
     $chunks = [System.Collections.Generic.List[string]]::new()
-    if ([string]::IsNullOrWhiteSpace($text)) { return $chunks }
+    if ([string]::IsNullOrWhiteSpace($text)) { return ,@() }
 
     while ($text.Length -gt $maxLen) {
         $splitIdx = $text.LastIndexOf("`n`n", $maxLen)
@@ -84,7 +84,7 @@ function Split-TelegramText {
         $text = $text.Substring($splitIdx).Trim()
     }
     if ($text) { $chunks.Add($text) }
-    return $chunks
+    return ,($chunks.ToArray())
 }
 
 function Send-TgLiveStatus {
@@ -539,7 +539,7 @@ while ($true) {
                             }
                             $replyText = $entry.content.ToString().Trim()
                             $formattedReply = Convert-MdToTgHtml -text $replyText
-                            $chunks = Split-TelegramText -text $formattedReply -maxLen 3500
+                            $chunks = @(Split-TelegramText -text $formattedReply -maxLen 3500)
                             $totalParts = $chunks.Count
 
                             Write-Host "[MIRROR] Model final response mirrored ($totalParts phần)" -ForegroundColor Magenta
