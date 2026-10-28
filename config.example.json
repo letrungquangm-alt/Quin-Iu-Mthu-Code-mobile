@@ -1,0 +1,13 @@
+﻿{
+    "BOT_TOKEN": "YOUR_TELEGRAM_BOT_TOKEN",
+    "ALLOWED_CHAT_ID": 0,
+    "GEMINI_API_KEY": "YOUR_GEMINI_API_KEY",
+    "PRO_EXPIRATION_DATE": "",
+    "SELECTED_MODEL": "Gemini 3.8 Flash (High)",
+    "MODEL_ID": "gemini-3.8-flash",
+    "THINKING_LEVEL": "high",
+    "EXECUTION_MODE": "auto",
+    "MAX_TOKENS": 1000000000,
+    "USED_TOKENS": 0,
+    "PROJECTS_ROOT_DIR": "C:\\Users\\Administrator\\.gemini\\antigravity\\scratch\\model"
+}

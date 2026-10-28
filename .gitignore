@@ -1,0 +1,9 @@
+﻿config.json
+chat_history.json
+sync_bridge.json
+*.log
+backups/
+req.json
+test_*.json
+test_*.ps1
+test_*.txt
