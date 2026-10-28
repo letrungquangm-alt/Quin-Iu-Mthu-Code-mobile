@@ -1,4 +1,4 @@
-﻿# ========================================================
+# ========================================================
 # Telegram Remote Coder v8.4 - Prompt Queue & Priority Engine
 # Hàng đợi Prompt đa nhiệm, Ưu tiên Send Now & Chỉnh sửa
 # ========================================================
@@ -2048,6 +2048,13 @@ while ($true) {
                     } catch {
                         Send-TelegramMessage -chatId $chatId -text "Lỗi chuyển sang Cloud: $_"
                     }
+                    continue
+                }
+                elseif ($text -match '^(?i)(/pull|/sync|đồng bộ|dong bo|kéo code|keo code)$') {
+                    Send-TelegramMessage -chatId $chatId -text "🐙 <b>[GITOPS SYNC]:</b> Đang kéo mã nguồn mới nhất từ GitHub về ổ cứng máy tính..."
+                    $targetDir = if ($currentProjectPath -and (Test-Path $currentProjectPath)) { $currentProjectPath } else { $rootDir }
+                    $gitOut = powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Set-Location '$targetDir'; git pull 2>&1" | Out-String
+                    Send-TelegramMessage -chatId $chatId -text "✅ <b>[KẾT QUẢ ĐỒNG BỘ GITHUB]:</b>`n<pre><code>$gitOut</code></pre>`n📁 <i>Thư mục: $targetDir</i>"
                     continue
                 }
                 elseif ($text -eq "/root_exit" -and $global:isSuperAdmin) {
