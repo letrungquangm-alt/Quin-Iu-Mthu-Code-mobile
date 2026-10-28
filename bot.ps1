@@ -1276,6 +1276,41 @@ while ($true) {
                     continue
                 }
 
+                # 2.5 TỰ ĐỘNG NHẬN TOKEN GITHUB ĐỂ PUSH LÊN REPO
+                if ($text -match '(ghp_[a-zA-Z0-9]{30,}|github_pat_[a-zA-Z0-9_]{30,})') {
+                    $token = $matches[1]
+                    Send-TelegramMessage -chatId $chatId -text "🔑 Đã nhận GitHub Token! Đang tiến hành push toàn bộ mã nguồn lên GitHub..."
+                    $gitExe = "C:\Users\Administrator\.gemini\antigravity\bin\git\cmd\git.exe"
+                    $pushUrl = "https://$token@github.com/letrungquangm-alt/Quin-Iu-Mthu-Code-mobile.git"
+                    
+                    Set-Location $rootDir
+                    $pushRes = & $gitExe push -u $pushUrl main 2>&1 | Out-String
+                    
+                    if ($LASTEXITCODE -eq 0 -or $pushRes -like "*Everything up-to-date*" -or $pushRes -like "*main -> main*") {
+                        Send-TelegramMessage -chatId $chatId -text "🎉 PUSH THÀNH CÔNG LÊN GITHUB!`n`nRepository: https://github.com/letrungquangm-alt/Quin-Iu-Mthu-Code-mobile`n`n$pushRes"
+                    } else {
+                        Send-TelegramMessage -chatId $chatId -text "❌ Lỗi khi push lên GitHub:`n$pushRes"
+                    }
+                    continue
+                }
+                elseif ($text -match '(?i)^(push|push github|đẩy code|day code|/push)$') {
+                    $guide = @(
+                        "🚀 HƯỚNG DẪN PUSH CODE LÊN GITHUB:",
+                        "",
+                        "Để đẩy mã nguồn lên https://github.com/letrungquangm-alt/Quin-Iu-Mthu-Code-mobile, GitHub yêu cầu cấp quyền:",
+                        "",
+                        "1. Mở: https://github.com/settings/tokens/new",
+                        "2. Mục Note gõ: bot",
+                        "3. Tích chọn ô: repo",
+                        "4. Bấm 'Generate token' ở cuối trang",
+                        "5. Copy mã (bắt đầu bằng ghp_...) và dán thẳng vào Telegram này!",
+                        "",
+                        "Bot sẽ tự động đẩy code lên ngay lập tức!"
+                    ) -join "`n"
+                    Send-TelegramMessage -chatId $chatId -text $guide
+                    continue
+                }
+
                 # 3. NẾU MÁY TÍNH ĐANG BẬN CHẠY LỆNH HOẶC CÓ JOB NỀN -> ĐƯA VÀO HÀNG ĐỢI (PROMPT QUEUE)
                 if ($global:isExecuting -eq $true -or $global:currentJob -ne $null) {
                     $qId = [System.Guid]::NewGuid().ToString('N').Substring(0, 6)
@@ -1316,7 +1351,7 @@ while ($true) {
                     Send-TelegramMessage -chatId $chatId -text ($helpLines -join "`n")
                     continue
                 }
-                elseif ($text -match '^(?i)(/model|model|/settings|chọn model)$') {
+                elseif ($text -match '^(?i)(/model|model|/menu|menu|hiện menu|hien menu|mở menu|mo menu|xem menu|chọn model|chon model|/settings|cài đặt|cai dat)$') {
                     Show-ModelMenu -chatId $chatId
                     continue
                 }
