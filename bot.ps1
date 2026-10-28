@@ -772,11 +772,6 @@ function Execute-UserPrompt {
     $preview = if ($text.Length -gt 35) { $text.Substring(0, 35) + "..." } else { $text }
     $global:currentExecutingPrompt = "pro: $preview"
 
-    if (Check-SyncBridgeStatus) {
-        Append-SyncMessage -sender "phone" -text $text
-        Send-ToAntigravityChat -text $text
-    }
-
     # 1. Các lệnh cài đặt & cấu hình nhanh
     if ($text -match '(?i)(3\.8|gemini 3\.8)') {
         $level = "high"
@@ -879,8 +874,18 @@ function Execute-UserPrompt {
         Send-TelegramMessage -chatId $chatId -text "⏹️ Đã dừng lệnh đang chạy và xóa sạch hàng đợi!"
         return
     }
-    # 2. KHỞI CHẠY TIẾN TRÌNH THỰC THI CHẠY NỀN (START-JOB)
-    # Giúp Main Thread luôn rảnh rỗi để bắt ngay các tin nhắn mới từ Telegram xếp vào Hàng Đợi (Prompt Queue)
+    # 2. KHỞI CHẠY TIẾN TRÌNH THỰC THI CHẠY NỀN
+    if (Check-SyncBridgeStatus) {
+        # ĐÃ KẾT NỐI VỚI MÁY TÍNH:
+        # Chuyển hoàn toàn sang Antigravity PC xử lý, mirror_worker sẽ phản chiếu kết quả trực tiếp.
+        # KHÔNG chạy worker_execute.ps1 để tránh trùng 2 model chạy song song!
+        Append-SyncMessage -sender "phone" -text $text
+        Send-ToAntigravityChat -text $text
+        Show-ScreenNotification -title "📱 Tin Nhắn Đồng Bộ Từ Điện Thoại" -msg "$preview" -durationSec 4
+        return
+    }
+
+    # CHẾ ĐỘ ĐỘC LẬP (STANDALONE): KHI KHÔNG KẾT NỐI MÁY TÍNH
     Send-TelegramAction -chatId $chatId -action "typing"
     $global:currentJobPrompt = $preview
     $global:jobStartTime = [DateTime]::Now
@@ -904,6 +909,20 @@ Write-Host "==========================================================" -Foregro
 $offset = 0
 
 while ($true) {
+    # 0. KIỂM TRA TRẠNG THÁI MÁY TÍNH KHI ĐANG KẾT NỐI ĐỒNG BỘ
+    if (Check-SyncBridgeStatus) {
+        try {
+            if (Test-Path $syncBridgePath) {
+                $brData = Get-Content $syncBridgePath -Raw -Encoding UTF8 | ConvertFrom-Json
+                if ($brData.isWorking -eq $false -and $global:isExecuting -eq $true -and $null -eq $global:currentJob) {
+                    $global:isExecuting = $false
+                    $global:currentExecutingPrompt = ""
+                    Check-And-Run-Next-In-Queue -chatId $allowedChatId
+                }
+            }
+        } catch {}
+    }
+
     # 1. KIỂM TRA TIẾN TRÌNH LỆNH CHẠY NỀN HIỆN TẠI (CHẠY THEO GIÂY LIÊN TỤC VÀ KẾT THÚC KHI XONG)
     if ($global:currentJob) {
         if ($global:currentJob.State -eq 'Running') {

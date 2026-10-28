@@ -51,6 +51,17 @@ function Delete-TgMessage {
     } catch {}
 }
 
+function Set-SyncBridgeWorkingStatus {
+    param([bool]$working)
+    if (Test-Path $syncBridgePath) {
+        try {
+            $br = Get-Content $syncBridgePath -Raw -Encoding UTF8 | ConvertFrom-Json
+            $br | Add-Member -NotePropertyName "isWorking" -NotePropertyValue $working -Force
+            $br | ConvertTo-Json -Depth 5 | Set-Content $syncBridgePath -Encoding UTF8
+        } catch {}
+    }
+}
+
 function Edit-TgMessage {
     param([int]$messageId, [string]$text)
     if (-not $messageId -or [string]::IsNullOrWhiteSpace($text)) { return }
@@ -65,6 +76,17 @@ function Edit-TgMessage {
     try {
         Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($jsonBody)) -TimeoutSec 5 | Out-Null
     } catch {}
+}
+
+function Set-SyncBridgeWorkingStatus {
+    param([bool]$working)
+    if (Test-Path $syncBridgePath) {
+        try {
+            $br = Get-Content $syncBridgePath -Raw -Encoding UTF8 | ConvertFrom-Json
+            $br | Add-Member -NotePropertyName "isWorking" -NotePropertyValue $working -Force
+            $br | ConvertTo-Json -Depth 5 | Set-Content $syncBridgePath -Encoding UTF8
+        } catch {}
+    }
 }
 
 # Quản lý danh sách file đã biết trong project để phân biệt chính xác Tạo mới (+N -0) vs Sửa cũ (+N -M)
@@ -136,6 +158,7 @@ while ($true) {
 
                         # 1. BẮT SUY NGHĨ CỦA AI (CHẠY THEO GIÂY LIÊN TỤC VÀ KẾT THÚC BẰNG THỜI GIAN/NỘI DUNG)
                         if ($entry.thinking) {
+                            Set-SyncBridgeWorkingStatus -working $true
                             if (-not $global:mirrorThinkingStart) {
                                 $global:mirrorThinkingStart = [DateTime]::Now
                                 $global:lastMirrorSec = 1
@@ -152,6 +175,7 @@ while ($true) {
 
                         # 2. BẮT TRẠNG THÁI WORKING / TOOL CALLS (KẾT THÚC SUY NGHĨ NẾU CÓ)
                         if ($entry.tool_calls) {
+                            Set-SyncBridgeWorkingStatus -working $true
                             if ($global:mirrorThinkingStart) {
                                 $elapsedSec = [math]::Max(1, [int]([DateTime]::Now - $global:mirrorThinkingStart).TotalSeconds)
                                 Edit-TgMessage -messageId $global:mirrorThinkingMsgId -text "🧠 [AI ĐÃ SUY NGHĨ XONG - ${elapsedSec}s]"
@@ -329,6 +353,7 @@ while ($true) {
                             
                             # Gửi tin nhắn phản hồi chính thức
                             Send-TgLiveStatus -text $doneMsg
+                            Set-SyncBridgeWorkingStatus -working $false
 
                             # TỰ ĐỘNG XÓA SẠCH CÁC TIN NHẮN TIẾN TRÌNH TẠM THỜI (để giữ box chat Telegram gọn gàng sạch sẽ)
                             if ($tempWorkingMsgIds.Count -gt 0) {
