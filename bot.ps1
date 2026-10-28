@@ -515,7 +515,7 @@ function Send-ToAntigravityChat {
             if ($bridge.active -and $bridge.conversationId) {
                 $langServer = if (Test-Path "$env:LOCALAPPDATA\Programs\antigravity\resources\bin\language_server.exe") { "$env:LOCALAPPDATA\Programs\antigravity\resources\bin\language_server.exe" } else { "C:\Users\Administrator\AppData\Local\Programs\antigravity\resources\bin\language_server.exe" }
                 if (Test-Path $langServer) {
-                    & $langServer agentapi send-message $bridge.conversationId "[Điện thoại gửi]: $text" 2>&1 | Out-Null
+                    Start-Process -FilePath $langServer -ArgumentList "agentapi", "send-message", $bridge.conversationId, "[Điện thoại gửi]: $text" -WindowStyle Hidden
                     return $true
                 }
             }
@@ -947,12 +947,7 @@ function Execute-UserPrompt {
     }
     # 2. KHỞI CHẠY TIẾN TRÌNH THỰC THI CHẠY NỀN
     if (Check-SyncBridgeStatus) {
-        # ĐÃ KẾT NỐI VỚI MÁY TÍNH:
-        Append-SyncMessage -sender "phone" -text $text
-        Send-ToAntigravityChat -text $text
-        Show-ScreenNotification -title "📱 Tin Nhắn Đồng Bộ Từ Điện Thoại" -msg "$preview" -durationSec 4
-
-        # GỬI NGAY THÔNG BÁO: ĐANG ĐỌC PROMPT CỦA BẠN (1s)...
+        # 1. GỬI NGAY PHẢN HỒI TỨC THÌ ĐẦU TIÊN CHO TELEGRAM (< 0.5s)
         $global:promptReadingStart = [DateTime]::Now
         $global:promptReadingPreview = $preview
         $global:lastReadingSec = 1
@@ -968,6 +963,11 @@ function Execute-UserPrompt {
                 $br | ConvertTo-Json -Depth 5 | Set-Content $syncBridgePath -Encoding UTF8
             } catch {}
         }
+
+        # 2. Gửi ngầm không chặn (Non-blocking) vào Antigravity PC
+        Append-SyncMessage -sender "phone" -text $text
+        Send-ToAntigravityChat -text $text
+        Show-ScreenNotification -title "📱 Tin Nhắn Đồng Bộ Từ Điện Thoại" -msg "$preview" -durationSec 3
         return
     }
 
@@ -1602,13 +1602,19 @@ while ($true) {
                     $fileId = $largestPhoto.file_id
                     $userCaption = if ($msg.caption) { $msg.caption.Trim() } else { "Hãy quan sát bức ảnh này và phân tích, hỗ trợ tôi." }
 
-                    # 1. Tạo thư mục lưu trữ ảnh lâu dài trên máy tính
+                    # 1. GỬI NGAY THÔNG BÁO TỨC THÌ ĐẦU TIÊN (< 0.5s) CHO TELEGRAM
+                    $global:promptReadingStart = [DateTime]::Now
+                    $global:promptReadingPreview = if ($msg.caption) { "[Ảnh] $userCaption" } else { "[Ảnh] Phân tích hình ảnh" }
+                    $global:lastReadingSec = 1
+                    $safeCaption = [System.Net.WebUtility]::HtmlEncode($userCaption)
+                    $global:promptReadingMsgId = Send-TelegramMessage -chatId $chatId -text "📷 <b>[ĐÃ NHẬN ẢNH - ĐANG TẢI & PHÂN TÍCH (1s)...]</b>`n<blockquote expandable><i>`"$safeCaption`"</i></blockquote>"
+
+                    # 2. Tải ảnh từ Telegram API về máy tính trong nền
                     $uploadDir = Join-Path $currentProjectPath "uploads"
                     if (-not (Test-Path $uploadDir)) { New-Item -ItemType Directory -Path $uploadDir -Force | Out-Null }
                     $imgFileName = "photo_$(Get-Date -Format 'yyyyMMdd_HHmmss').jpg"
                     $savedImgPath = Join-Path $uploadDir $imgFileName
 
-                    # 2. Tải ảnh từ Telegram API về máy tính
                     $downloadOk = $false
                     try {
                         $getFileUrl = "https://api.telegram.org/bot$botToken/getFile?file_id=$fileId"
@@ -1622,24 +1628,16 @@ while ($true) {
                     } catch {}
 
                     if (-not $downloadOk) {
-                        Send-TelegramMessage -chatId $chatId -text "❌ Không thể tải ảnh từ Telegram về máy tính!"
+                        Edit-TelegramMessage -chatId $chatId -messageId $global:promptReadingMsgId -text "❌ Không thể tải ảnh từ Telegram về máy tính!"
                         continue
                     }
-
-                    Show-ScreenNotification -title "📷 Telegram: Đã Nhận Ảnh" -msg "$userCaption" -durationSec 5
 
                     # 3. NẾU ĐANG KẾT NỐI ĐỒNG BỘ VỚI ANTIGRAVITY PC:
                     if (Check-SyncBridgeStatus) {
                         $fullPrompt = "[Điện thoại gửi ảnh]: $userCaption`nĐường dẫn file ảnh trên máy tính: $savedImgPath"
                         Append-SyncMessage -sender "phone" -text $fullPrompt
                         Send-ToAntigravityChat -text $fullPrompt
-
-                        # Bật đồng hồ bấm giây đọc ảnh & prompt
-                        $global:promptReadingStart = [DateTime]::Now
-                        $global:promptReadingPreview = "[Ảnh: $imgFileName] $userCaption"
-                        $global:lastReadingSec = 1
-                        $safeCaption = [System.Net.WebUtility]::HtmlEncode($userCaption)
-                        $global:promptReadingMsgId = Send-TelegramMessage -chatId $chatId -text "📷 <b>[ĐÃ NHẬN ẢNH & ĐANG PHÂN TÍCH (1s)...]</b>`n📁 <b>File:</b> <code>$savedImgPath</code>`n<blockquote expandable><i>`"$safeCaption`"</i></blockquote>"
+                        Show-ScreenNotification -title "📷 Telegram: Đã Nhận Ảnh" -msg "$userCaption" -durationSec 3
 
                         if (Test-Path $syncBridgePath) {
                             try {
