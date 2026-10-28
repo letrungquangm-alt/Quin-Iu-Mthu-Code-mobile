@@ -1,6 +1,7 @@
 ﻿# ========================================================
-# Telegram Remote Coder - Live Activity Mirror Worker v2.5 (Color-Coded File Ops)
-# Tự động hiển thị tiến trình: In đậm, 🟢 Tạo mới (Xanh lá), 🟠 Sửa cũ (Cam), 🔴 Xóa (Đỏ)
+# Telegram Remote Coder - Live Activity Mirror Worker v2.6
+# Chữ có màu thật (Diff Syntax: + Xanh lá, ! Cam, - Đỏ)
+# Đồng hồ bấm giây live cho mọi khoảng lặng & Nhận diện ĐÃ ĐỌC PROMPT
 # ========================================================
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -137,7 +138,26 @@ function Set-SyncBridgeWorkingStatus {
     }
 }
 
-# Quản lý danh sách file đã biết trong project để phân biệt chính xác Tạo mới (+N -0) vs Sửa cũ (+N -M)
+function Finish-PromptReadingStatus {
+    if (Test-Path $syncBridgePath) {
+        try {
+            $br = Get-Content $syncBridgePath -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($br.promptReadingMsgId -and $br.promptReadingStart) {
+                $pStart = [DateTime]::Parse($br.promptReadingStart)
+                $readSec = [math]::Max(1, [int]([DateTime]::Now - $pStart).TotalSeconds)
+                $pPrev = if ($br.promptReadingPreview) { [System.Net.WebUtility]::HtmlEncode($br.promptReadingPreview) } else { "" }
+                Edit-TgMessage -messageId ([int]$br.promptReadingMsgId) -text "✅ <b>[ĐÃ ĐỌC XONG PROMPT - ${readSec}s]</b>`n<blockquote expandable><i>`"$pPrev`"</i></blockquote>"
+                
+                $br.promptReadingMsgId = $null
+                $br.promptReadingStart = $null
+                $br.promptReadingPreview = $null
+                $br | ConvertTo-Json -Depth 5 | Set-Content $syncBridgePath -Encoding UTF8
+            }
+        } catch {}
+    }
+}
+
+# Quản lý danh sách file đã biết trong project để phân biệt chính xác Tạo mới vs Sửa cũ
 $projectKnownFiles = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
 
 function Index-ExistingFiles {
@@ -169,7 +189,7 @@ if (Test-Path $syncBridgePath) {
 $transcriptPath = "$env:USERPROFILE\.gemini\antigravity\brain\$conversationId\.system_generated\logs\transcript.jsonl"
 
 Write-Host "==========================================================" -ForegroundColor Cyan
-Write-Host " Live Mirror Worker v2.5 (Color-Coded File Ops) đang chạy..." -ForegroundColor Cyan
+Write-Host " Live Mirror Worker v2.6 (Diff Colors & Live Timers) đang chạy..." -ForegroundColor Cyan
 Write-Host " Theo dõi transcript: $transcriptPath" -ForegroundColor DarkCyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 
@@ -197,8 +217,19 @@ $global:activeWorkingMsgId = $null
 $global:activeWorkingTitle = ""
 $global:lastWorkingSec = 0
 
+$global:planningTrackerStart = $null
+$global:planningTrackerMsgId = $null
+$global:lastPlanningSec = 0
+
 function Start-WorkingTracker {
     param([string]$title)
+    if ($global:planningTrackerStart -and $global:planningTrackerMsgId) {
+        $pSec = [math]::Max(1, [int]([DateTime]::Now - $global:planningTrackerStart).TotalSeconds)
+        Edit-TgMessage -messageId $global:planningTrackerMsgId -text "🧠 <b>[AI ĐÃ XỬ LÝ XONG - ${pSec}s]</b>"
+        $global:planningTrackerStart = $null
+        $global:planningTrackerMsgId = $null
+        $global:lastPlanningSec = 0
+    }
     if ($global:activeWorkingStart -and $global:activeWorkingMsgId) {
         $prevSec = [math]::Max(1, [int]([DateTime]::Now - $global:activeWorkingStart).TotalSeconds)
         Edit-TgMessage -messageId $global:activeWorkingMsgId -text "✅ <b>[MÁY TÍNH ĐÃ HOÀN TẤT - ${prevSec}s]</b>`n$($global:activeWorkingTitle)"
@@ -227,7 +258,7 @@ while ($true) {
             $currThinkSec = [math]::Max(1, [int]([DateTime]::Now - $global:mirrorThinkingStart).TotalSeconds)
             if ($currThinkSec -ge ($global:lastMirrorSec + 2)) {
                 $global:lastMirrorSec = $currThinkSec
-                Edit-TgMessage -messageId $global:mirrorThinkingMsgId -text "🧠 <b>[AI ĐANG SUY NGHĨ (${currThinkSec}s)]</b>$global:lastThinkingSnippet"
+                Edit-TgMessage -messageId $global:mirrorThinkingMsgId -text "🧠 <b>[AI ĐANG SUY NGHĨ (${currThinkSec}s)...]</b>$global:lastThinkingSnippet"
             }
         }
 
@@ -237,6 +268,15 @@ while ($true) {
             if ($currSec -ge ($global:lastWorkingSec + 2)) {
                 $global:lastWorkingSec = $currSec
                 Edit-TgMessage -messageId $global:activeWorkingMsgId -text "⚡ <b>[MÁY TÍNH ĐANG THỰC HIỆN (${currSec}s)...]</b>`n$($global:activeWorkingTitle)"
+            }
+        }
+
+        # 3. Đếm giây liên tục cho khoảng lặng giữa các bước (Planning / Processing)
+        if ($global:planningTrackerStart -and $global:planningTrackerMsgId) {
+            $currPlanSec = [math]::Max(1, [int]([DateTime]::Now - $global:planningTrackerStart).TotalSeconds)
+            if ($currPlanSec -ge ($global:lastPlanningSec + 2)) {
+                $global:lastPlanningSec = $currPlanSec
+                Edit-TgMessage -messageId $global:planningTrackerMsgId -text "🧠 <b>[AI ĐANG XỬ LÝ BƯỚC TIẾP THEO (${currPlanSec}s)...]</b>"
             }
         }
 
@@ -256,7 +296,16 @@ while ($true) {
                         # A. BẮT SUY NGHĨ CỦA AI (CHỈ KHI ĐANG SUY NGHĨ THUẦN TÚY, CHƯA CÓ TOOL CALL)
                         if ($entry.thinking -and -not $entry.tool_calls) {
                             Set-SyncBridgeWorkingStatus -working $true
-                            
+                            Finish-PromptReadingStatus
+
+                            if ($global:planningTrackerStart -and $global:planningTrackerMsgId) {
+                                $pSec = [math]::Max(1, [int]([DateTime]::Now - $global:planningTrackerStart).TotalSeconds)
+                                Edit-TgMessage -messageId $global:planningTrackerMsgId -text "🧠 <b>[AI ĐÃ XỬ LÝ XONG - ${pSec}s]</b>"
+                                $global:planningTrackerStart = $null
+                                $global:planningTrackerMsgId = $null
+                                $global:lastPlanningSec = 0
+                            }
+
                             $cleanThinking = ""
                             $rawThink = $entry.thinking.ToString().Trim()
                             $thinkLines = $rawThink -split "\r?\n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
@@ -270,20 +319,30 @@ while ($true) {
                             if (-not $global:mirrorThinkingStart) {
                                 $global:mirrorThinkingStart = [DateTime]::Now
                                 $global:lastMirrorSec = 1
-                                $global:mirrorThinkingMsgId = Send-TgLiveStatus -text "🧠 <b>[AI ĐANG SUY NGHĨ (1s)]</b>$global:lastThinkingSnippet"
+                                $global:mirrorThinkingMsgId = Send-TgLiveStatus -text "🧠 <b>[AI ĐANG SUY NGHĨ (1s)...]</b>$global:lastThinkingSnippet"
                                 if ($global:mirrorThinkingMsgId) { $tempWorkingMsgIds.Add($global:mirrorThinkingMsgId) }
                             }
                         }
 
-                        # B. BẮT TRẠNG THÁI WORKING / TOOL CALLS (HIỂN THỊ NGAY TOOL SUMMARY ĐẦU DÒNG, MÀU SẮC CHUẨN)
+                        # B. BẮT TRẠNG THÁI WORKING / TOOL CALLS (CHỮ CÓ MÀU: + XANH LÁ, ! CAM, - ĐỎ)
                         if ($entry.tool_calls) {
                             Set-SyncBridgeWorkingStatus -working $true
+                            Finish-PromptReadingStatus
+
                             if ($global:mirrorThinkingStart -and $global:mirrorThinkingMsgId) {
                                 $elapsedSec = [math]::Max(1, [int]([DateTime]::Now - $global:mirrorThinkingStart).TotalSeconds)
                                 Edit-TgMessage -messageId $global:mirrorThinkingMsgId -text "🧠 <b>[AI ĐÃ SUY NGHĨ XONG - ${elapsedSec}s]</b>"
                                 $global:mirrorThinkingStart = $null
                                 $global:mirrorThinkingMsgId = $null
                                 $global:lastMirrorSec = 0
+                            }
+
+                            if ($global:planningTrackerStart -and $global:planningTrackerMsgId) {
+                                $pSec = [math]::Max(1, [int]([DateTime]::Now - $global:planningTrackerStart).TotalSeconds)
+                                Edit-TgMessage -messageId $global:planningTrackerMsgId -text "🧠 <b>[AI ĐÃ XỬ LÝ XONG - ${pSec}s]</b>"
+                                $global:planningTrackerStart = $null
+                                $global:planningTrackerMsgId = $null
+                                $global:lastPlanningSec = 0
                             }
 
                             foreach ($tc in $entry.tool_calls) {
@@ -297,10 +356,10 @@ while ($true) {
                                     $displayCmd = if ($cmd.Length -gt 250) { $cmd.Substring(0, 250) + "... [dài]" } else { $cmd }
                                     $safeCmd = [System.Net.WebUtility]::HtmlEncode($displayCmd)
 
-                                    # Nếu là thao tác XÓA FILE -> Màu đỏ 🔴
+                                    # Nếu là thao tác XÓA FILE -> Chữ màu ĐỎ rực rỡ (-)
                                     if ($cmd -match "(?i)(Remove-Item|rm\s+|del\s+|rmdir|unlink)") {
                                         $actionSummary = if ($rawSummary) { $rawSummary } else { "Xóa file / thư mục" }
-                                        $actionDetailHtml = "🔴 <b>[XÓA FILE / THƯ MỤC]:</b>`n<pre><code class=""language-diff"">- $safeCmd</code></pre>"
+                                        $actionDetailHtml = "<pre><code class=""language-diff"">- [XÓA FILE / THƯ MỤC] $safeCmd</code></pre>"
                                     } else {
                                         $actionSummary = if ($rawSummary) { $rawSummary } else { "Chạy lệnh hệ thống" }
                                         $actionDetailHtml = "▶️ <b>Lệnh:</b> <pre><code class=""language-powershell"">$safeCmd</code></pre>"
@@ -323,9 +382,9 @@ while ($true) {
                                     [void]$projectKnownFiles.Add($rawPath)
                                     [void]$projectKnownFiles.Add($fileName)
 
-                                    # SỬA FILE -> Màu cam 🟠
+                                    # SỬA FILE CŨ -> Chữ màu CAM / VÀNG (!)
                                     $actionSummary = if ($rawSummary) { $rawSummary } else { "Chỉnh sửa code $fileName" }
-                                    $actionDetailHtml = "🟠 <b>[SỬA FILE]:</b> <code>$fileName</code>`n<pre><code class=""language-diff"">+ $linesAdded dòng thêm`n- $linesRemoved dòng sửa</code></pre>"
+                                    $actionDetailHtml = "<pre><code class=""language-diff"">! [SỬA FILE CŨ] $fileName (+$linesAdded dòng thêm / -$linesRemoved dòng sửa)</code></pre>"
                                 }
                                 elseif ($toolName -eq "write_file") {
                                     $rawPath = if ($tc.args.Path) { $tc.args.Path.ToString().Trim('"', ' ') } else { "file" }
@@ -355,14 +414,14 @@ while ($true) {
 
                                         $linesAdded = $contentLines
                                         $actionSummary = if ($rawSummary) { $rawSummary } else { "Cập nhật file $fileName" }
-                                        # SỬA FILE CŨ -> Màu cam 🟠
-                                        $actionDetailHtml = "🟠 <b>[SỬA FILE]:</b> <code>$fileName</code>`n<pre><code class=""language-diff"">+ $linesAdded dòng thêm`n- $linesRemoved dòng sửa</code></pre>"
+                                        # SỬA FILE CŨ -> Chữ màu CAM / VÀNG (!)
+                                        $actionDetailHtml = "<pre><code class=""language-diff"">! [SỬA FILE CŨ] $fileName (+$linesAdded dòng thêm / -$linesRemoved dòng sửa)</code></pre>"
                                     } else {
                                         [void]$projectKnownFiles.Add($rawPath)
                                         [void]$projectKnownFiles.Add($fileName)
                                         $actionSummary = if ($rawSummary) { $rawSummary } else { "Tạo mới file $fileName" }
-                                        # TẠO FILE MỚI -> Màu xanh lá 🟢
-                                        $actionDetailHtml = "🟢 <b>[TẠO FILE MỚI]:</b> <code>$fileName</code>`n<pre><code class=""language-diff"">+ $contentLines dòng mới</code></pre>"
+                                        # TẠO FILE MỚI -> Chữ màu XANH LÁ CÂY (+)
+                                        $actionDetailHtml = "<pre><code class=""language-diff"">+ [TẠO FILE MỚI] $fileName (+$contentLines dòng mới)</code></pre>"
                                     }
                                 }
                                 elseif ($toolName -eq "read_file") {
@@ -422,12 +481,28 @@ while ($true) {
                                     Write-Host "[MIRROR] Output captured" -ForegroundColor DarkGreen
                                     $mid = Send-TgLiveStatus -text $outMsg
                                     if ($mid) { $tempWorkingMsgIds.Add($mid) }
+
+                                    # BẮT ĐẦU ĐẾM GIÂY CHO KHOẢNG LẶNG TIẾP THEO (KHÔNG ĐỂ TRỐNG GIÂY NÀO)
+                                    $global:planningTrackerStart = [DateTime]::Now
+                                    $global:lastPlanningSec = 1
+                                    $global:planningTrackerMsgId = Send-TgLiveStatus -text "🧠 <b>[AI ĐANG XỬ LÝ BƯỚC TIẾP THEO (1s)...]</b>"
+                                    if ($global:planningTrackerMsgId) { $tempWorkingMsgIds.Add($global:planningTrackerMsgId) }
                                 }
                             }
                         }
                         # D. BẮT KẾT QUẢ TRẢ LỜI CUỐI CÙNG (RESPONSE TO USER) -> HOÀN THÀNH LƯỢT WORKING
                         elseif ($entry.type -eq "PLANNER_RESPONSE" -and $entry.content -and -not $entry.tool_calls) {
                             Stop-WorkingTracker
+                            Finish-PromptReadingStatus
+
+                            if ($global:planningTrackerStart -and $global:planningTrackerMsgId) {
+                                $pSec = [math]::Max(1, [int]([DateTime]::Now - $global:planningTrackerStart).TotalSeconds)
+                                Edit-TgMessage -messageId $global:planningTrackerMsgId -text "🧠 <b>[AI ĐÃ XỬ LÝ XONG - ${pSec}s]</b>"
+                                $global:planningTrackerStart = $null
+                                $global:planningTrackerMsgId = $null
+                                $global:lastPlanningSec = 0
+                            }
+
                             if ($global:mirrorThinkingStart -and $global:mirrorThinkingMsgId) {
                                 $elapsedSec = [math]::Max(1, [int]([DateTime]::Now - $global:mirrorThinkingStart).TotalSeconds)
                                 Edit-TgMessage -messageId $global:mirrorThinkingMsgId -text "🧠 <b>[AI ĐÃ SUY NGHĨ XONG - ${elapsedSec}s]</b>"

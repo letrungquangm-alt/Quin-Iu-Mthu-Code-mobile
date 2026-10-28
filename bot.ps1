@@ -948,11 +948,26 @@ function Execute-UserPrompt {
     # 2. KHỞI CHẠY TIẾN TRÌNH THỰC THI CHẠY NỀN
     if (Check-SyncBridgeStatus) {
         # ĐÃ KẾT NỐI VỚI MÁY TÍNH:
-        # Chuyển hoàn toàn sang Antigravity PC xử lý, mirror_worker sẽ phản chiếu kết quả trực tiếp.
-        # KHÔNG chạy worker_execute.ps1 để tránh trùng 2 model chạy song song!
         Append-SyncMessage -sender "phone" -text $text
         Send-ToAntigravityChat -text $text
         Show-ScreenNotification -title "📱 Tin Nhắn Đồng Bộ Từ Điện Thoại" -msg "$preview" -durationSec 4
+
+        # GỬI NGAY THÔNG BÁO: ĐANG ĐỌC PROMPT CỦA BẠN (1s)...
+        $global:promptReadingStart = [DateTime]::Now
+        $global:promptReadingPreview = $preview
+        $global:lastReadingSec = 1
+        $safePrev = [System.Net.WebUtility]::HtmlEncode($preview)
+        $global:promptReadingMsgId = Send-TelegramMessage -chatId $chatId -text "📖 <b>[ĐANG ĐỌC PROMPT CỦA BẠN (1s)...]</b>`n<blockquote expandable><i>`"$safePrev`"</i></blockquote>"
+
+        if (Test-Path $syncBridgePath) {
+            try {
+                $br = Get-Content $syncBridgePath -Raw -Encoding UTF8 | ConvertFrom-Json
+                $br | Add-Member -NotePropertyName "promptReadingMsgId" -NotePropertyValue $global:promptReadingMsgId -Force
+                $br | Add-Member -NotePropertyName "promptReadingStart" -NotePropertyValue ([DateTime]::Now.ToString("o")) -Force
+                $br | Add-Member -NotePropertyName "promptReadingPreview" -NotePropertyValue $preview -Force
+                $br | ConvertTo-Json -Depth 5 | Set-Content $syncBridgePath -Encoding UTF8
+            } catch {}
+        }
         return
     }
 
@@ -992,6 +1007,27 @@ while ($true) {
                 }
             }
         } catch {}
+    }
+
+    # Đếm giây liên tục cho trạng thái ĐANG ĐỌC PROMPT CỦA BẠN (Cập nhật 2s/lần)
+    if ($global:promptReadingStart -and $global:promptReadingMsgId) {
+        if (Test-Path $syncBridgePath) {
+            try {
+                $brData = Get-Content $syncBridgePath -Raw -Encoding UTF8 | ConvertFrom-Json
+                if (-not $brData.promptReadingMsgId) {
+                    $global:promptReadingStart = $null
+                    $global:promptReadingMsgId = $null
+                }
+            } catch {}
+        }
+        if ($global:promptReadingStart -and $global:promptReadingMsgId) {
+            $currReadSec = [math]::Max(1, [int]([DateTime]::Now - $global:promptReadingStart).TotalSeconds)
+            if ($currReadSec -ge ($global:lastReadingSec + 2)) {
+                $global:lastReadingSec = $currReadSec
+                $safePrev = [System.Net.WebUtility]::HtmlEncode($global:promptReadingPreview)
+                Edit-TelegramMessage -chatId $allowedChatId -messageId $global:promptReadingMsgId -text "📖 <b>[ĐANG ĐỌC PROMPT CỦA BẠN (${currReadSec}s)...]</b>`n<blockquote expandable><i>`"$safePrev`"</i></blockquote>" | Out-Null
+            }
+        }
     }
 
     # 1. KIỂM TRA TIẾN TRÌNH LỆNH CHẠY NỀN HIỆN TẠI (CHẠY THEO GIÂY LIÊN TỤC VÀ KẾT THÚC KHI XONG)
