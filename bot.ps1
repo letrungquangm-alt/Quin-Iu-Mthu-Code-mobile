@@ -863,78 +863,14 @@ function Execute-UserPrompt {
         Send-TelegramMessage -chatId $chatId -text "⏹️ Đã dừng lệnh đang chạy và xóa sạch hàng đợi!"
         return
     }
-    elseif ($text.StartsWith("/cmd ") -or $text.StartsWith("! ")) {
-        $cmdToRun = if ($text.StartsWith("/cmd ")) { $text.Substring(5).Trim() } else { $text.Substring(2).Trim() }
-        Show-ScreenNotification -title "🖥️ Chạy Lệnh Terminal" -msg $cmdToRun -durationSec 3
-        Send-TelegramMessage -chatId $chatId -text "⚡ Đang chạy lệnh từ pro: ""$preview""`n`n(powershell: $cmdToRun)"
-        $global:currentJobPrompt = $preview
-        $global:currentJob = Start-Job -ScriptBlock {
-            param($c)
-            powershell.exe -NoProfile -ExecutionPolicy Bypass -Command $c 2>&1 | Out-String
-        } -ArgumentList $cmdToRun
-        return
-    }
-
-    # 2. Xử lý qua AI Gemini
-    if (-not [string]::IsNullOrWhiteSpace($geminiApiKey)) {
-        Send-TelegramAction -chatId $chatId -action "typing"
-        $aiResponse = Ask-GeminiAI -userText $text
-
-        $cleanPreview = ($aiResponse -split "`n`n\d{9}/\d{9}")[0]
-        if ($cleanPreview.Length -gt 150) { $cleanPreview = $cleanPreview.Substring(0, 150) + "..." }
-        Show-ScreenNotification -title "🤖 AI Phản Hồi -> Máy tính" -msg $cleanPreview -durationSec 4
-
-        if (Check-SyncBridgeStatus) { Append-SyncMessage -sender "ai" -text $aiResponse }
-
-        if ($aiResponse -match '```upgrade:powershell\s*([\s\S]*?)```') {
-            $newScriptCode = $matches[1].Trim()
-            Send-TelegramMessage -chatId $chatId -text "AI đã tạo bản nâng cấp mới! Đang bắt đầu sao lưu và kiểm tra an toàn..."
-            Apply-SelfUpgrade -chatId $chatId -newCode $newScriptCode -reason "Yêu cầu từ người dùng: $text"
-            Check-And-Run-Next-In-Queue -chatId $chatId
-            return
-        }
-        elseif ($aiResponse -match '```run\s*([\s\S]*?)```') {
-            $cmdToAutoRun = $matches[1].Trim()
-            $cleanText = $aiResponse -replace '```run[\s\S]*?```', ''
-
-            if ($executionMode -eq "ask") {
-                $cmdId = [System.Guid]::NewGuid().ToString('N').Substring(0, 8)
-                $pendingCommands[$cmdId] = $cmdToAutoRun
-
-                $promptText = "$cleanText`n`n⚠️ AI yêu cầu thực thi lệnh sau trên máy tính:`n`powershell: $cmdToAutoRun`n`nBạn có cho phép chạy không?"
-                $askButtons = @(
-                    @(
-                        @{ text = "✅ Cho phép chạy"; callback_data = "exec:$cmdId" },
-                        @{ text = "❌ Hủy bỏ"; callback_data = "cancel:$cmdId" }
-                    )
-                )
-                Send-TelegramKeyboard -chatId $chatId -text $promptText -buttons $askButtons
-                $global:isExecuting = $false
-                return
-            }
-            else {
-                # CHẾ ĐỘ AUTO-RUN: BẮT ĐẦU CHẠY NỀN QUA START-JOB ĐỂ KHÔNG CHẶN HÀNG ĐỢI
-                Show-ScreenNotification -title "⚡ Đang chạy lệnh máy tính" -msg $cmdToAutoRun -durationSec 3
-                Send-TelegramMessage -chatId $chatId -text "$cleanText`n`n⚡ Đang chạy lệnh từ pro: ""$preview""`n`n(powershell: $cmdToAutoRun)"
-                $global:currentJobPrompt = $preview
-                $global:currentJob = Start-Job -ScriptBlock {
-                    param($c)
-                    powershell.exe -NoProfile -ExecutionPolicy Bypass -Command $c 2>&1 | Out-String
-                } -ArgumentList $cmdToAutoRun
-                return
-            }
-        }
-        else {
-            Send-TelegramMessage -chatId $chatId -text $aiResponse
-            Check-And-Run-Next-In-Queue -chatId $chatId
-            return
-        }
-    }
-    else {
-        Send-TelegramMessage -chatId $chatId -text "Vui lòng cài đặt Gemini API Key bằng lệnh: /setkey <key>"
-        Check-And-Run-Next-In-Queue -chatId $chatId
-        return
-    }
+    # 2. KHỞI CHẠY TIẾN TRÌNH THỰC THI CHẠY NỀN (START-JOB)
+    # Giúp Main Thread luôn rảnh rỗi để bắt ngay các tin nhắn mới từ Telegram xếp vào Hàng Đợi (Prompt Queue)
+    Send-TelegramAction -chatId $chatId -action "typing"
+    $global:currentJobPrompt = $preview
+    
+    $workerScript = Join-Path $rootDir "worker_execute.ps1"
+    $global:currentJob = Start-Job -FilePath $workerScript -ArgumentList $chatId, $text, $rootDir
+    return
 }
 
 # --- VÒNG LẶP CHÍNH CỦA BOT ---
@@ -952,15 +888,61 @@ while ($true) {
     # 1. KIỂM TRA TIẾN TRÌNH LỆNH CHẠY NỀN HIỆN TẠI
     if ($global:currentJob) {
         if ($global:currentJob.State -in @('Completed', 'Failed', 'Stopped')) {
-            $jobOut = Receive-Job $global:currentJob | Out-String
+            $jobRaw = Receive-Job $global:currentJob | Out-String
             Remove-Job $global:currentJob -Force
             $global:currentJob = $null
 
-            if ([string]::IsNullOrWhiteSpace($jobOut)) {
-                $jobOut = "(Lệnh đã chạy xong, không có output)"
+            if (-not [string]::IsNullOrWhiteSpace($jobRaw)) {
+                try {
+                    $resObj = $jobRaw | ConvertFrom-Json
+                    if ($resObj.type -eq "cmd") {
+                        $tokenEnd = Format-TokenFooter -tokensThisCall ($resObj.tokensUsed)
+                        Send-TelegramMessage -chatId $allowedChatId -text "=== [Kết quả: $($global:currentJobPrompt)] ===`n$($resObj.output)`n`n$tokenEnd"
+                    }
+                    elseif ($resObj.type -eq "ai") {
+                        $cleanReply = $resObj.cleanReply
+                        $cmdToRun = $resObj.cmdToRun
+                        $autoOutput = $resObj.autoOutput
+                        $execMode = $resObj.executionMode
+                        
+                        if ($cleanReply.Length -gt 150) { 
+                            Show-ScreenNotification -title "🤖 AI Phản Hồi -> Máy tính" -msg ($cleanReply.Substring(0, 150) + "...") -durationSec 4 
+                        }
+
+                        if ($cmdToRun) {
+                            if ($execMode -eq "ask") {
+                                $cmdId = [System.Guid]::NewGuid().ToString('N').Substring(0, 8)
+                                $pendingCommands[$cmdId] = $cmdToRun
+                                $promptText = "$cleanReply`n`n⚠️ AI yêu cầu thực thi lệnh sau trên máy tính:`n`powershell: $cmdToRun`n`nBạn có cho phép chạy không?"
+                                $askButtons = @(
+                                    @(
+                                        @{ text = "✅ Cho phép chạy"; callback_data = "exec:$cmdId" },
+                                        @{ text = "❌ Hủy bỏ"; callback_data = "cancel:$cmdId" }
+                                    )
+                                )
+                                Send-TelegramKeyboard -chatId $allowedChatId -text $promptText -buttons $askButtons
+                                $global:isExecuting = $false
+                                $global:currentExecutingPrompt = ""
+                                continue
+                            } else {
+                                $outText = "$cleanReply`n`n⚡ [ĐÃ TỰ ĐỘNG THỰC THI]:`n$autoOutput"
+                                $tokenEnd = Format-TokenFooter -tokensThisCall ($resObj.tokensUsed)
+                                Send-TelegramMessage -chatId $allowedChatId -text "$outText`n`n$tokenEnd"
+                            }
+                        } else {
+                            $tokenEnd = Format-TokenFooter -tokensThisCall ($resObj.tokensUsed)
+                            Send-TelegramMessage -chatId $allowedChatId -text "$cleanReply`n`n$tokenEnd"
+                        }
+                    }
+                    else {
+                        $tokenEnd = Format-TokenFooter -tokensThisCall 10
+                        Send-TelegramMessage -chatId $allowedChatId -text "=== [Kết quả: $($global:currentJobPrompt)] ===`n$jobRaw`n`n$tokenEnd"
+                    }
+                } catch {
+                    $tokenEnd = Format-TokenFooter -tokensThisCall 10
+                    Send-TelegramMessage -chatId $allowedChatId -text "=== [Kết quả: $($global:currentJobPrompt)] ===`n$jobRaw`n`n$tokenEnd"
+                }
             }
-            $tokenEnd = Format-TokenFooter -tokensThisCall 10
-            Send-TelegramMessage -chatId $allowedChatId -text "=== [Kết quả: $($global:currentJobPrompt)] ===`n$jobOut`n`n$tokenEnd"
 
             $global:isExecuting = $false
             $global:currentExecutingPrompt = ""
