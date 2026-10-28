@@ -1600,37 +1600,74 @@ while ($true) {
                 if ($msg.photo) {
                     $largestPhoto = $msg.photo | Sort-Object file_size -Descending | Select-Object -First 1
                     $fileId = $largestPhoto.file_id
-                    $userCaption = if ($msg.caption) { $msg.caption.Trim() } else { "" }
+                    $userCaption = if ($msg.caption) { $msg.caption.Trim() } else { "Hãy quan sát bức ảnh này và phân tích, hỗ trợ tôi." }
 
-                    Show-ScreenNotification -title "📷 Telegram: Ảnh Mới" -msg (if ($userCaption) { $userCaption } else { "Đã nhận 1 bức ảnh" }) -durationSec 4
+                    # 1. Tạo thư mục lưu trữ ảnh lâu dài trên máy tính
+                    $uploadDir = Join-Path $currentProjectPath "uploads"
+                    if (-not (Test-Path $uploadDir)) { New-Item -ItemType Directory -Path $uploadDir -Force | Out-Null }
+                    $imgFileName = "photo_$(Get-Date -Format 'yyyyMMdd_HHmmss').jpg"
+                    $savedImgPath = Join-Path $uploadDir $imgFileName
 
-                    $loadingMsgId = Send-TelegramMessage -chatId $chatId -text "Đang phân tích hình ảnh qua Gemini Multimodal Vision..."
-
+                    # 2. Tải ảnh từ Telegram API về máy tính
+                    $downloadOk = $false
                     try {
                         $getFileUrl = "https://api.telegram.org/bot$botToken/getFile?file_id=$fileId"
                         $fileInfo = Invoke-RestMethod -Uri $getFileUrl -Method Get
                         if ($fileInfo.ok -and $fileInfo.result.file_path) {
                             $filePath = $fileInfo.result.file_path
                             $downloadUrl = "https://api.telegram.org/file/bot$botToken/$filePath"
-                            $tempImg = Join-Path $env:TEMP "tg_img_$([System.Guid]::NewGuid().ToString('N')).jpg"
+                            & curl.exe -s -o $savedImgPath $downloadUrl
+                            if (Test-Path $savedImgPath) { $downloadOk = $true }
+                        }
+                    } catch {}
 
-                            & curl.exe -s -o $tempImg $downloadUrl
+                    if (-not $downloadOk) {
+                        Send-TelegramMessage -chatId $chatId -text "❌ Không thể tải ảnh từ Telegram về máy tính!"
+                        continue
+                    }
 
-                            $imgBytes = [System.IO.File]::ReadAllBytes($tempImg)
-                            $base64 = [System.Convert]::ToBase64String($imgBytes)
-                            Remove-Item $tempImg -Force -ErrorAction SilentlyContinue
+                    Show-ScreenNotification -title "📷 Telegram: Đã Nhận Ảnh" -msg "$userCaption" -durationSec 5
 
-                            $visionAnswer = Ask-GeminiVision -userText $userCaption -base64Image $base64 -mimeType "image/jpeg"
+                    # 3. NẾU ĐANG KẾT NỐI ĐỒNG BỘ VỚI ANTIGRAVITY PC:
+                    if (Check-SyncBridgeStatus) {
+                        $fullPrompt = "[Điện thoại gửi ảnh]: $userCaption`nĐường dẫn file ảnh trên máy tính: $savedImgPath"
+                        Append-SyncMessage -sender "phone" -text $fullPrompt
+                        Send-ToAntigravityChat -text $fullPrompt
 
-                            if ($loadingMsgId) {
-                                Edit-TelegramMessage -chatId $chatId -messageId $loadingMsgId -text $visionAnswer
-                            } else {
-                                Send-TelegramMessage -chatId $chatId -text $visionAnswer
-                            }
+                        # Bật đồng hồ bấm giây đọc ảnh & prompt
+                        $global:promptReadingStart = [DateTime]::Now
+                        $global:promptReadingPreview = "[Ảnh: $imgFileName] $userCaption"
+                        $global:lastReadingSec = 1
+                        $safeCaption = [System.Net.WebUtility]::HtmlEncode($userCaption)
+                        $global:promptReadingMsgId = Send-TelegramMessage -chatId $chatId -text "📷 <b>[ĐÃ NHẬN ẢNH & ĐANG PHÂN TÍCH (1s)...]</b>`n📁 <b>File:</b> <code>$savedImgPath</code>`n<blockquote expandable><i>`"$safeCaption`"</i></blockquote>"
+
+                        if (Test-Path $syncBridgePath) {
+                            try {
+                                $br = Get-Content $syncBridgePath -Raw -Encoding UTF8 | ConvertFrom-Json
+                                $br | Add-Member -NotePropertyName "promptReadingMsgId" -NotePropertyValue $global:promptReadingMsgId -Force
+                                $br | Add-Member -NotePropertyName "promptReadingStart" -NotePropertyValue ([DateTime]::Now.ToString("o")) -Force
+                                $br | Add-Member -NotePropertyName "promptReadingPreview" -NotePropertyValue "[Ảnh] $userCaption" -Force
+                                $br | ConvertTo-Json -Depth 5 | Set-Content $syncBridgePath -Encoding UTF8
+                            } catch {}
+                        }
+                        continue
+                    }
+
+                    # 4. CHẾ ĐỘ ĐỘC LẬP (STANDALONE): GỬI SANG GEMINI MULTIMODAL VISION
+                    $loadingMsgId = Send-TelegramMessage -chatId $chatId -text "🧠 <b>[ĐANG PHÂN TÍCH ẢNH QUA VISION (1s)...]</b>"
+                    try {
+                        $imgBytes = [System.IO.File]::ReadAllBytes($savedImgPath)
+                        $base64 = [System.Convert]::ToBase64String($imgBytes)
+                        $visionAnswer = Ask-GeminiVision -userText $userCaption -base64Image $base64 -mimeType "image/jpeg"
+                        $formattedVision = Convert-MdToTgHtml -text $visionAnswer
+                        if ($loadingMsgId) {
+                            Edit-TelegramMessage -chatId $chatId -messageId $loadingMsgId -text $formattedVision
+                        } else {
+                            Send-TelegramMessage -chatId $chatId -text $formattedVision
                         }
                     } catch {
                         if ($loadingMsgId) {
-                            Edit-TelegramMessage -chatId $chatId -messageId $loadingMsgId -text "Lỗi tải và xử lý ảnh: $_"
+                            Edit-TelegramMessage -chatId $chatId -messageId $loadingMsgId -text "Lỗi xử lý ảnh: $_"
                         }
                     }
                     continue
