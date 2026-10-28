@@ -32,6 +32,9 @@ $modelId = if ($config.MODEL_ID) { $config.MODEL_ID.ToString().Trim() } else { "
 $thinkingLevel = if ($config.THINKING_LEVEL) { $config.THINKING_LEVEL.ToString().Trim() } else { "high" }
 $executionMode = if ($config.EXECUTION_MODE) { $config.EXECUTION_MODE.ToString().Trim() } else { "auto" }
 $projectsRootDir = if ($config.PROJECTS_ROOT_DIR) { $config.PROJECTS_ROOT_DIR.ToString().Trim() } else { "C:\Users\Administrator\.gemini\antigravity\scratch\model" }
+$currentProject = if ($config.CURRENT_PROJECT) { $config.CURRENT_PROJECT.ToString().Trim() } else { "telegram-remote-coder" }
+$currentProjectPath = if ($config.CURRENT_PROJECT_PATH) { $config.CURRENT_PROJECT_PATH.ToString().Trim() } else { $rootDir }
+$global:waitingForNewProjectName = $false
 
 # --- QUẢN LÝ HÀNG ĐỢI PROMPT & TRẠNG THÁI THỰC THI ---
 $global:isExecuting = $false
@@ -457,6 +460,24 @@ function Append-SyncMessage {
 
 # --- CÁC HÀM TIỆN ÍCH HỆ THỐNG & MENU MODEL GIỐNG HỆT IDE ---
 
+function Get-ProjectMenuButtons {
+    $buttons = @()
+    $buttons += ,@( @{ text = "✨ Tạo Project Mới (Ctrl+Shift+N)"; callback_data = "proj:new" } )
+    $buttons += ,@( @{ text = "📂 Chọn Project Đã Có"; callback_data = "proj:list" } )
+    if (-not [string]::IsNullOrWhiteSpace($currentProject)) {
+        $buttons += ,@( @{ text = "▶️ Tiếp Tục: $currentProject"; callback_data = "proj:continue" } )
+    }
+    $buttons += ,@( @{ text = "⚙️ Chọn Model Trực Tiếp ❯"; callback_data = "menu:main" } )
+    return $buttons
+}
+
+function Show-ProjectMenu {
+    param([int64]$chatId)
+    $text = "📁 BƯỚC 1: QUẢN LÝ DỰ ÁN (PROJECT)`n`n• Project hiện tại: $currentProject`n• Thư mục gốc: $projectsRootDir`n`nBạn muốn tạo mới hay mở project nào để làm việc?"
+    $buttons = Get-ProjectMenuButtons
+    Send-TelegramKeyboard -chatId $chatId -text $text -buttons $buttons
+}
+
 function Get-ModelMainMenuButtons {
     param([string]$curModelId = $modelId, [string]$curLevel = $thinkingLevel)
 
@@ -479,13 +500,14 @@ function Get-ModelMainMenuButtons {
         @( @{ text = $opusLabel; callback_data = "setmodel:claude-opus-4.6:Claude Opus 4.6 (Thinking)" } ),
         @( @{ text = $gptLabel; callback_data = "setmodel:gpt-oss-120b:GPT-OSS 120B (Medium)" } ),
         @( @{ text = $argonLabel; callback_data = "setmodel:gemini-4-argon:Gemini 4 Argon" } ),
-        @( @{ text = "⏲ View Usage >"; callback_data = "menu:usage" } )
+        @( @{ text = "⏲ View Usage >"; callback_data = "menu:usage" } ),
+        @( @{ text = "📁 Đổi Project (Quay lại Bước 1)"; callback_data = "proj:menu" } )
     )
 }
 
 function Show-ModelMenu {
     param([int64]$chatId)
-    $text = "Model (Hiện tại: $selectedModel):"
+    $text = "BƯỚC 2: CHỌN MODEL CHO PROJECT ($currentProject):`nHiện tại: $selectedModel"
     $buttons = Get-ModelMainMenuButtons
     Send-TelegramKeyboard -chatId $chatId -text $text -buttons $buttons
 }
@@ -1076,6 +1098,74 @@ while ($true) {
                     }
 
                     # --- CÁC NÚT CÀI ĐẶT HỆ THỐNG CŨ ---
+                                        # --- XỬ LÝ CÁC NÚT DỰ ÁN (PROJECT WORKFLOW - BƯỚC 1) ---
+                    if ($data -eq "proj:new") {
+                        Answer-TelegramCallback -callbackId $cbId
+                        $global:waitingForNewProjectName = $true
+                        $promptNewProj = @(
+                            "✨ TẠO PROJECT MỚI (Tương đương Ctrl+Shift+N):",
+                            "",
+                            "Bạn hãy gõ TÊN PROJECT bên dưới để khởi tạo:",
+                            "Ví dụ: game_caro, website_shop, discord_bot, app_mobile...",
+                            "",
+                            "Bot sẽ tự động tạo thư mục riêng trong 'model/<tên_project>' và mở giao diện chọn Model!"
+                        ) -join "`n"
+                        Send-TelegramMessage -chatId $cbChatId -text $promptNewProj
+                        continue
+                    }
+                    elseif ($data -eq "proj:list") {
+                        Answer-TelegramCallback -callbackId $cbId
+                        if (-not (Test-Path $projectsRootDir)) {
+                            New-Item -ItemType Directory -Path $projectsRootDir -Force | Out-Null
+                        }
+                        $subDirs = Get-ChildItem -Path $projectsRootDir -Directory -ErrorAction SilentlyContinue
+                        if (-not $subDirs -or $subDirs.Count -eq 0) {
+                            $emptyText = "📂 Hiện tại chưa có project con nào trong thư mục 'model/'.`n`nBạn hãy bấm nút bên dưới để tạo project mới nhé!"
+                            $emptyButtons = @(
+                                @( @{ text = "✨ Tạo Project Mới (Ctrl+Shift+N)"; callback_data = "proj:new" } ),
+                                @( @{ text = "⬅️ Quay lại Menu Project"; callback_data = "proj:menu" } )
+                            )
+                            Edit-TelegramKeyboard -chatId $cbChatId -messageId $cbMsgId -text $emptyText -buttons $emptyButtons
+                        } else {
+                            $listText = "📂 DANH SÁCH PROJECT ĐÃ CÓ ($($subDirs.Count) project):`n`nChọn project bên dưới để tiếp tục làm việc:"
+                            $projButtons = @()
+                            foreach ($d in $subDirs) {
+                                $mark = if ($d.Name -eq $currentProject) { " (Đang chọn) ✓" } else { "" }
+                                $projButtons += ,@( @{ text = "📁 $($d.Name)$mark"; callback_data = "proj:select:$($d.Name)" } )
+                            }
+                            $projButtons += ,@( @{ text = "✨ Tạo Project Mới"; callback_data = "proj:new" } )
+                            $projButtons += ,@( @{ text = "⬅️ Quay lại Menu Project"; callback_data = "proj:menu" } )
+                            Edit-TelegramKeyboard -chatId $cbChatId -messageId $cbMsgId -text $listText -buttons $projButtons
+                        }
+                        continue
+                    }
+                    elseif ($data.StartsWith("proj:select:")) {
+                        $selName = $data.Substring(12).Trim()
+                        Answer-TelegramCallback -callbackId $cbId -text "Đã chọn: $selName"
+                        $currentProject = $selName
+                        $currentProjectPath = Join-Path $projectsRootDir $selName
+                        $config.CURRENT_PROJECT = $currentProject
+                        $config.CURRENT_PROJECT_PATH = $currentProjectPath
+                        $config | ConvertTo-Json | Set-Content $configPath -Encoding UTF8
+                        
+                        Show-ScreenNotification -title "📁 Mở Project" -msg "$currentProject" -durationSec 3
+                        $pMsg = "✅ ĐÃ MỞ PROJECT: $currentProject!`nĐường dẫn: $currentProjectPath`n`n👉 BƯỚC 2: Vui lòng chọn Model AI bên dưới:"
+                        Edit-TelegramKeyboard -chatId $cbChatId -messageId $cbMsgId -text $pMsg -buttons (Get-ModelMainMenuButtons)
+                        continue
+                    }
+                    elseif ($data -eq "proj:continue") {
+                        Answer-TelegramCallback -callbackId $cbId -text "Tiếp tục $currentProject"
+                        $pMsg = "▶️ TIẾP TỤC PROJECT: $currentProject`nĐường dẫn: $currentProjectPath`n`n👉 BƯỚC 2: Vui lòng chọn Model AI bên dưới:"
+                        Edit-TelegramKeyboard -chatId $cbChatId -messageId $cbMsgId -text $pMsg -buttons (Get-ModelMainMenuButtons)
+                        continue
+                    }
+                    elseif ($data -eq "proj:menu") {
+                        Answer-TelegramCallback -callbackId $cbId
+                        $pText = "📁 BƯỚC 1: QUẢN LÝ DỰ ÁN (PROJECT)`n`n• Project hiện tại: $currentProject`n• Thư mục gốc: $projectsRootDir`n`nBạn muốn tạo mới hay mở project nào để làm việc?"
+                        Edit-TelegramKeyboard -chatId $cbChatId -messageId $cbMsgId -text $pText -buttons (Get-ProjectMenuButtons)
+                        continue
+                    }
+
                     if ($data -eq "menu:gemini38") {
                         Answer-TelegramCallback -callbackId $cbId
                         $g38Text = "⚡ Chọn mức độ tư duy (Thinking Level) cho Gemini 3.8 Flash:"
@@ -1250,6 +1340,30 @@ while ($true) {
                 Show-ScreenNotification -title "📱 Telegram: Trung Quân" -msg $text -durationSec 4
                 try { Set-Clipboard -Value $text } catch {}
 
+                                # 1.0 NẾU ĐANG CHỜ NHẬP TÊN PROJECT MỚI
+                if ($global:waitingForNewProjectName -eq $true) {
+                    $global:waitingForNewProjectName = $false
+                    $safeName = ($text -replace '[^a-zA-Z0-9_\-]', '_').ToLower().Trim('_')
+                    if ([string]::IsNullOrWhiteSpace($safeName)) { $safeName = "project_" + (Get-Date -Format "yyyyMMdd_HHmmss") }
+                    
+                    $newProjPath = Join-Path $projectsRootDir $safeName
+                    if (-not (Test-Path $newProjPath)) {
+                        New-Item -ItemType Directory -Path $newProjPath -Force | Out-Null
+                    }
+                    
+                    $currentProject = $safeName
+                    $currentProjectPath = $newProjPath
+                    $config.CURRENT_PROJECT = $safeName
+                    $config.CURRENT_PROJECT_PATH = $newProjPath
+                    $config | ConvertTo-Json | Set-Content $configPath -Encoding UTF8
+                    
+                    Show-ScreenNotification -title "📁 Tạo Project Mới" -msg "Project: $safeName" -durationSec 3
+                    $projCreatedMsg = "✨ ĐÃ TẠO PROJECT THÀNH CÔNG!`n`n• Tên project: $safeName`n• Đường dẫn: $newProjPath`n`n👉 BƯỚC 2: Vui lòng chọn Model để làm việc với project này:"
+                    Send-TelegramMessage -chatId $chatId -text $projCreatedMsg
+                    Show-ModelMenu -chatId $chatId
+                    continue
+                }
+
                 # 1. NẾU ĐANG CHỜ SỬA NỘI DUNG CỦA MỘT PROMPT TRONG HÀNG ĐỢI
                 if (-not [string]::IsNullOrWhiteSpace($global:waitingForEditPromptId)) {
                     $targetId = $global:waitingForEditPromptId
@@ -1351,8 +1465,30 @@ while ($true) {
                     Send-TelegramMessage -chatId $chatId -text ($helpLines -join "`n")
                     continue
                 }
-                elseif ($text -match '^(?i)(/model|model|/menu|menu|hiện menu|hien menu|mở menu|mo menu|xem menu|chọn model|chon model|/settings|cài đặt|cai dat)$') {
+                                elseif ($text -match '^(?i)(/start|start|/menu|menu|hiện menu|hien menu|mở menu|mo menu|xem menu|project|dự án|du an)$') {
+                    Show-ProjectMenu -chatId $chatId
+                    continue
+                }
+                elseif ($text -match '^(?i)(/model|model|chọn model|chon model|/settings|cài đặt|cai dat)$') {
                     Show-ModelMenu -chatId $chatId
+                    continue
+                }
+                elseif ($text -match '(?i)(tạo project mới|tao project moi|tạo project|tao project|new project)\s*[:=]?\s*([a-zA-Z0-9_\-]+)?') {
+                    $pName = $matches[2]
+                    if ([string]::IsNullOrWhiteSpace($pName)) {
+                        $global:waitingForNewProjectName = $true
+                        Send-TelegramMessage -chatId $chatId -text "✨ Bạn hãy nhập tên Project muốn tạo (ví dụ: game_caro, website_shop, discord_bot...):"
+                    } else {
+                        $newProjPath = Join-Path $projectsRootDir $pName
+                        if (-not (Test-Path $newProjPath)) { New-Item -ItemType Directory -Path $newProjPath -Force | Out-Null }
+                        $currentProject = $pName
+                        $currentProjectPath = $newProjPath
+                        $config.CURRENT_PROJECT = $pName
+                        $config.CURRENT_PROJECT_PATH = $newProjPath
+                        $config | ConvertTo-Json | Set-Content $configPath -Encoding UTF8
+                        Send-TelegramMessage -chatId $chatId -text "✨ Đã tạo project: $pName thành công!`nĐường dẫn: $newProjPath"
+                        Show-ModelMenu -chatId $chatId
+                    }
                     continue
                 }
                 elseif ($text -eq "/usage" -or $text -eq "/pro" -or $text -eq "/checkkey") {

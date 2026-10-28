@@ -248,8 +248,24 @@ while ($true) {
                                     $fileName = Split-Path $rawPath -Leaf
                                     [void]$projectKnownFiles.Add($rawPath)
                                     [void]$projectKnownFiles.Add($fileName)
-                                    $msg = "📖 [MÁY TÍNH ĐANG ĐỌC FILE / WORKING]`n📄 File: $fileName"
-                                    Write-Host "[MIRROR] Read file: $fileName" -ForegroundColor DarkGray
+                                    
+                                    # Xác định đoạn dòng (range) đang được đọc
+                                    $rangeInfo = ""
+                                    $sLine = if ($tc.args.StartLine) { $tc.args.StartLine.ToString().Trim('"', ' ') } else { "" }
+                                    $eLine = if ($tc.args.EndLine) { $tc.args.EndLine.ToString().Trim('"', ' ') } else { "" }
+                                    
+                                    if ($sLine -and $eLine) {
+                                        $rangeInfo = " (Dòng $sLine - $eLine)"
+                                    } elseif ($sLine) {
+                                        $rangeInfo = " (Từ dòng $sLine)"
+                                    } elseif ($eLine) {
+                                        $rangeInfo = " (Đến dòng $eLine)"
+                                    } else {
+                                        $rangeInfo = " (Đọc toàn bộ file)"
+                                    }
+
+                                    $msg = "📖 [MÁY TÍNH ĐANG ĐỌC FILE / WORKING]`n📄 File: $fileName$rangeInfo"
+                                    Write-Host "[MIRROR] Read file: $fileName$rangeInfo" -ForegroundColor DarkGray
                                     $mid = Send-TgLiveStatus -text $msg
                                     if ($mid) { $tempWorkingMsgIds.Add($mid) }
                                 }
