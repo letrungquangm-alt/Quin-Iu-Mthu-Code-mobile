@@ -143,8 +143,45 @@ $global:mirrorThinkingMsgId = $null
 $global:mirrorThinkingStart = $null
 $global:lastMirrorSec = 0
 
+$global:activeWorkingStart = $null
+$global:activeWorkingMsgId = $null
+$global:activeWorkingTitle = ""
+$global:lastWorkingSec = 0
+
+function Start-WorkingTracker {
+    param([string]$title)
+    if ($global:activeWorkingStart -and $global:activeWorkingMsgId) {
+        $prevSec = [math]::Max(1, [int]([DateTime]::Now - $global:activeWorkingStart).TotalSeconds)
+        Edit-TgMessage -messageId $global:activeWorkingMsgId -text "✅ [MÁY TÍNH ĐÃ HOÀN TẤT - ${prevSec}s]`n$($global:activeWorkingTitle)"
+    }
+    $global:activeWorkingStart = [DateTime]::Now
+    $global:lastWorkingSec = 1
+    $global:activeWorkingTitle = $title
+    $global:activeWorkingMsgId = Send-TgLiveStatus -text "⚡ [MÁY TÍNH ĐANG THỰC HIỆN (1s)...]`n$title"
+    if ($global:activeWorkingMsgId) { $tempWorkingMsgIds.Add($global:activeWorkingMsgId) }
+}
+
+function Stop-WorkingTracker {
+    if ($global:activeWorkingStart -and $global:activeWorkingMsgId) {
+        $doneSec = [math]::Max(1, [int]([DateTime]::Now - $global:activeWorkingStart).TotalSeconds)
+        Edit-TgMessage -messageId $global:activeWorkingMsgId -text "✅ [MÁY TÍNH ĐÃ HOÀN TẤT - ${doneSec}s]`n$($global:activeWorkingTitle)"
+        $global:activeWorkingStart = $null
+        $global:activeWorkingMsgId = $null
+        $global:lastWorkingSec = 0
+    }
+}
+
 while ($true) {
     try {
+        # Đếm giây liên tục cho tác vụ Working đang chạy ngầm trên máy tính (Cập nhật 2s/lần)
+        if ($global:activeWorkingStart -and $global:activeWorkingMsgId) {
+            $currSec = [math]::Max(1, [int]([DateTime]::Now - $global:activeWorkingStart).TotalSeconds)
+            if ($currSec -ge ($global:lastWorkingSec + 2)) {
+                $global:lastWorkingSec = $currSec
+                Edit-TgMessage -messageId $global:activeWorkingMsgId -text "⚡ [MÁY TÍNH ĐANG THỰC HIỆN (${currSec}s)...]`n$($global:activeWorkingTitle)"
+            }
+        }
+
         if (Test-Path $transcriptPath) {
             $fileInfo = Get-Item $transcriptPath -ErrorAction SilentlyContinue
             if ($fileInfo -and $fileInfo.Length -gt $lastByteOffset) {
@@ -158,19 +195,29 @@ while ($true) {
                     try {
                         $entry = $line | ConvertFrom-Json
 
-                        # 1. BẮT SUY NGHĨ CỦA AI (CHẠY THEO GIÂY LIÊN TỤC VÀ KẾT THÚC BẰNG THỜI GIAN/NỘI DUNG)
+                        # 1. BẮT SUY NGHĨ CỦA AI (CHẠY THEO GIÂY LIÊN TỤC VÀ TRÍCH XUẤT NỘI DUNG SUY NGHĨ)
                         if ($entry.thinking) {
                             Set-SyncBridgeWorkingStatus -working $true
+                            
+                            $cleanThinking = ""
+                            $rawThink = $entry.thinking.ToString().Trim()
+                            $thinkLines = $rawThink -split "\r?\n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+                            if ($thinkLines.Count -gt 0) {
+                                $cleanThinking = ($thinkLines | Select-Object -First 2) -join " "
+                                if ($cleanThinking.Length -gt 150) { $cleanThinking = $cleanThinking.Substring(0, 150) + "..." }
+                            }
+                            $thinkSnippet = if ($cleanThinking) { "`n💭 `"$cleanThinking`"" } else { "" }
+
                             if (-not $global:mirrorThinkingStart) {
                                 $global:mirrorThinkingStart = [DateTime]::Now
                                 $global:lastMirrorSec = 1
-                                $global:mirrorThinkingMsgId = Send-TgLiveStatus -text "🧠 AI đang suy nghĩ (1s)..."
+                                $global:mirrorThinkingMsgId = Send-TgLiveStatus -text "🧠 [AI ĐANG SUY NGHĨ (1s)]:$thinkSnippet"
                                 if ($global:mirrorThinkingMsgId) { $tempWorkingMsgIds.Add($global:mirrorThinkingMsgId) }
                             } else {
                                 $elapsedSec = [math]::Max(1, [int]([DateTime]::Now - $global:mirrorThinkingStart).TotalSeconds)
                                 if ($elapsedSec -ge ($global:lastMirrorSec + 2)) {
                                     $global:lastMirrorSec = $elapsedSec
-                                    Edit-TgMessage -messageId $global:mirrorThinkingMsgId -text "🧠 AI đang suy nghĩ (${elapsedSec}s)..."
+                                    Edit-TgMessage -messageId $global:mirrorThinkingMsgId -text "🧠 [AI ĐANG SUY NGHĨ (${elapsedSec}s)]:$thinkSnippet"
                                 }
                             }
                         }
@@ -208,8 +255,7 @@ while ($true) {
                                         ) -join "`n"
 
                                         Write-Host "[MIRROR] Tool call: $summary" -ForegroundColor Cyan
-                                        $mid = Send-TgLiveStatus -text $msg.Trim()
-                                        if ($mid) { $tempWorkingMsgIds.Add($mid) }
+                                        $sumInfo = if ($summary) { "`n📋 Thao tác: $summary" } else { "" }; Start-WorkingTracker -title "▶️ Lệnh: $displayCmd$sumInfo"
                                     }
                                 }
                                 elseif ($toolName -eq "edit_file") {
@@ -240,8 +286,7 @@ while ($true) {
                                     ) -join "`n"
 
                                     Write-Host "[MIRROR] File edit: $fileName $actionTag $diffStat" -ForegroundColor Green
-                                    $mid = Send-TgLiveStatus -text $msg.Trim()
-                                    if ($mid) { $tempWorkingMsgIds.Add($mid) }
+                                    $sumInfo = if ($summary) { "`n📋 Thao tác: $summary" } else { "" }; Start-WorkingTracker -title "📁 File: $fileName $actionTag $diffStat$sumInfo"
                                 }
                                 elseif ($toolName -eq "write_file") {
                                     $rawPath = if ($tc.args.Path) { $tc.args.Path.ToString().Trim('"', ' ') } else { "file" }
@@ -314,13 +359,13 @@ while ($true) {
 
                                     $msg = "📖 [MÁY TÍNH ĐANG ĐỌC FILE / WORKING]`n📄 File: $fileName$rangeInfo"
                                     Write-Host "[MIRROR] Read file: $fileName$rangeInfo" -ForegroundColor DarkGray
-                                    $mid = Send-TgLiveStatus -text $msg
-                                    if ($mid) { $tempWorkingMsgIds.Add($mid) }
+                                    Start-WorkingTracker -title "📖 Đọc file: $fileName$rangeInfo"
                                 }
                             }
                         }
                         # 3. BẮT KẾT QUẢ OUTPUT CỦA LỆNH (GENERIC output)
                         elseif ($entry.type -eq "GENERIC" -and $entry.content) {
+                            Stop-WorkingTracker
                             $content = $entry.content.ToString()
                             if ($content -match "Command output:\s*([\s\S]*)") {
                                 $rawOut = $matches[1].Trim()
@@ -339,6 +384,7 @@ while ($true) {
                         }
                         # 4. BẮT KẾT QUẢ TRẢ LỜI CUỐI CÙNG (RESPONSE TO USER) -> HOÀN THÀNH LƯỢT WORKING
                         elseif ($entry.type -eq "PLANNER_RESPONSE" -and $entry.content -and -not $entry.tool_calls) {
+                            Stop-WorkingTracker
                             if ($global:mirrorThinkingStart) {
                                 $elapsedSec = [math]::Max(1, [int]([DateTime]::Now - $global:mirrorThinkingStart).TotalSeconds)
                                 Edit-TgMessage -messageId $global:mirrorThinkingMsgId -text "🧠 [AI ĐÃ SUY NGHĨ XONG - ${elapsedSec}s]"
