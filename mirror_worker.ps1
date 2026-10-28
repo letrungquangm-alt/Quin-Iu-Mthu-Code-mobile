@@ -124,12 +124,16 @@ Write-Host " Live Mirror Worker v2.2 (Thinking & Accurate Diff Stats) đang ch�
 Write-Host " Theo dõi transcript: $transcriptPath" -ForegroundColor DarkCyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 
-# Bỏ qua các dòng cũ trước thời điểm bật
-$lastLineIndex = 0
+# Bỏ qua các byte cũ trước thời điểm bật (Streaming Byte Offset - 0% CPU, Siêu tốc)
+$lastByteOffset = 0
 if (Test-Path $transcriptPath) {
-    $existing = Get-Content $transcriptPath -Encoding UTF8
-    $lastLineIndex = $existing.Count
-    Write-Host "Bắt đầu theo dõi từ dòng: $lastLineIndex" -ForegroundColor Yellow
+    try {
+        $fileInfo = Get-Item $transcriptPath -ErrorAction SilentlyContinue
+        if ($fileInfo) {
+            $lastByteOffset = $fileInfo.Length
+            Write-Host "Bắt đầu theo dõi từ byte offset: $lastByteOffset" -ForegroundColor Yellow
+        }
+    } catch {}
 }
 
 $lastReportedCmd = ""
@@ -142,15 +146,13 @@ $global:lastMirrorSec = 0
 while ($true) {
     try {
         if (Test-Path $transcriptPath) {
-            # BẮT BUỘC -Encoding UTF8 để tránh lỗi font chữ tiếng Việt (mojibake)
-            $allLines = Get-Content $transcriptPath -Encoding UTF8 -ErrorAction SilentlyContinue
-            $currentCount = $allLines.Count
+            $fileInfo = Get-Item $transcriptPath -ErrorAction SilentlyContinue
+            if ($fileInfo -and $fileInfo.Length -gt $lastByteOffset) {
+                $stream = [System.IO.File]::Open($transcriptPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+                [void]$stream.Seek($lastByteOffset, [System.IO.SeekOrigin]::Begin)
+                $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::UTF8)
 
-            if ($currentCount -gt $lastLineIndex) {
-                $newLines = $allLines | Select-Object -Skip $lastLineIndex
-                $lastLineIndex = $currentCount
-
-                foreach ($line in $newLines) {
+                while (($line = $reader.ReadLine()) -ne $null) {
                     if ([string]::IsNullOrWhiteSpace($line)) { continue }
 
                     try {
@@ -166,7 +168,7 @@ while ($true) {
                                 if ($global:mirrorThinkingMsgId) { $tempWorkingMsgIds.Add($global:mirrorThinkingMsgId) }
                             } else {
                                 $elapsedSec = [math]::Max(1, [int]([DateTime]::Now - $global:mirrorThinkingStart).TotalSeconds)
-                                if ($elapsedSec -gt $global:lastMirrorSec) {
+                                if ($elapsedSec -ge ($global:lastMirrorSec + 2)) {
                                     $global:lastMirrorSec = $elapsedSec
                                     Edit-TgMessage -messageId $global:mirrorThinkingMsgId -text "🧠 AI đang suy nghĩ (${elapsedSec}s)..."
                                 }
@@ -367,11 +369,14 @@ while ($true) {
                         }
                     } catch {}
                 }
+                $lastByteOffset = $stream.Position
+                $reader.Dispose()
+                $stream.Dispose()
             }
         }
     } catch {
         Start-Sleep -Seconds 1
     }
 
-    Start-Sleep -Milliseconds 500
+    Start-Sleep -Milliseconds 400
 }

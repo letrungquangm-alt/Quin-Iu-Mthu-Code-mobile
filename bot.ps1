@@ -650,31 +650,24 @@ CÁC NGUYÊN TẮC HÀNH ĐỘNG BẮT BUỘC:
         contents = $contentsList
     } | ConvertTo-Json -Depth 6
 
-    [System.IO.File]::WriteAllText($reqFile, $payload, [System.Text.Encoding]::UTF8)
-
-    $modelsToTry = @("gemini-flash-lite-latest", "gemini-flash-latest", "gemini-2.5-flash")
-
+    $postBytes = [System.Text.Encoding]::UTF8.GetBytes(($payload | ConvertTo-Json -Depth 6 -Compress))
+    $modelsToTry = @("gemini-2.5-flash", "gemini-flash-latest", "gemini-flash-lite-latest")
     $tokensUsedThisCall = 25
     $responseText = ""
 
     foreach ($m in $modelsToTry) {
-        $url = "https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent"
+        $url = "https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=$geminiApiKey"
         try {
-            $rawRes = cmd.exe /c "curl -s -X POST `"$url`" -H ""Content-Type: application/json"" -H ""X-goog-api-key: $geminiApiKey"" -d @`"$reqFile`""
-            if (-not [string]::IsNullOrWhiteSpace($rawRes)) {
-                $parsed = $rawRes | ConvertFrom-Json
-                if ($parsed.candidates -and $parsed.candidates[0].content.parts) {
-                    $responseText = $parsed.candidates[0].content.parts[0].text
-                    if ($parsed.usageMetadata -and $parsed.usageMetadata.totalTokenCount) {
-                        $tokensUsedThisCall = [int]$parsed.usageMetadata.totalTokenCount
-                    }
-                    break
+            $parsed = Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body $postBytes -TimeoutSec 25
+            if ($parsed.candidates -and $parsed.candidates[0].content.parts) {
+                $responseText = $parsed.candidates[0].content.parts[0].text
+                if ($parsed.usageMetadata -and $parsed.usageMetadata.totalTokenCount) {
+                    $tokensUsedThisCall = [int]$parsed.usageMetadata.totalTokenCount
                 }
+                break
             }
         } catch {}
     }
-
-    Remove-Item $reqFile -Force -ErrorAction SilentlyContinue
 
     if ([string]::IsNullOrWhiteSpace($responseText)) {
         return "Các model AI đang tạm thời quá tải, bạn vui lòng thử lại sau vài giây nhé!"
@@ -727,30 +720,24 @@ function Ask-GeminiVision {
         )
     } | ConvertTo-Json -Depth 6
 
-    [System.IO.File]::WriteAllText($reqFile, $payload, [System.Text.Encoding]::UTF8)
-
-    $modelsToTry = @("gemini-flash-lite-latest", "gemini-flash-latest", "gemini-2.5-flash")
+    $postBytes = [System.Text.Encoding]::UTF8.GetBytes(($payload | ConvertTo-Json -Depth 6 -Compress))
+    $modelsToTry = @("gemini-2.5-flash", "gemini-flash-latest", "gemini-flash-lite-latest")
     $tokensUsedThisCall = 40
     $responseText = ""
 
     foreach ($m in $modelsToTry) {
-        $url = "https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent"
+        $url = "https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=$geminiApiKey"
         try {
-            $rawRes = cmd.exe /c "curl -s -X POST `"$url`" -H ""Content-Type: application/json"" -H ""X-goog-api-key: $geminiApiKey"" -d @`"$reqFile`""
-            if (-not [string]::IsNullOrWhiteSpace($rawRes)) {
-                $parsed = $rawRes | ConvertFrom-Json
-                if ($parsed.candidates -and $parsed.candidates[0].content.parts) {
-                    $responseText = $parsed.candidates[0].content.parts[0].text
-                    if ($parsed.usageMetadata -and $parsed.usageMetadata.totalTokenCount) {
-                        $tokensUsedThisCall = [int]$parsed.usageMetadata.totalTokenCount
-                    }
-                    break
+            $parsed = Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body $postBytes -TimeoutSec 25
+            if ($parsed.candidates -and $parsed.candidates[0].content.parts) {
+                $responseText = $parsed.candidates[0].content.parts[0].text
+                if ($parsed.usageMetadata -and $parsed.usageMetadata.totalTokenCount) {
+                    $tokensUsedThisCall = [int]$parsed.usageMetadata.totalTokenCount
                 }
+                break
             }
         } catch {}
     }
-
-    Remove-Item $reqFile -Force -ErrorAction SilentlyContinue
 
     if ([string]::IsNullOrWhiteSpace($responseText)) {
         return "AI Vision đang tạm thời bận, bạn hãy gửi lại ảnh nhé!"
@@ -927,7 +914,7 @@ while ($true) {
     if ($global:currentJob) {
         if ($global:currentJob.State -eq 'Running') {
             $elapsedSec = [math]::Max(1, [int]([DateTime]::Now - $global:jobStartTime).TotalSeconds)
-            if ($elapsedSec -gt $global:lastThinkingSec) {
+            if ($elapsedSec -ge ($global:lastThinkingSec + 2)) {
                 $global:lastThinkingSec = $elapsedSec
                 Edit-TelegramMessage -chatId $allowedChatId -messageId $global:thinkingMsgId -text "🧠 AI đang suy nghĩ (${elapsedSec}s)..." | Out-Null
             }

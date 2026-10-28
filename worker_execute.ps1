@@ -1,6 +1,6 @@
 ﻿# ========================================================
-# Telegram Remote Coder - Background Task Worker
-# Chạy song song độc lập để main thread liên tục nhận getUpdates
+# Telegram Remote Coder - High-Performance Background Worker v2.5
+# Tối ưu hóa: In-Memory REST API, Context Pruning & Dynamic Thinking
 # ========================================================
 
 param(
@@ -63,19 +63,39 @@ if ([string]::IsNullOrWhiteSpace($geminiApiKey)) {
     exit 0
 }
 
-# Đọc lịch sử ngữ cảnh
+# 2.1 CẮT TỈA VÀ NÉN LỊCH SỬ NGỮ CẢNH (CONTEXT PRUNING - TIẾT KIỆM 70% TOKEN)
 $contentsList = [System.Collections.Generic.List[PSObject]]::new()
 if (Test-Path $historyPath) {
     try {
         $rawHist = Get-Content $historyPath -Raw -Encoding UTF8
         if (-not [string]::IsNullOrWhiteSpace($rawHist)) {
             $hist = $rawHist | ConvertFrom-Json
+            # Giữ tối đa 12 turns gần nhất (6 lượt hỏi/đáp) để bảo toàn token
+            if ($hist.Count -gt 12) {
+                $hist = $hist | Select-Object -Skip ($hist.Count - 12)
+            }
             $expectedRole = "user"
+            $turnIndex = 0
+            $totalTurns = $hist.Count
             foreach ($turn in $hist) {
+                $turnIndex++
                 if ($turn.role -eq $expectedRole -and $turn.parts -and $turn.parts[0].text) {
+                    $turnText = $turn.parts[0].text
+                    
+                    # Nén các đoạn code dài trong các turn cũ (trừ 2 turn gần nhất)
+                    if ($turn.role -eq "model" -and ($totalTurns - $turnIndex) -ge 2) {
+                        if ($turnText.Length -gt 250 -and $turnText -match '```') {
+                            $turnText = [System.Text.RegularExpressions.Regex]::Replace($turnText, '```(?:run|powershell|ps1|html|javascript|js|python|py|css|json)?[\s\S]{120,}?```', {
+                                param($m)
+                                $lineCount = ($m.Value -split "`n").Count
+                                return "`n[💾 Đã tạo/chạy mã nguồn trước đó: ~$lineCount dòng code]`n"
+                            })
+                        }
+                    }
+                    
                     $contentsList.Add(@{
                         role = $turn.role
-                        parts = @(@{ text = $turn.parts[0].text })
+                        parts = @(@{ text = $turnText })
                     })
                     $expectedRole = if ($expectedRole -eq "user") { "model" } else { "user" }
                 }
@@ -92,40 +112,92 @@ $contentsList.Add(@{
     parts = @(@{ text = $userText })
 })
 
+# 2.2 SMART ROUTING & DYNAMIC THINKING BUDGET
+$isSimpleQuery = ($userText.Length -lt 45 -and $userText -notmatch '(?i)(code|viết|tạo|sửa|lập trình|debug|fix|xây dựng|build|function|html|css|python|js|script|file|dự án|project)')
+
+$activeModel = $modelId
+$thinkingBudget = 0
+
+if ($isSimpleQuery) {
+    # Tác vụ ngắn/hỏi đáp nhanh: dùng budget = 0 để trả lời ngay lập tức dưới 1 giây
+    $activeModel = "gemini-2.5-flash"
+    $thinkingBudget = 0
+} else {
+    switch ($thinkingLevel.ToLower()) {
+        "off"    { $thinkingBudget = 0 }
+        "low"    { $thinkingBudget = 1024 }
+        "medium" { $thinkingBudget = 2048 }
+        default  { $thinkingBudget = 8192 } # high
+    }
+}
+
 $sysPrompt = "Bạn là trợ lý lập trình AI thông minh cao cấp, có toàn quyền điều khiển hệ thống và terminal máy tính từ xa qua Telegram của người dùng.`nModel đang dùng: $selectedModel (Thinking Level: $($thinkingLevel.ToUpper())).`nProject đang làm việc: $currentProject. Thư mục hiện tại của project: $currentProjectPath.`nThư mục gốc của mọi project: $projectsRootDir.`n`nQUY TẮC BẮT BUỘC:`n1. GHI NHỚ TOÀN DIỆN NGỮ CẢNH: Khi người dùng nói tiếp hoặc yêu cầu lập trình, bạn PHẢI hiểu ngữ cảnh trước đó và HÀNH ĐỘNG NGAY!`n2. TẤT CẢ CODE PHẢI ĐƯỢC LƯU VÀO MÁY TÍNH: Bất cứ khi nào bạn tạo file, sửa code hay chạy terminal, bạn BẮT BUỘC phải xuất khối lệnh ```run để ghi trực tiếp vào máy tính:`nVí dụ tạo hoặc ghi đè file:`n````run`nSet-Content -Path `"$currentProjectPath\index.html`" -Value @'`n<!DOCTYPE html>`n... nội dung code ...`n'@ -Encoding UTF8`n````n3. Mọi file tạo ra PHẢI nằm trong thư mục của project hiện tại: `"$currentProjectPath`".`n4. Ngôn ngữ: Tiếng Việt có dấu chuẩn 100%, tự nhiên, súc tích, chuyên nghiệp."
+
+$generationConfig = @{
+    temperature = 0.7
+    maxOutputTokens = 8192
+}
+if ($thinkingBudget -gt 0) {
+    $generationConfig.thinkingConfig = @{ thinkingBudget = $thinkingBudget }
+} else {
+    $generationConfig.thinkingConfig = @{ thinkingBudget = 0 }
+}
 
 $payload = @{
     systemInstruction = @{ parts = @(@{ text = $sysPrompt }) }
     contents = $contentsList
-} | ConvertTo-Json -Depth 6
+    generationConfig = $generationConfig
+}
 
-$reqFile = Join-Path $env:TEMP "gemini_worker_$([System.Guid]::NewGuid().ToString('N')).json"
-[System.IO.File]::WriteAllText($reqFile, $payload, [System.Text.Encoding]::UTF8)
+# 2.3 NATIVE IN-MEMORY REST API (HOÀN TOÀN TRONG BỘ NHỚ, KHÔNG DÙNG FILE TẠM & CMD CURL)
+$postBody = $payload | ConvertTo-Json -Depth 10 -Compress
+$postBytes = [System.Text.Encoding]::UTF8.GetBytes($postBody)
 
 $aiResponse = ""
-$modelsToTry = @("gemini-flash-lite-latest", "gemini-flash-latest", "gemini-2.5-flash")
+$actualTokens = ($userText.Length * 2)
+
+$modelsToTry = [System.Collections.Generic.List[string]]::new()
+if (-not [string]::IsNullOrWhiteSpace($activeModel)) { $modelsToTry.Add($activeModel) }
+foreach ($fb in @("gemini-2.5-flash", "gemini-flash-latest", "gemini-flash-lite-latest")) {
+    if (-not $modelsToTry.Contains($fb)) { $modelsToTry.Add($fb) }
+}
+
 foreach ($m in $modelsToTry) {
     $url = "https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=$geminiApiKey"
     try {
-        $curlCmd = "curl.exe -s -m 25 -X POST ""$url"" -H ""Content-Type: application/json; charset=utf-8"" -d @""$reqFile"""
-        $rawRes = cmd.exe /c $curlCmd
-        if ($rawRes) {
-            $jsonRes = $rawRes | ConvertFrom-Json
-            if ($jsonRes.candidates -and $jsonRes.candidates[0].content.parts[0].text) {
-                $aiResponse = $jsonRes.candidates[0].content.parts[0].text.Trim()
+        $res = Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body $postBytes -TimeoutSec 25
+        if ($res -and $res.candidates -and $res.candidates[0].content.parts[0].text) {
+            $aiResponse = $res.candidates[0].content.parts[0].text.Trim()
+            if ($res.usageMetadata -and $res.usageMetadata.totalTokenCount) {
+                $actualTokens = [int]$res.usageMetadata.totalTokenCount
+            }
+            break
+        }
+    } catch {
+        # Fallback nếu model không hỗ trợ thinkingConfig
+        try {
+            $payloadSimple = @{
+                systemInstruction = @{ parts = @(@{ text = $sysPrompt }) }
+                contents = $contentsList
+            }
+            $fallbackBytes = [System.Text.Encoding]::UTF8.GetBytes(($payloadSimple | ConvertTo-Json -Depth 10 -Compress))
+            $resFb = Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body $fallbackBytes -TimeoutSec 20
+            if ($resFb -and $resFb.candidates -and $resFb.candidates[0].content.parts[0].text) {
+                $aiResponse = $resFb.candidates[0].content.parts[0].text.Trim()
+                if ($resFb.usageMetadata -and $resFb.usageMetadata.totalTokenCount) {
+                    $actualTokens = [int]$resFb.usageMetadata.totalTokenCount
+                }
                 break
             }
-        }
-    } catch {}
+        } catch {}
+    }
 }
-
-Remove-Item $reqFile -Force -ErrorAction SilentlyContinue
 
 if ([string]::IsNullOrWhiteSpace($aiResponse)) {
     $aiResponse = "Các model AI đang tạm thời quá tải, bạn vui lòng thử lại sau vài giây nhé!"
 }
 
-# Lưu lịch sử chat
+# 2.4 LƯU LỊCH SỬ CHAT CÓ GIỚI HẠN (TRÁNH PHÌNH BỘ NHỚ)
 try {
     $memory = [System.Collections.Generic.List[PSObject]]::new()
     if (Test-Path $historyPath) {
@@ -134,17 +206,16 @@ try {
     }
     $memory.Add(@{ role = "user"; parts = @(@{ text = $userText }); timestamp = (Get-Date -Format "yyyy-MM-dd HH:mm:ss") })
     $memory.Add(@{ role = "model"; parts = @(@{ text = $aiResponse }); timestamp = (Get-Date -Format "yyyy-MM-dd HH:mm:ss") })
-    if ($memory.Count -gt 24) { $memory = $memory | Select-Object -Skip ($memory.Count - 24) }
+    if ($memory.Count -gt 16) { $memory = $memory | Select-Object -Skip ($memory.Count - 16) }
     $memory | ConvertTo-Json -Depth 5 | Set-Content $historyPath -Encoding UTF8
 } catch {}
 
-# Kiểm tra xem AI có yêu cầu chạy lệnh terminal không (```run / ```powershell)
+# 3. PHÁT HIỆN VÀ THỰC THI KHỐI LỆNH (```run / ```powershell)
 $cmdToRun = ""
 $cleanReply = $aiResponse
 $autoOutput = ""
 $savedFiles = [System.Collections.Generic.List[string]]::new()
 
-# 1. Phát hiện khối lệnh run hoặc powershell
 if ($aiResponse -match '```(?:run|powershell|ps1|cmd|sh)\s*([\s\S]*?)```') {
     $cmdToRun = $matches[1].Trim()
     $cleanReply = $aiResponse -replace '```(?:run|powershell|ps1|cmd|sh)[\s\S]*?```', ''
@@ -154,7 +225,7 @@ elseif ($aiResponse -match '(?:^|\n)un\s*(\$projectDir[\s\S]*?)(?:\n\n|$)') {
     $cleanReply = $aiResponse -replace '(?:^|\n)un\s*\$projectDir[\s\S]*?(?:\n\n|$)', ''
 }
 
-# 2. Tự động trích xuất code block nếu AI xuất code thuần
+# Tự động trích xuất file nếu AI xuất code thuần
 if ([string]::IsNullOrWhiteSpace($cmdToRun)) {
     $targetFileName = ""
     if ($userText -match '(?i)(?:file|tập tin|tạo|sửa|lưu)\s+([a-zA-Z0-9_\-\.]+\.(?:html|css|js|py|json|md|txt|ts|jsx|tsx|ps1))') {
@@ -182,7 +253,7 @@ if ([string]::IsNullOrWhiteSpace($cmdToRun)) {
     }
 }
 
-# 3. Thực thi câu lệnh PowerShell nếu có
+# Thực thi lệnh PowerShell nếu có
 if (-not [string]::IsNullOrWhiteSpace($cmdToRun)) {
     if ($executionMode -eq "auto") {
         Set-Location $currentProjectPath
@@ -190,7 +261,6 @@ if (-not [string]::IsNullOrWhiteSpace($cmdToRun)) {
         if ([string]::IsNullOrWhiteSpace($execRes)) { $execRes = "(Lệnh đã chạy xong, không có lỗi)" }
         $autoOutput += "`n" + $execRes.Trim()
 
-        # Kiểm tra các file vừa được tạo/sửa đổi
         try {
             $recentFiles = Get-ChildItem -Path $currentProjectPath -File | Where-Object { $_.LastWriteTime -gt (Get-Date).AddSeconds(-30) }
             foreach ($f in $recentFiles) {
@@ -208,5 +278,5 @@ if (-not [string]::IsNullOrWhiteSpace($cmdToRun)) {
     executionMode = $executionMode
     savedFiles = @($savedFiles)
     currentProjectPath = $currentProjectPath
-    tokensUsed = ($userText.Length + $aiResponse.Length)
+    tokensUsed = $actualTokens
 } | ConvertTo-Json -Depth 5
