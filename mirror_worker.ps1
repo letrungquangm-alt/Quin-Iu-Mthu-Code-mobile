@@ -51,6 +51,22 @@ function Delete-TgMessage {
     } catch {}
 }
 
+function Edit-TgMessage {
+    param([int]$messageId, [string]$text)
+    if (-not $messageId -or [string]::IsNullOrWhiteSpace($text)) { return }
+    $url = "https://api.telegram.org/bot$botToken/editMessageText"
+    $bodyObj = @{
+        chat_id = $chatId
+        message_id = $messageId
+        text = $text
+        disable_web_page_preview = $true
+    }
+    $jsonBody = $bodyObj | ConvertTo-Json -Compress
+    try {
+        Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($jsonBody)) -TimeoutSec 5 | Out-Null
+    } catch {}
+}
+
 # Quản lý danh sách file đã biết trong project để phân biệt chính xác Tạo mới (+N -0) vs Sửa cũ (+N -M)
 $projectKnownFiles = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
 
@@ -97,6 +113,9 @@ if (Test-Path $transcriptPath) {
 $lastReportedCmd = ""
 # Danh sách lưu các Message ID tạm thời trong lượt Working hiện tại (sẽ xóa sạch khi xong)
 $tempWorkingMsgIds = New-Object System.Collections.Generic.List[int]
+$global:mirrorThinkingMsgId = $null
+$global:mirrorThinkingStart = $null
+$global:lastMirrorSec = 0
 
 while ($true) {
     try {
@@ -115,28 +134,31 @@ while ($true) {
                     try {
                         $entry = $line | ConvertFrom-Json
 
-                        # 1. BẮT SUY NGHĨ CỦA AI (THINKING / REASONING)
+                        # 1. BẮT SUY NGHĨ CỦA AI (CHẠY THEO GIÂY LIÊN TỤC VÀ KẾT THÚC BẰNG THỜI GIAN/NỘI DUNG)
                         if ($entry.thinking) {
-                            $rawThinking = $entry.thinking.ToString().Trim()
-                            if (-not [string]::IsNullOrWhiteSpace($rawThinking)) {
-                                $cleanThinking = $rawThinking -replace '(?m)^\s*[-*]\s*', '• '
-                                $lines = $cleanThinking -split "\r?\n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
-                                $previewThinking = ($lines | Select-Object -First 4) -join "`n"
-                                if ($previewThinking.Length -gt 380) { $previewThinking = $previewThinking.Substring(0, 380) + "..." }
-
-                                $thinkingMsg = @(
-                                    "🧠 [AI ĐANG SUY NGHĨ / THINKING]",
-                                    $previewThinking
-                                ) -join "`n"
-
-                                Write-Host "[MIRROR] Thinking captured" -ForegroundColor Yellow
-                                $mid = Send-TgLiveStatus -text $thinkingMsg
-                                if ($mid) { $tempWorkingMsgIds.Add($mid) }
+                            if (-not $global:mirrorThinkingStart) {
+                                $global:mirrorThinkingStart = [DateTime]::Now
+                                $global:lastMirrorSec = 1
+                                $global:mirrorThinkingMsgId = Send-TgLiveStatus -text "🧠 AI đang suy nghĩ (1s)..."
+                                if ($global:mirrorThinkingMsgId) { $tempWorkingMsgIds.Add($global:mirrorThinkingMsgId) }
+                            } else {
+                                $elapsedSec = [math]::Max(1, [int]([DateTime]::Now - $global:mirrorThinkingStart).TotalSeconds)
+                                if ($elapsedSec -gt $global:lastMirrorSec) {
+                                    $global:lastMirrorSec = $elapsedSec
+                                    Edit-TgMessage -messageId $global:mirrorThinkingMsgId -text "🧠 AI đang suy nghĩ (${elapsedSec}s)..."
+                                }
                             }
                         }
 
-                        # 2. BẮT TRẠNG THÁI WORKING / TOOL CALLS
+                        # 2. BẮT TRẠNG THÁI WORKING / TOOL CALLS (KẾT THÚC SUY NGHĨ NẾU CÓ)
                         if ($entry.tool_calls) {
+                            if ($global:mirrorThinkingStart) {
+                                $elapsedSec = [math]::Max(1, [int]([DateTime]::Now - $global:mirrorThinkingStart).TotalSeconds)
+                                Edit-TgMessage -messageId $global:mirrorThinkingMsgId -text "🧠 [AI ĐÃ SUY NGHĨ XONG - ${elapsedSec}s]"
+                                $global:mirrorThinkingStart = $null
+                                $global:mirrorThinkingMsgId = $null
+                                $global:lastMirrorSec = 0
+                            }
                             foreach ($tc in $entry.tool_calls) {
                                 $toolName = $tc.name
                                 $summary = if ($tc.args.toolSummary) { $tc.args.toolSummary.ToString().Trim('"', ' ') } else { "" }
@@ -291,6 +313,13 @@ while ($true) {
                         }
                         # 4. BẮT KẾT QUẢ TRẢ LỜI CUỐI CÙNG (RESPONSE TO USER) -> HOÀN THÀNH LƯỢT WORKING
                         elseif ($entry.type -eq "PLANNER_RESPONSE" -and $entry.content -and -not $entry.tool_calls) {
+                            if ($global:mirrorThinkingStart) {
+                                $elapsedSec = [math]::Max(1, [int]([DateTime]::Now - $global:mirrorThinkingStart).TotalSeconds)
+                                Edit-TgMessage -messageId $global:mirrorThinkingMsgId -text "🧠 [AI ĐÃ SUY NGHĨ XONG - ${elapsedSec}s]"
+                                $global:mirrorThinkingStart = $null
+                                $global:mirrorThinkingMsgId = $null
+                                $global:lastMirrorSec = 0
+                            }
                             $replyText = $entry.content.ToString().Trim()
                             if ($replyText.Length -gt 3500) {
                                 $replyText = $replyText.Substring(0, 3500) + "`n`n... [Xem tiếp trên màn hình máy tính]"

@@ -177,6 +177,20 @@ function Edit-TelegramMessage {
     return $false
 }
 
+function Delete-TelegramMessage {
+    param(
+        [int64]$chatId,
+        [int]$messageId
+    )
+    if (-not $messageId) { return }
+    $url = "https://api.telegram.org/bot$botToken/deleteMessage"
+    $bodyObj = @{ chat_id = $chatId; message_id = $messageId }
+    $jsonBody = $bodyObj | ConvertTo-Json -Compress
+    try {
+        Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($jsonBody)) -TimeoutSec 5 | Out-Null
+    } catch {}
+}
+
 function Send-TelegramKeyboard {
     param(
         [int64]$chatId,
@@ -869,6 +883,9 @@ function Execute-UserPrompt {
     # Giúp Main Thread luôn rảnh rỗi để bắt ngay các tin nhắn mới từ Telegram xếp vào Hàng Đợi (Prompt Queue)
     Send-TelegramAction -chatId $chatId -action "typing"
     $global:currentJobPrompt = $preview
+    $global:jobStartTime = [DateTime]::Now
+    $global:lastThinkingSec = 1
+    $global:thinkingMsgId = Send-TelegramMessage -chatId $chatId -text "🧠 AI đang suy nghĩ (1s)..."
     
     $workerScript = Join-Path $rootDir "worker_execute.ps1"
     $global:currentJob = Start-Job -FilePath $workerScript -ArgumentList $chatId, $text, $rootDir
@@ -887,9 +904,20 @@ Write-Host "==========================================================" -Foregro
 $offset = 0
 
 while ($true) {
-    # 1. KIỂM TRA TIẾN TRÌNH LỆNH CHẠY NỀN HIỆN TẠI
+    # 1. KIỂM TRA TIẾN TRÌNH LỆNH CHẠY NỀN HIỆN TẠI (CHẠY THEO GIÂY LIÊN TỤC VÀ KẾT THÚC KHI XONG)
     if ($global:currentJob) {
-        if ($global:currentJob.State -in @('Completed', 'Failed', 'Stopped')) {
+        if ($global:currentJob.State -eq 'Running') {
+            $elapsedSec = [math]::Max(1, [int]([DateTime]::Now - $global:jobStartTime).TotalSeconds)
+            if ($elapsedSec -gt $global:lastThinkingSec) {
+                $global:lastThinkingSec = $elapsedSec
+                Edit-TelegramMessage -chatId $allowedChatId -messageId $global:thinkingMsgId -text "🧠 AI đang suy nghĩ (${elapsedSec}s)..." | Out-Null
+            }
+        }
+        elseif ($global:currentJob.State -in @('Completed', 'Failed', 'Stopped')) {
+            $elapsedSec = [math]::Max(1, [int]([DateTime]::Now - $global:jobStartTime).TotalSeconds)
+            if ($global:thinkingMsgId) {
+                Edit-TelegramMessage -chatId $allowedChatId -messageId $global:thinkingMsgId -text "🧠 [AI ĐÃ SUY NGHĨ XONG - ${elapsedSec}s]" | Out-Null
+            }
             $jobRaw = Receive-Job $global:currentJob | Out-String
             Remove-Job $global:currentJob -Force
             $global:currentJob = $null
