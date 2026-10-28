@@ -1,6 +1,6 @@
 ﻿# ========================================================
-# Telegram Remote Coder - Live Activity Mirror Worker v2.4 (Rich HTML & Syntax Colors)
-# Tự động hiển thị tiến trình: In đậm, Tô màu cú pháp Code, Quote viền màu & Live Ticking
+# Telegram Remote Coder - Live Activity Mirror Worker v2.5 (Color-Coded File Ops)
+# Tự động hiển thị tiến trình: In đậm, 🟢 Tạo mới (Xanh lá), 🟠 Sửa cũ (Cam), 🔴 Xóa (Đỏ)
 # ========================================================
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -169,7 +169,7 @@ if (Test-Path $syncBridgePath) {
 $transcriptPath = "$env:USERPROFILE\.gemini\antigravity\brain\$conversationId\.system_generated\logs\transcript.jsonl"
 
 Write-Host "==========================================================" -ForegroundColor Cyan
-Write-Host " Live Mirror Worker v2.4 (Rich HTML & Syntax Colors) đang chạy..." -ForegroundColor Cyan
+Write-Host " Live Mirror Worker v2.5 (Color-Coded File Ops) đang chạy..." -ForegroundColor Cyan
 Write-Host " Theo dõi transcript: $transcriptPath" -ForegroundColor DarkCyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 
@@ -275,7 +275,7 @@ while ($true) {
                             }
                         }
 
-                        # B. BẮT TRẠNG THÁI WORKING / TOOL CALLS (HIỂN THỊ NGAY TOOL SUMMARY ĐẦU DÒNG, KHÔNG KHOẢNG LẶNG)
+                        # B. BẮT TRẠNG THÁI WORKING / TOOL CALLS (HIỂN THỊ NGAY TOOL SUMMARY ĐẦU DÒNG, MÀU SẮC CHUẨN)
                         if ($entry.tool_calls) {
                             Set-SyncBridgeWorkingStatus -working $true
                             if ($global:mirrorThinkingStart -and $global:mirrorThinkingMsgId) {
@@ -295,9 +295,16 @@ while ($true) {
                                 if ($toolName -eq "run_command") {
                                     $cmd = if ($tc.args.CommandLine) { $tc.args.CommandLine.ToString().Trim('"', ' ') } else { "" }
                                     $displayCmd = if ($cmd.Length -gt 250) { $cmd.Substring(0, 250) + "... [dài]" } else { $cmd }
-                                    $actionSummary = if ($rawSummary) { $rawSummary } else { "Chạy lệnh hệ thống" }
                                     $safeCmd = [System.Net.WebUtility]::HtmlEncode($displayCmd)
-                                    $actionDetailHtml = "▶️ <b>Lệnh:</b> <pre><code class=""language-powershell"">$safeCmd</code></pre>"
+
+                                    # Nếu là thao tác XÓA FILE -> Màu đỏ 🔴
+                                    if ($cmd -match "(?i)(Remove-Item|rm\s+|del\s+|rmdir|unlink)") {
+                                        $actionSummary = if ($rawSummary) { $rawSummary } else { "Xóa file / thư mục" }
+                                        $actionDetailHtml = "🔴 <b>[XÓA FILE / THƯ MỤC]:</b>`n<pre><code class=""language-diff"">- $safeCmd</code></pre>"
+                                    } else {
+                                        $actionSummary = if ($rawSummary) { $rawSummary } else { "Chạy lệnh hệ thống" }
+                                        $actionDetailHtml = "▶️ <b>Lệnh:</b> <pre><code class=""language-powershell"">$safeCmd</code></pre>"
+                                    }
                                 }
                                 elseif ($toolName -eq "edit_file") {
                                     $rawPath = if ($tc.args.Path) { $tc.args.Path.ToString().Trim('"', ' ') } else { "file" }
@@ -316,9 +323,9 @@ while ($true) {
                                     [void]$projectKnownFiles.Add($rawPath)
                                     [void]$projectKnownFiles.Add($fileName)
 
-                                    $diffStat = "(+$linesAdded -$linesRemoved)"
+                                    # SỬA FILE -> Màu cam 🟠
                                     $actionSummary = if ($rawSummary) { $rawSummary } else { "Chỉnh sửa code $fileName" }
-                                    $actionDetailHtml = "📁 <b>File:</b> <code>$fileName</code> <b>[SỬA FILE CŨ]</b> <code>$diffStat</code>"
+                                    $actionDetailHtml = "🟠 <b>[SỬA FILE]:</b> <code>$fileName</code>`n<pre><code class=""language-diff"">+ $linesAdded dòng thêm`n- $linesRemoved dòng sửa</code></pre>"
                                 }
                                 elseif ($toolName -eq "write_file") {
                                     $rawPath = if ($tc.args.Path) { $tc.args.Path.ToString().Trim('"', ' ') } else { "file" }
@@ -347,19 +354,16 @@ while ($true) {
                                         if ($linesRemoved -eq 0 -and -not $isAppend) { $linesRemoved = 1 }
 
                                         $linesAdded = $contentLines
-                                        $diffStat = "(+$linesAdded -$linesRemoved)"
-                                        $actionTag = "[SỬA FILE CŨ]"
-                                        $defaultSum = "Cập nhật file $fileName"
+                                        $actionSummary = if ($rawSummary) { $rawSummary } else { "Cập nhật file $fileName" }
+                                        # SỬA FILE CŨ -> Màu cam 🟠
+                                        $actionDetailHtml = "🟠 <b>[SỬA FILE]:</b> <code>$fileName</code>`n<pre><code class=""language-diff"">+ $linesAdded dòng thêm`n- $linesRemoved dòng sửa</code></pre>"
                                     } else {
-                                        $diffStat = "(+$contentLines -0)"
-                                        $actionTag = "[TẠO FILE MỚI]"
-                                        $defaultSum = "Tạo mới file $fileName"
                                         [void]$projectKnownFiles.Add($rawPath)
                                         [void]$projectKnownFiles.Add($fileName)
+                                        $actionSummary = if ($rawSummary) { $rawSummary } else { "Tạo mới file $fileName" }
+                                        # TẠO FILE MỚI -> Màu xanh lá 🟢
+                                        $actionDetailHtml = "🟢 <b>[TẠO FILE MỚI]:</b> <code>$fileName</code>`n<pre><code class=""language-diff"">+ $contentLines dòng mới</code></pre>"
                                     }
-
-                                    $actionSummary = if ($rawSummary) { $rawSummary } else { $defaultSum }
-                                    $actionDetailHtml = "📁 <b>File:</b> <code>$fileName</code> <b>$actionTag</b> <code>$diffStat</code>"
                                 }
                                 elseif ($toolName -eq "read_file") {
                                     $rawPath = if ($tc.args.Path) { $tc.args.Path.ToString().Trim('"', ' ') } else { "file" }
