@@ -1,4 +1,4 @@
-﻿# ========================================================
+﻿﻿# ========================================================
 # Telegram Remote Coder - Live Activity Mirror Worker v2.2
 # Tự động hiển thị tiến trình: Thinking, Working, Sửa/Tạo file chuẩn quy tắc (+ / -)
 # và TỰ ĐỘNG XÓA tin nhắn tạm thời khi câu trả lời hoàn tất!
@@ -106,7 +106,8 @@ function Index-ExistingFiles {
 
 # Nạp các file đã có trong workspace & scratch
 Index-ExistingFiles -dir $rootDir
-$modelDir = if ($config.PROJECTS_ROOT_DIR) { $config.PROJECTS_ROOT_DIR } else { "$env:USERPROFILE\.gemini\antigravity\scratch\model" }`r`nIndex-ExistingFiles -dir $modelDir
+$modelDir = if ($config.PROJECTS_ROOT_DIR) { $config.PROJECTS_ROOT_DIR } else { "$env:USERPROFILE\.gemini\antigravity\scratch\model" } 
+Index-ExistingFiles -dir $modelDir
 
 # Lấy ID phiên làm việc Antigravity hiện tại
 $conversationId = "7f7131ce-dc72-490f-97bd-4a675f9dd0c7"
@@ -126,11 +127,12 @@ Write-Host "==========================================================" -Foregro
 
 # Bỏ qua các byte cũ trước thời điểm bật (Streaming Byte Offset - 0% CPU, Siêu tốc)
 $lastByteOffset = 0
+$lastProcessedStep = 0
 if (Test-Path $transcriptPath) {
     try {
         $fileInfo = Get-Item $transcriptPath -ErrorAction SilentlyContinue
         if ($fileInfo) {
-            $lastByteOffset = $fileInfo.Length
+            $lastByteOffset = [math]::Max(0, ($fileInfo.Length - 8192))
             Write-Host "Bắt đầu theo dõi từ byte offset: $lastByteOffset" -ForegroundColor Yellow
         }
     } catch {}
