@@ -17,3 +17,6 @@ stream_state.json
 outbox/
 antigravity_ls.json
 bridge_state.json
+incoming_photo.jpg
+*.jpg
+*.png
