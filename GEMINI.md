@@ -12,13 +12,13 @@
 - Cloud Fallback: Vercel serverless webhook automatically dropped when PC runs (`deleteWebhook`).
 
 ## 3. UI/UX & Interaction Standards
-- **In-Place Live Stopwatch**:
+- **In-Place Live Stopwatch & Freeze Rule**:
   - Live ticker running every 2.0s on the single status bubble (`promptMsgId`).
   - Seamlessly transitions across:
-    - 📖 `[ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (Xs)...]`
-    - ✏️ `[ĐÃ CẬP NHẬT PROMPT MỚI, KHỞI ĐỘNG LẠI (Xs)...]`
-    - 💡 `[ĐÃ CÓ CÁCH, ĐỢI MÌNH CHÚT - Xs]`
-    - ⏳ `[ĐÃ XONG YÊU CẦU CỦA BẠN, CHỜ CHÚT TÔI ĐANG GỬI PHẢN HỒI YÊU CẦU CỦA BẠN (Xs)...]`
+    - 📖 `[ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (Xs)...]` (ticking)
+    - ✏️ `[ĐÃ CẬP NHẬT PROMPT MỚI, KHỞI ĐỘNG LẠI (Xs)...]` (ticking)
+    - 💡 `[ĐÃ CÓ CÁCH, ĐỢI MÌNH CHÚT - Xs]` (ticking)
+    - ⏳ `[ĐÃ XONG YÊU CẦU CỦA BẠN, CHỜ CHÚT TÔI ĐANG GỬI PHẢN HỒI YÊU CẦU CỦA BẠN (Xs)]` (FROZEN: Đóng băng đồng hồ bấm giờ ngay lập tức vì tác vụ đã hoàn tất xong, cố định số giây thực thi cuối cùng, KHÔNG đếm tiếp).
 - **1-Touch Cancel Button**:
   - Inline keyboard `[🛑 Dừng tác vụ (Cancel)]` attached directly under active status bubbles.
   - User tap triggers `callback_query` to immediately abort ongoing commands, clean up, and notify.

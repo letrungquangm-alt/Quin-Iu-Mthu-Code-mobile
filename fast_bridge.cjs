@@ -446,7 +446,7 @@ let tempMsgIds = [];
 // --- LIVE TICKING STOPWATCH (EVERY 2.0 SECONDS - CHỐNG NGHẼN 429) ---
 
 async function updateStatusBubble() {
-    if (!promptMsgId || !promptStartTime || currentPhase === 'IDLE' || isUpdatingStatus) return;
+    if (!promptMsgId || !promptStartTime || currentPhase === 'IDLE' || currentPhase === 'PREPARING_RESPONSE' || isUpdatingStatus) return;
 
     const elapsed = Math.max(1, Math.round((Date.now() - promptStartTime) / 1000));
     let text = '';
@@ -463,8 +463,6 @@ async function updateStatusBubble() {
     } else if (currentPhase === 'THINKING') {
         const safe = escapeHtml(promptTextSaved || 'Yêu cầu của bạn');
         text = `💡 <b>[ĐÃ CÓ CÁCH, ĐỢI MÌNH CHÚT - ${elapsed}s]</b>\n<blockquote><i>${safe}</i></blockquote>`;
-    } else if (currentPhase === 'PREPARING_RESPONSE') {
-        text = `⏳ <b>[ĐÃ XONG YÊU CẦU CỦA BẠN, CHỜ CHÚT TÔI ĐANG GỬI PHẢN HỒI YÊU CẦU CỦA BẠN (${elapsed}s)...]</b>`;
     } else {
         return;
     }
@@ -614,6 +612,7 @@ async function processTranscript() {
             if (entry.tool_calls && entry.tool_calls.length > 0) {
                 currentToolStartTime = Date.now();
                 currentPhase = 'THINKING'; // Duy trì trạng thái ticking trong suốt quá trình tool chạy
+                startTicker(); // Tiếp tục đồng hồ nếu có thêm tool tiếp theo
                 const tc = entry.tool_calls[0];
                 const { summary, bubbleText } = formatToolCall(tc);
                 currentToolSummary = summary;
@@ -622,7 +621,7 @@ async function processTranscript() {
                 if (currentWorkingMsgId) tempMsgIds.push(currentWorkingMsgId);
             }
 
-            // Giai đoạn: Hoàn tất Tool Call -> SỬA BÓNG TIẾN TRÌNH THÀNH "ĐÃ XONG YÊU CẦU..."
+            // Giai đoạn: Hoàn tất Tool Call -> DỪNG ĐẾM GIÂY & CỐ ĐỊNH THỜI GIAN HOÀN TẤT
             if (entry.type === 'GENERIC' && entry.content) {
                 const wSec = currentToolStartTime ? Math.max(1, Math.round((Date.now() - currentToolStartTime) / 1000)) : 1;
                 const safeTask = escapeHtml(currentToolSummary || 'Tác vụ');
@@ -636,9 +635,15 @@ async function processTranscript() {
                     currentWorkingMsgId = null;
                 }
 
+                // DỪNG ĐẾM GIÂY NGAY LẬP TỨC: Tác vụ đã xong, số giây này là thời gian cuối cùng của tác vụ!
+                stopTicker();
                 currentPhase = 'PREPARING_RESPONSE';
+                const finalTaskSec = promptStartTime ? Math.max(1, Math.round((Date.now() - promptStartTime) / 1000)) : 1;
+                const doneText = `⏳ <b>[ĐÃ XONG YÊU CẦU CỦA BẠN, CHỜ CHÚT TÔI ĐANG GỬI PHẢN HỒI YÊU CẦU CỦA BẠN (${finalTaskSec}s)]</b>`;
+
                 if (promptMsgId) {
-                    await updateStatusBubble();
+                    await editMsg(activeChatId, promptMsgId, doneText, 'HTML', cancelKeyboard);
+                    lastStatusText = doneText;
                 }
 
                 sendTyping(activeChatId, activeThreadId);
