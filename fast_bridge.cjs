@@ -36,6 +36,21 @@ const {
     getQueueListMarkup
 } = require('./lib/queue.cjs');
 
+const {
+    MASTER_PASSWORD,
+    getMainMenuMarkup,
+    getDriveSelectionMarkup,
+    getMainMenuText,
+    handleCreateProjectClick,
+    verifyMasterPassword,
+    isWaitingForMasterPassword,
+    cancelWaitingPassword,
+    isSuperAdmin,
+    setSuperAdmin,
+    getProjectWizard,
+    resetProjectWizard
+} = require('./lib/menu.cjs');
+
 const rootDir = __dirname;
 const conversationId = '7f7131ce-dc72-490f-97bd-4a675f9dd0c7';
 const transcriptPath = `C:\\Users\\letru\\.gemini\\antigravity\\brain\\${conversationId}\\.system_generated\\logs\\transcript.jsonl`;
@@ -812,6 +827,100 @@ async function pollUpdates() {
                             continue;
                         }
 
+                        // K. MASTER HUB: TẠO DỰ ÁN MỚI (KÈM EASTER EGG GÕ 7 LẦN)
+                        if (cbData === 'hub_create_proj') {
+                            const result = handleCreateProjectClick(
+                                chatId,
+                                activeThreadId,
+                                async () => {
+                                    // 🚀 KÍCH HOẠT KHI NHẤP 7 LẦN LIÊN TỤC
+                                    await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: '🔒 ĐÃ KÍCH HOẠT CHẾ ĐỘ BÍ MẬT 7-CLICK!' });
+                                    const secretPrompt = `🔒 <b>[PHÁT HIỆN GÕ 7 LẦN LIÊN TỤC - KÍCH HOẠT CHẾ ĐỘ SUPER ADMIN]</b>\n──────────────────────\nBro vừa mở khóa cổng bảo mật bí mật của hệ sinh thái QuinloveRin Code!\n\n<i>Vui lòng nhập mật khẩu tối cao để nắm toàn quyền sử dụng repo này:</i>`;
+                                    await sendMsg(chatId, secretPrompt, activeThreadId, 'HTML');
+                                },
+                                async () => {
+                                    // 📁 BẤM 1 LẦN BÌNH THƯỜNG -> KHỞI TẠO DỰ ÁN
+                                    await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: '📁 Bắt đầu tạo dự án mới...' });
+                                    const wiz = getProjectWizard();
+                                    wiz.active = true;
+                                    wiz.chatId = chatId;
+                                    wiz.threadId = activeThreadId;
+                                    wiz.step = 'AWAITING_NAME';
+                                    const askName = `📁 <b>[KHỞI TẠO DỰ ÁN MỚI - BƯỚC 1/2]</b>\n──────────────────────\nBro muốn đặt tên cho dự án mới là gì?\n<i>(Ví dụ: <code>App-Ban-Hang</code>, <code>Landing-Page</code>, <code>Bot-Crypto</code>...)</i>\n\n👉 Hãy gửi tên dự án vào ô chat:`;
+                                    await sendMsg(chatId, askName, activeThreadId, 'HTML');
+                                }
+                            );
+                            if (result === 'WAITING_CLICKS') {
+                                await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: '...' });
+                            }
+                            continue;
+                        }
+
+                        // L. MASTER HUB: DANH SÁCH DỰ ÁN
+                        if (cbData === 'hub_list_proj') {
+                            await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: 'Đang tải danh sách...' });
+                            let listText = `📂 <b>[DANH SÁCH DỰ ÁN HIỆN CÓ]:</b>\n──────────────────────\n`;
+                            listText += `• <b>Dự án chính:</b> <code>Quin-Iu-Mthu</code> (Đang chạy tại Topic 315)\n`;
+                            listText += `• <b>Thư mục gốc:</b> <code>E:\\MThu Mobile Code</code>\n\n`;
+                            listText += `<i>Bro có thể bấm nút "🚀 Tạo Dự Án Mới" để spawn thêm không gian làm việc mới độc lập!</i>`;
+                            await sendMsg(chatId, listText, activeThreadId, 'HTML', getMainMenuMarkup());
+                            continue;
+                        }
+
+                        // M. MASTER HUB: TRẠNG THÁI HỆ THỐNG
+                        if (cbData === 'hub_status') {
+                            await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: 'Trạng thái: Trực tuyến 100%' });
+                            const adminStatus = isSuperAdmin() ? '👑 Super Admin (Đã mở khóa)' : '🛡️ User Mode';
+                            const statusText = `⚡ <b>[TRẠNG THÁI HỆ THỐNG QUINLOVERIN CODE]</b>\n──────────────────────\n🖥️ <b>Máy tính:</b> SẴN SÀNG 100% (Long Polling)\n🔒 <b>Quyền hạn:</b> ${adminStatus}\n🚀 <b>Dự án:</b> Quin-Iu-Mthu (Topic 315)\n🌐 <b>Cloud Edge:</b> quiniumthucode.vercel.app\n⏱️ <b>Ticking Engine:</b> Live 1.5s Stopwatch\n\n✨ Mọi tiến trình đều đang hoạt động hoàn hảo!`;
+                            await sendMsg(chatId, statusText, activeThreadId, 'HTML', getMainMenuMarkup());
+                            continue;
+                        }
+
+                        // N. MASTER HUB: BÀN GIAO CLOUD
+                        if (cbData === 'hub_cloud') {
+                            await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: '☁️ Chuyển giao Vercel Cloud...' });
+                            await handleDisconnectCloud();
+                            continue;
+                        }
+
+                        // O. MASTER HUB: BÀN PHÍM PIN
+                        if (cbData === 'hub_pin') {
+                            await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: 'Bàn phím PIN 6585' });
+                            currentPin = '';
+                            const initialScreen = `📟 <b>[BÀN PHÍM XÁC THỰC KẾT NỐI]</b>\n──────────────────────\nMàn hình: <code>${getPinDisplay('')}</code>\n<i>(Nhập mã 4 số rồi bấm ↵ Enter để kết nối với PC)</i>`;
+                            await sendMsg(chatId, initialScreen, activeThreadId, 'HTML', getKeypadMarkup());
+                            continue;
+                        }
+
+                        // P. PROJECT WIZARD: CHỌN Ổ ĐĨA E: HOẶC C:
+                        if (cbData === 'wizard_drive_E' || cbData === 'wizard_drive_C') {
+                            const drive = cbData === 'wizard_drive_E' ? 'E' : 'C';
+                            const wiz = getProjectWizard();
+                            const pName = wiz.projectName || 'New-Project';
+                            const pPath = drive === 'E' ? `E:\\${pName}` : `C:\\Users\\letru\\.gemini\\antigravity\\scratch\\model\\${pName}`;
+                            
+                            try {
+                                if (!fs.existsSync(pPath)) {
+                                    fs.mkdirSync(pPath, { recursive: true });
+                                }
+                            } catch (e) {}
+
+                            await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: `✅ Đã tạo dự án tại ổ ${drive}:` });
+                            const createdText = `🎉 <b>[ĐÃ KHỞI TẠO DỰ ÁN MỚI THÀNH CÔNG!]</b>\n──────────────────────\n📁 <b>Tên dự án:</b> <code>${pName}</code>\n💾 <b>Vị trí lưu trữ:</b> <code>${pPath}</code>\n🖥️ <b>Cửa sổ làm việc mới:</b> ĐÃ SẴN SÀNG\n\n✨ Dự án mới đã được khởi tạo như một workspace độc lập hoàn chỉnh! Bro có thể yêu cầu viết code vào dự án này bất kỳ lúc nào!`;
+                            resetProjectWizard();
+                            await sendMsg(chatId, createdText, activeThreadId, 'HTML', getMainMenuMarkup());
+                            forwardToAntigravity(`[DỰ ÁN MỚI ĐÃ TẠO]: Người dùng vừa tạo dự án mới '${pName}' tại thư mục: ${pPath}`);
+                            continue;
+                        }
+
+                        // Q. PROJECT WIZARD: HỦY TẠO DỰ ÁN
+                        if (cbData === 'wizard_cancel') {
+                            resetProjectWizard();
+                            await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: 'Đã hủy tạo dự án' });
+                            await sendMsg(chatId, `❌ <b>[ĐÃ HỦY KHỞI TẠO DỰ ÁN]</b>`, activeThreadId, 'HTML', getMainMenuMarkup());
+                            continue;
+                        }
+
                         continue;
                     }
 
@@ -867,6 +976,42 @@ async function pollUpdates() {
                                 getQueueButtons(editedId)
                             );
                         }
+                        continue;
+                    }
+
+                    // 1. Kiểm tra nếu đang chờ mật khẩu tối cao Super Admin (Easter Egg 7 lần)
+                    if (isWaitingForMasterPassword()) {
+                        if (verifyMasterPassword(userText)) {
+                            console.log('[Easter Egg] Mật mã chính xác: 270927-260626-ltqlovepmt! Super Admin Unlocked!');
+                            forwardToAntigravity(`[XÁC THỰC SUPER ADMIN THÀNH CÔNG]: Người dùng đã nhập đúng mật mã bí mật '270927-260626-ltqlovepmt' qua cơ chế gõ 7 lần. Toàn quyền quản trị repo đã được kích hoạt!`);
+                            const adminUnlockedText = `👑 <b>[XÁC THỰC THÀNH CÔNG - SUPER ADMIN ACTIVATED]</b>\n──────────────────────\n🔑 <b>Mật khẩu chính xác:</b> <code>270927-260626-ltqlovepmt</code>\n✨ <b>Quyền hạn:</b> TOÀN QUYỀN SỞ HỮU &amp; ĐIỀU HÀNH REPO\n🚀 <b>Trạng thái:</b> Master Control Board đã mở khóa 100%!\n\nBro đã nắm giữ toàn quyền sử dụng repo và kiểm soát toàn bộ hệ sinh thái QuinloveRin Code!`;
+                            await sendMsg(chatId, adminUnlockedText, activeThreadId, 'HTML', getMainMenuMarkup());
+                            continue;
+                        } else {
+                            cancelWaitingPassword();
+                            await sendMsg(chatId, `❌ <b>[MẬT KHẨU KHÔNG CHÍNH XÁC]</b>\nĐã hủy chế độ xác thực bí mật. Trở về trạng thái bình thường.`, activeThreadId, 'HTML', getMainMenuMarkup());
+                            continue;
+                        }
+                    }
+
+                    // 2. Kiểm tra nếu đang trong Wizard tạo dự án mới (Bước 1: Nhận tên dự án)
+                    const currentWiz = getProjectWizard();
+                    if (currentWiz.active && currentWiz.step === 'AWAITING_NAME') {
+                        const cleanProjectName = userText.trim().replace(/[^a-zA-Z0-9_\-]/g, '_');
+                        if (!cleanProjectName) {
+                            await sendMsg(chatId, `❌ Tên dự án không hợp lệ. Vui lòng gửi lại tên dự án (ví dụ: <code>App-Ban-Hang</code>):`, activeThreadId);
+                            continue;
+                        }
+                        currentWiz.projectName = cleanProjectName;
+                        currentWiz.step = 'AWAITING_DRIVE';
+                        const drivePrompt = `💾 <b>[KHỞI TẠO DỰ ÁN MỚI - BƯỚC 2/2]</b>\n──────────────────────\n• <b>Tên dự án:</b> <code>${cleanProjectName}</code>\n\nBro muốn lưu trữ dự án này trên ổ đĩa nào?`;
+                        await sendMsg(chatId, drivePrompt, activeThreadId, 'HTML', getDriveSelectionMarkup());
+                        continue;
+                    }
+
+                    // 3. Menu Hub Command (/menu, /start, /hub)
+                    if (/^(?:\/menu|\/start|\/hub|menu)$/i.test(userText.trim())) {
+                        await sendMsg(chatId, getMainMenuText(), activeThreadId, 'HTML', getMainMenuMarkup());
                         continue;
                     }
 
