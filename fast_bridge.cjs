@@ -190,12 +190,13 @@ function mdToTgHtml(text) {
 async function sendLongResponse(chatId, answerText, totalSec, threadId = null) {
     if (!answerText) return;
 
+    const targetThreadId = threadId || activeThreadId || 315;
     const maxLen = 3500;
     const headerTitle = `🤖 <b>[MÁY TÍNH ĐÃ PHẢN HỒI XONG TRONG ${totalSec}s]:</b>\n\n`;
 
     if (answerText.length <= maxLen) {
         const html = mdToTgHtml(answerText);
-        await sendMsg(chatId, `${headerTitle}${html}`, threadId);
+        await sendMsg(chatId, `${headerTitle}${html}`, targetThreadId);
         return;
     }
 
@@ -230,7 +231,7 @@ async function sendLongResponse(chatId, answerText, totalSec, threadId = null) {
     for (let i = 0; i < chunks.length; i++) {
         const html = mdToTgHtml(chunks[i]);
         const header = (i === 0) ? headerTitle : `<i>(Phần ${i + 1}/${chunks.length})</i>\n\n`;
-        await sendMsg(chatId, `${header}${html}`, threadId);
+        await sendMsg(chatId, `${header}${html}`, targetThreadId);
         if (i < chunks.length - 1) {
             await new Promise(r => setTimeout(r, 200));
         }
@@ -241,12 +242,13 @@ async function sendLongResponse(chatId, answerText, totalSec, threadId = null) {
 
 async function runCountdownCleanup(chatId, threadId, msgIdsToDelete) {
     if (!msgIdsToDelete || msgIdsToDelete.length === 0) return;
+    const targetThreadId = threadId || activeThreadId || 315;
     try {
         console.log(`[Countdown Cleanup] Bắt đầu đếm ngược 10s để dọn ${msgIdsToDelete.length} tin nhắn...`);
         const countdownMsgId = await sendMsg(
             chatId,
             `🧹 <b>[ĐANG DỌN DẸP TIẾN TRÌNH TRONG VÒNG 10 GIÂY...]</b>`,
-            threadId
+            targetThreadId
         );
 
         const countdownSteps = [8, 6, 4, 2, 1];
@@ -402,8 +404,18 @@ function forwardToAntigravity(text) {
 
 // --- STATE MANAGEMENT ---
 
-let activeChatId = allowedChatId || -1004457846636;
-let activeThreadId = null;
+let activeChatId = -1004457846636;
+let activeThreadId = 315;
+
+if (fs.existsSync(syncBridgePath)) {
+    try {
+        const br = JSON.parse(fs.readFileSync(syncBridgePath, 'utf8').replace(/^\uFEFF/, ''));
+        if (br.activeChatId) activeChatId = Number(br.activeChatId);
+        if (br.activeThreadId) activeThreadId = Number(br.activeThreadId);
+    } catch (e) {}
+}
+if (!activeThreadId) activeThreadId = 315;
+if (!activeChatId) activeChatId = -1004457846636;
 
 let promptStartTime = null;
 let promptTextSaved = '';
