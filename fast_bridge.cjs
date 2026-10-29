@@ -903,13 +903,48 @@ async function pollUpdates() {
                                 if (!fs.existsSync(pPath)) {
                                     fs.mkdirSync(pPath, { recursive: true });
                                 }
+                                const geminiDoc = `# Dự Án: ${pName}\n\n- Khởi tạo lúc: ${new Date().toLocaleString('vi-VN')}\n- Vị trí: ${pPath}\n- Hệ điều hành: Windows\n- Trạng thái: Sẵn sàng\n`;
+                                fs.writeFileSync(path.join(pPath, 'GEMINI.md'), geminiDoc, 'utf8');
                             } catch (e) {}
 
+                            // 1. Tạo Forum Topic mới trên Telegram Supergroup
+                            let newTopicId = null;
+                            try {
+                                const topicRes = await tgApiRaw('createForumTopic', {
+                                    chat_id: activeChatId,
+                                    name: `🚀 Dự Án: ${pName}`
+                                });
+                                if (topicRes.ok && topicRes.result?.message_thread_id) {
+                                    newTopicId = topicRes.result.message_thread_id;
+                                    console.log(`[Bridge Spawner] Đã tạo Telegram Topic mới: #${newTopicId} (${pName})`);
+                                    await sendMsg(
+                                        activeChatId,
+                                        `🎉 <b>[CỬA SỔ DỰ ÁN MỚI ĐÃ KHỞI TẠO]</b>\n──────────────────────\n📁 <b>Tên dự án:</b> <code>${pName}</code>\n💾 <b>Thư mục PC:</b> <code>${pPath}</code>\n🚀 <b>Topic ID:</b> <code>${newTopicId}</code>\n\n✨ Cửa sổ Antigravity PC và Topic Telegram đã sẵn sàng! Bro gửi yêu cầu code ngay tại Topic này nhé!`,
+                                        newTopicId,
+                                        'HTML'
+                                    );
+                                }
+                            } catch (e) {
+                                console.error('[Bridge Spawner Topic Error]:', e.message);
+                            }
+
+                            // 2. Mở Cửa Sổ Antigravity IDE Mới trên PC
+                            try {
+                                const agyExe = 'C:\\Users\\letru\\AppData\\Local\\Programs\\antigravity\\Antigravity.exe';
+                                if (fs.existsSync(agyExe)) {
+                                    execFile(agyExe, [pPath], { detached: true, stdio: 'ignore' }).unref();
+                                    console.log(`[Bridge Spawner] Đã mở Cửa sổ Antigravity IDE mới cho: ${pPath}`);
+                                }
+                            } catch (e) {
+                                console.error('[Bridge Spawner Antigravity Error]:', e.message);
+                            }
+
                             await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: `✅ Đã tạo dự án tại ổ ${drive}:` });
-                            const createdText = `🎉 <b>[ĐÃ KHỞI TẠO DỰ ÁN MỚI THÀNH CÔNG!]</b>\n──────────────────────\n📁 <b>Tên dự án:</b> <code>${pName}</code>\n💾 <b>Vị trí lưu trữ:</b> <code>${pPath}</code>\n🖥️ <b>Cửa sổ làm việc mới:</b> ĐÃ SẴN SÀNG\n\n✨ Dự án mới đã được khởi tạo như một workspace độc lập hoàn chỉnh! Bro có thể yêu cầu viết code vào dự án này bất kỳ lúc nào!`;
+                            const topicNote = newTopicId ? `\n🚀 <b>Telegram Topic mới:</b> <code>#${newTopicId}</code>` : '';
+                            const createdText = `🎉 <b>[ĐÃ KHỞI TẠO DỰ ÁN MỚI THÀNH CÔNG!]</b>\n──────────────────────\n📁 <b>Tên dự án:</b> <code>${pName}</code>\n💾 <b>Vị trí lưu trữ:</b> <code>${pPath}</code>\n🖥️ <b>Cửa sổ Antigravity PC:</b> ĐÃ BẬT MỞ${topicNote}\n\n✨ Cửa sổ làm việc mới trên PC và Topic Telegram đã được đồng bộ song song 1-1!`;
                             resetProjectWizard();
                             await sendMsg(chatId, createdText, activeThreadId, 'HTML', getMainMenuMarkup());
-                            forwardToAntigravity(`[DỰ ÁN MỚI ĐÃ TẠO]: Người dùng vừa tạo dự án mới '${pName}' tại thư mục: ${pPath}`);
+                            forwardToAntigravity(`[DỰ ÁN MỚI ĐÃ TẠO]: Người dùng vừa tạo dự án mới '${pName}' tại: ${pPath}${topicNote}`);
                             continue;
                         }
 
