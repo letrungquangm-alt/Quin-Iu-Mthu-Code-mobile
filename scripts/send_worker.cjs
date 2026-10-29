@@ -96,6 +96,9 @@ function formatStopwatch(sec) {
 }
 
 async function tgApi(method, payload) {
+    if (payload.message_thread_id === null || payload.message_thread_id === undefined) {
+        delete payload.message_thread_id;
+    }
     const url = `https://api.telegram.org/bot${botToken}/${method}`;
     let attempts = 0;
 
@@ -250,7 +253,7 @@ async function run() {
 
     const action = payload.action || (payload.text ? 'response' : 'text');
     const chatId = payload.chat_id || supergroupId;
-    const threadId = payload.message_thread_id || defaultThreadId;
+    const threadId = (payload.message_thread_id !== undefined) ? payload.message_thread_id : null;
 
     // --- 1. ACTION: PROMPT_START (BẮT ĐẦU NHẬN PROMPT & LIVE TICKING STOPWATCH) ---
     if (action === 'prompt_start' || action === 'prompt_ack') {

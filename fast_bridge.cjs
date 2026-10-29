@@ -425,7 +425,7 @@ async function pollUpdates() {
                         const cbData = cb.data;
                         const fromId = cb.from ? cb.from.id : 0;
                         const chatId = cb.message && cb.message.chat ? cb.message.chat.id : activeChatId;
-                        const cbThreadId = (cb.message && cb.message.message_thread_id) ? cb.message.message_thread_id : activeThreadId;
+                        const cbThreadId = (cb.message && cb.message.message_thread_id) ? cb.message.message_thread_id : null;
                         activeChatId = chatId;
                         activeThreadId = cbThreadId;
 
@@ -776,7 +776,7 @@ async function pollUpdates() {
                     const isEdit = !!update.edited_message;
 
                     const chatId = msg.chat.id;
-                    const threadId = msg.message_thread_id || 1160;
+                    const threadId = msg.message_thread_id ? Number(msg.message_thread_id) : null;
                     const fromId = msg.from ? msg.from.id : 0;
 
                     if (msg.from && msg.from.is_bot) continue;
