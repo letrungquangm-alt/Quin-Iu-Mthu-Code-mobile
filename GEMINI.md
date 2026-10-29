@@ -27,11 +27,11 @@
   - If edited to `stop`, `hủy`, or `/cancel`, abort immediately.
 - **Color-Coded Tool Call Bubbles**:
   - 🟢 `[TẠO FILE MỚI]` (+ X dòng mã nguồn mới)
-  - 🟠 `[SỬA FILE]` (+ X dòng thêm, - Y dòng sửa, ! Ghi đè)
-  - 🔴 `[XÓA FILE / THƯ MỤC]` (- Lệnh xóa)
+  - 🟠 `[SỬA FILE]` (+ X dòng thêm [màu xanh], - Y dòng đã xóa [màu đỏ])
+  - 🔴 `[XÓA FILE / THƯ MỤC]` (- Lệnh xóa [màu đỏ])
   - 📄 `[ĐỌC FILE]` (Kèm phạm vi dòng)
   - ⚡ `[ĐANG XỬ LÝ]` (Chạy lệnh terminal - Tuyệt đối không dùng chữ 'tiến trình ngầm')
   - Tự động ẩn các lệnh kiểm tra nội bộ (như manage_task status/list) để không làm loãng khung chat.
-- **Response Preservation & Cleanup**:
+- **Response Preservation & Countdown Cleanup**:
   - The final response `🤖 [MÁY TÍNH ĐÃ PHẢN HỒI XONG TRONG Xs]:` is permanent and MUST NEVER be deleted.
-  - Temporary progress bubbles are cleared after a safe 5-second countdown to prevent Telegram 429 rate limits.
+  - Temporary progress bubbles are cleared via an interactive 5-second countdown (`5s... 4s... 3s... 2s... 1s... ✨ ĐÃ DỌN DẸP THÀNH CÔNG!`).

@@ -260,7 +260,7 @@ async function sendLongResponse(chatId, answerText, totalSec, threadId = 315) {
     }
 }
 
-// --- CƠ CHẾ DỌN DẸP 5S (KHÔNG GÂY LỖI 429 RATE LIMIT) ---
+// --- CƠ CHẾ DỌN DẸP ĐẾM NGƯỢC 5S (KHÔNG GÂY LỖI 429 RATE LIMIT) ---
 
 async function runCountdownCleanup(chatId, threadId, msgIdsToDelete) {
     if (!msgIdsToDelete || msgIdsToDelete.length === 0) return;
@@ -273,7 +273,17 @@ async function runCountdownCleanup(chatId, threadId, msgIdsToDelete) {
             targetThreadId
         );
 
-        await new Promise(r => setTimeout(r, 5000));
+        for (let s = 4; s >= 1; s--) {
+            await new Promise(r => setTimeout(r, 1000));
+            if (countdownMsgId) {
+                await editMsg(
+                    chatId,
+                    countdownMsgId,
+                    `🧹 <b>[ĐANG DỌN DẸP TIẾN TRÌNH TRONG ${s} GIÂY...]</b>`
+                );
+            }
+        }
+        await new Promise(r => setTimeout(r, 1000));
 
         console.log('[Countdown Cleanup] Xóa toàn bộ tiến trình tạm...');
         await deleteMsgs(chatId, msgIdsToDelete);
@@ -283,7 +293,7 @@ async function runCountdownCleanup(chatId, threadId, msgIdsToDelete) {
             setTimeout(async () => {
                 await tgApi('deleteMessage', { chat_id: chatId, message_id: countdownMsgId });
                 console.log('[Countdown Cleanup] Hoàn tất, khung chat sạch bong!');
-            }, 2000);
+            }, 1500);
         }
     } catch (e) {
         console.error('[Countdown Cleanup Error]:', e.message);
@@ -321,7 +331,7 @@ function formatToolCall(tc) {
 
         if (isOverwrite || isAppend || fileExisted) {
             summary = rawSummary || `Cập nhật file ${fileName}`;
-            bubbleText = `🟠 <b>[SỬA FILE]:</b> <code>${fileName}</code>\n<pre><code class="language-diff">+ ${contentLines} dòng thêm/ghi đè\n! Cập nhật nội dung mã nguồn</code></pre>`;
+            bubbleText = `🟠 <b>[SỬA FILE]:</b> <code>${fileName}</code>\n<pre><code class="language-diff">+ ${contentLines} dòng thêm mới\n- Ghi đè thay thế nội dung cũ</code></pre>`;
         } else {
             summary = rawSummary || `Tạo mới file ${fileName}`;
             bubbleText = `🟢 <b>[TẠO FILE MỚI]:</b> <code>${fileName}</code>\n<pre><code class="language-diff">+ ${contentLines} dòng mã nguồn mới</code></pre>`;
@@ -332,7 +342,7 @@ function formatToolCall(tc) {
         const linesRemoved = args.Target ? args.Target.toString().split(/\r?\n/).length : 1;
         const linesAdded = args.Replacement ? args.Replacement.toString().split(/\r?\n/).length : 0;
         summary = rawSummary || `Chỉnh sửa code ${fileName}`;
-        bubbleText = `🟠 <b>[SỬA FILE]:</b> <code>${fileName}</code>\n<pre><code class="language-diff">+ ${linesAdded} dòng thêm\n- ${linesRemoved} dòng sửa</code></pre>`;
+        bubbleText = `🟠 <b>[SỬA FILE]:</b> <code>${fileName}</code>\n<pre><code class="language-diff">+ ${linesAdded} dòng thêm\n- ${linesRemoved} dòng đã xóa</code></pre>`;
     } else if (toolName === 'read_file') {
         const rawPath = args.Path ? args.Path.toString().replace(/^"|"$/g, '') : 'file';
         const fileName = path.basename(rawPath);
