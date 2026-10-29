@@ -173,6 +173,18 @@ function Edit-TgMessage {
     }
 }
 
+function Send-TgChatAction {
+    param([string]$action = "typing")
+    $target = Get-CurrentTgTarget
+    $url = "https://api.telegram.org/bot$botToken/sendChatAction"
+    $bodyObj = @{ chat_id = $target.chatId; action = $action }
+    if ($target.threadId -gt 0) { $bodyObj["message_thread_id"] = $target.threadId }
+    $jsonBody = $bodyObj | ConvertTo-Json -Compress
+    try {
+        Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($jsonBody)) -TimeoutSec 4 | Out-Null
+    } catch {}
+}
+
 function Set-SyncBridgeWorkingStatus {
     param([bool]$working)
     if (Test-Path $syncBridgePath) {
@@ -297,8 +309,23 @@ function Stop-WorkingTracker {
     }
 }
 
+$global:lastTypingTime = $null
+
 while ($true) {
     try {
+        # Giữ trạng thái typing... liên tục trên Telegram mỗi 3.5s khi AI đang xử lý
+        if (Test-Path $syncBridgePath) {
+            try {
+                $brLive = Get-Content $syncBridgePath -Raw -Encoding UTF8 | ConvertFrom-Json
+                if ($brLive.isWorking -eq $true) {
+                    if (-not $global:lastTypingTime -or ([DateTime]::Now - $global:lastTypingTime).TotalSeconds -ge 3.5) {
+                        $global:lastTypingTime = [DateTime]::Now
+                        Send-TgChatAction -action "typing"
+                    }
+                }
+            } catch {}
+        }
+
         # 1. Đếm giây liên tục cho Thinking nếu AI đang suy nghĩ
         if ($global:mirrorThinkingStart -and $global:mirrorThinkingMsgId) {
             $currThinkSec = [math]::Max(1, [int]([DateTime]::Now - $global:mirrorThinkingStart).TotalSeconds)
@@ -573,10 +600,8 @@ while ($true) {
                             }
                             Set-SyncBridgeWorkingStatus -working $false
 
-                            # TỰ ĐỘNG XÓA SẠCH CÁC TIN NHẮN TIẾN TRÌNH TẠM THỜI SAU 3 GIÂY
+                            # TỰ ĐỘNG XÓA SẠCH CÁC TIN NHẮN TIẾN TRÌNH TẠM THỜI (KHÔNG BLOCK)
                             if ($tempWorkingMsgIds.Count -gt 0) {
-                                Write-Host "[MIRROR] Đang tự động dọn dẹp $($tempWorkingMsgIds.Count) tin nhắn Working tạm thời sau 3 giây..." -ForegroundColor Yellow
-                                Start-Sleep -Seconds 3
                                 foreach ($mid in $tempWorkingMsgIds) {
                                     Delete-TgMessage -messageId $mid
                                 }
@@ -594,5 +619,5 @@ while ($true) {
         Start-Sleep -Seconds 1
     }
 
-    Start-Sleep -Milliseconds 400
+    Start-Sleep -Milliseconds 150
 }
