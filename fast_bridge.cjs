@@ -699,6 +699,15 @@ async function pollUpdates() {
                             continue;
                         }
 
+                        // N. MASTER LOBBY: HIỂN THỊ BÀN PHÍM PIN
+                        if (cbData === 'hub_show_pin') {
+                            currentPin = '';
+                            await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: 'Bàn phím xác thực mã PIN 6585' });
+                            const screen = `📟 <b>[BÀN PHÍM XÁC THỰC KẾT NỐI]</b>\n──────────────────────\nMàn hình: <code>${getPinDisplay('')}</code>\n<i>(Nhập mã 6585 rồi bấm ↵ Enter để cưỡng chế kết nối với PC)</i>`;
+                            await sendMsg(chatId, screen, activeThreadId, 'HTML', getKeypadMarkup());
+                            continue;
+                        }
+
                         // P. PROJECT WIZARD: CHỌN Ổ ĐĨA KHI TẠO MỚI
                         if (cbData.startsWith('wizard_drive_')) {
                             const drive = cbData.replace('wizard_drive_', '');
