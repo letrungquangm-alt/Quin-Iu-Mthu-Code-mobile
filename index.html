@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QuinloveRin Code - Cloud Workspace</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans">
+
+    <!-- Header / Navbar -->
+    <header class="bg-slate-900 border-b border-slate-800 px-6 py-4 flex items-center justify-between">
+        <div class="flex items-center space-x-3">
+            <div class="bg-indigo-600 p-2 rounded-xl text-white font-bold shadow-lg shadow-indigo-500/30">
+                <i class="fa-solid fa-code-branch"></i>
+            </div>
+            <div>
+                <h1 class="text-lg font-bold tracking-wider text-indigo-400">QuinloveRin Code</h1>
+                <p class="text-xs text-slate-400">Hệ thống AI & Quản lý triển khai 24/7 (Vercel Cloud)</p>
+            </div>
+        </div>
+        <div class="flex items-center space-x-3">
+            <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                <span class="w-2 h-2 mr-2 bg-emerald-500 rounded-full animate-pulse"></span>
+                Đang hoạt động trên Vercel
+            </span>
+        </div>
+    </header>
+
+    <!-- Main Lobby Container (Duy nhất 1 lobby) -->
+    <main class="flex-1 max-w-7xl w-full mx-auto p-6 grid grid-cols-1 md:grid-cols-3 gap-6">
+        
+        <!-- Cột điều khiển chính & Dự án -->
+        <div class="md:col-span-2 space-y-6">
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+                <h2 class="text-xl font-semibold mb-4 text-slate-200 flex items-center">
+                    <i class="fa-solid fa-terminal text-indigo-500 mr-2"></i> Trạm Triển Khai Chính
+                </h2>
+                <p class="text-slate-400 text-sm mb-6">
+                    Quản lý toàn bộ tiến trình code, kết nối ổ cứng máy tính chính và thực hiện bàn giao công việc qua các cửa sổ làm việc độc lập.
+                </p>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <!-- Nút Dự án hiện có (Liên kết ổ cứng PC) -->
+                    <button onclick="moChonOChungPC()" class="p-4 bg-slate-800 hover:bg-slate-750 border border-slate-700 hover:border-indigo-500 rounded-xl transition-all text-left group">
+                        <div class="flex items-center justify-between mb-2">
+                            <i class="fa-solid fa-hard-drive text-2xl text-indigo-400 group-hover:scale-110 transition-transform"></i>
+                            <span class="text-xs bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded">Cục bộ / PC</span>
+                        </div>
+                        <h3 class="font-semibold text-slate-200">Dự án hiện có</h3>
+                        <p class="text-xs text-slate-400 mt-1">Quét ổ cứng, chọn thư mục dự án trên máy tính chính.</p>
+                    </button>
+
+                    <!-- Nút Bàn giao (Mở cửa sổ mới) -->
+                    <button onclick="moCuaSoBanGiao()" class="p-4 bg-slate-800 hover:bg-slate-750 border border-slate-700 hover:border-emerald-500 rounded-xl transition-all text-left group">
+                        <div class="flex items-center justify-between mb-2">
+                            <i class="fa-solid fa-window-restore text-2xl text-emerald-400 group-hover:scale-110 transition-transform"></i>
+                            <span class="text-xs bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded">Cửa sổ mới</span>
+                        </div>
+                        <h3 class="font-semibold text-slate-200">Bàn giao công việc</h3>
+                        <p class="text-xs text-slate-400 mt-1">Mở giao diện bàn giao độc lập cho tác vụ hiện tại.</p>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Khu vực thông tin ổ cứng đã chọn -->
+            <div id="drive-info-box" class="bg-slate-900 border border-slate-800 rounded-2xl p-6 hidden">
+                <h3 class="text-lg font-medium text-indigo-400 mb-3"><i class="fa-solid fa-folder-tree mr-2"></i> Trạng thái ổ cứng & Thư mục đã chọn</h3>
+                <div id="selected-path-display" class="bg-slate-950 p-3 rounded-lg text-sm text-slate-300 font-mono border border-slate-800">
+                    Chưa chọn thư mục từ máy tính chính.
+                </div>
+            </div>
+        </div>
+
+        <!-- Cột trạng thái hệ thống -->
+        <div class="space-y-6">
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+                <h3 class="text-lg font-medium mb-4 text-slate-200 flex items-center">
+                    <i class="fa-solid fa-shield-halved text-indigo-500 mr-2"></i> Trạng thái GitHub Repo
+                </h3>
+                <div class="space-y-3 text-sm">
+                    <div class="flex justify-between py-2 border-b border-slate-800">
+                        <span class="text-slate-400">Tài khoản:</span>
+                        <span class="font-medium text-slate-200">letrungquangm-alt</span>
+                    </div>
+                    <div class="flex justify-between py-2 border-b border-slate-800">
+                        <span class="text-slate-400">Repository:</span>
+                        <span class="font-medium text-indigo-400">Quin-Iu-Mthu-Code-mobile</span>
+                    </div>
+                    <div class="flex justify-between py-2">
+                        <span class="text-slate-400">Trợ lý AI:</span>
+                        <span class="font-medium text-emerald-400">QuinloveRin Code</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Modal chọn ổ cứng / thư mục PC (Mô phỏng quy trình kết nối phần cứng) -->
+    <div id="pc-drive-modal" class="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center hidden z-50 p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-bold text-slate-100"><i class="fa-solid fa-server mr-2 text-indigo-500"></i> Chọn ổ cứng & Thư mục Dự án trên PC</h3>
+                <button onclick="dongModalPC()" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark text-xl"></i></button>
+            </div>
+            <p class="text-xs text-slate-400 mb-4">Hệ thống đang quét các ổ cứng khả dụng trên máy tính chính của bro...</p>
+            
+            <div class="space-y-2 mb-6">
+                <div onclick="chonThuMuc('C:\\Projects\\Quin-Iu-Mthu-Code-mobile')" class="p-3 bg-slate-800 hover:bg-indigo-600/20 border border-slate-700 hover:border-indigo-500 rounded-xl cursor-pointer transition-all flex items-center justify-between">
+                    <div class="flex items-center space-x-3">
+                        <i class="fa-solid hard-drive text-indigo-400"></i>
+                        <div>
+                            <div class="font-semibold text-sm">Ổ C: (System SSD)</div>
+                            <div class="text-xs text-slate-400">C:\Projects\Quin-Iu-Mthu-Code-mobile</div>
+                        </div>
+                    </div>
+                    <span class="text-xs bg-indigo-500 text-white px-2 py-1 rounded">Chọn</span>
+                </div>
+
+                <div onclick="chonThuMuc('D:\\Workspace\\MobileApp-Projects')" class="p-3 bg-slate-800 hover:bg-indigo-600/20 border border-slate-700 hover:border-indigo-500 rounded-xl cursor-pointer transition-all flex items-center justify-between">
+                    <div class="flex items-center space-x-3">
+                        <i class="fa-solid hard-drive text-indigo-400"></i>
+                        <div>
+                            <div class="font-semibold text-sm">Ổ D: (Data Drive)</div>
+                            <div class="text-xs text-slate-400">D:\Workspace\MobileApp-Projects</div>
+                        </div>
+                    </div>
+                    <span class="text-xs bg-indigo-500 text-white px-2 py-1 rounded">Chọn</span>
+                </div>
+            </div>
+
+            <div class="flex justify-end space-x-3">
+                <button onclick="dongModalPC()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-sm font-medium">Hủy</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Script xử lý logic -->
+    <script>
+        function moChonOChungPC() {
+            document.getElementById('pc-drive-modal').classList.remove('hidden');
+        }
+
+        function dongModalPC() {
+            document.getElementById('pc-drive-modal').classList.add('hidden');
+        }
+
+        function chonThuMuc(duongDan) {
+            dongModalPC();
+            const infoBox = document.getElementById('drive-info-box');
+            const display = document.getElementById('selected-path-display');
+            
+            infoBox.classList.remove('hidden');
+            display.innerHTML = `<i class="fa-solid fa-check text-emerald-400 mr-2"></i> Đã liên kết thành công với: <span class="text-indigo-300 font-semibold">${duongDan}</span>`;
+            
+            // Khởi chạy cửa sổ làm việc mới sau khi chọn thành công ổ cứng
+            setTimeout(() => {
+                window.open('', '_blank', 'width=1000,height=700');
+            }, 800);
+        }
+
+        function moCuaSoBanGiao() {
+            // Mở cửa sổ mới chuyên biệt cho việc bàn giao
+            window.open('', 'BanGiaoWindow', 'width=900,height=600');
+        }
+    </script>
+</body>
+</html>
