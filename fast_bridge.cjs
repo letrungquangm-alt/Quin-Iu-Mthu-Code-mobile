@@ -1,23 +1,21 @@
 /**
- * QuinloveRin Code - Fast Telegram Bridge v2.1 (.cjs)
- * - CHUỖI TIẾN TRÌNH TRÀN DÀI (Stream Log): Không vừa làm vừa xóa.
- * - HIỆN ĐỦ: Đọc prompt -> Đã có cách -> Đang chạy lệnh -> Hoàn tất lệnh.
- * - KHI LÀM XONG VIỆC & CHỜ TRẢ LỜI:
- *   + Bật trạng thái 'typing...' trên thanh tiêu đề Telegram.
- *   + Báo: "⏳ [ĐÃ XONG YÊU CẦU CỦA BẠN, CHỜ CHÚT TÔI ĐANG GỬI PHẢN HỒI YÊU CẦU CỦA BẠN (Xs)...]"
- * - KHI PHÁT ĐÁP ÁN:
- *   + Tiêu đề: "🤖 [MÁY TÍNH ĐÃ PHẢN HỒI XONG TRONG Xs]:"
- *   + Phát nội dung hoàn chỉnh (VĨNH VIỄN, KHÔNG BAO GIỜ XÓA).
- * - ĐẾM NGƯỢC 10S TỰ HỦY:
- *   + Báo "🧹 [ĐANG DỌN DẸP TIẾN TRÌNH TRONG VÒNG 10 GIÂY...]" và đếm ngược 10s.
- *   + Xóa sạch toàn bộ dãy tin nhắn tạm thời ở trên.
- *   + Đổi thành "✨ [ĐÃ DỌN DẸP THÀNH CÔNG!]".
- *   + Sau 2 giây tự xóa chính nó!
+ * QuinloveRin Code - Fast Telegram Bridge v2.5 (.cjs)
+ * - TÍCH HỢP ĐẦY ĐỦ 2 CHẾ ĐỘ:
+ *   1. Chế độ Điều khiển từ xa (Remote Control): Nhận lệnh từ Telegram -> Gemini AI xử lý -> Chạy code trên máy tính -> Phản hồi.
+ *   2. Chế độ Phản chiếu máy tính (PC Mirror): Khi chat trực tiếp trên Antigravity PC -> Tự động stream toàn bộ tiến trình lên Telegram.
+ * - GIAO DIỆN CHUẨN XÁC:
+ *   + 📖 [ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (Xs)...]
+ *   + 💡 [ĐÃ CÓ CÁCH, ĐỢI MÌNH CHÚT - Xs]
+ *   + ⚡ [MÁY TÍNH ĐANG THỰC HIỆN] ▶ <tên tác vụ> (Không gắn tổng thời gian thừa thãi)
+ *   + ✅ [ĐÃ HOÀN TẤT TRONG Xs]: <tên tác vụ>
+ *   + Typing trạng thái trên thanh tiêu đề khi chuẩn bị đáp án
+ *   + 🤖 [MÁY TÍNH ĐÃ PHẢN HỒI XONG TRONG Xs]: <nội dung> (VĨNH VIỄN, KHÔNG BAO GIỜ XÓA)
+ *   + Đếm ngược 10s tự hủy: 🧹 [ĐANG DỌN DẸP TIẾN TRÌNH TRONG VÒNG 10 GIÂY...] -> ✨ [ĐÃ DỌN DẸP THÀNH CÔNG!] -> tự xóa sau 2s.
  */
 
 const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
+const { exec } = require('child_process');
 
 const rootDir = __dirname;
 const configPath = path.join(rootDir, 'config.json');
@@ -28,11 +26,17 @@ if (!fs.existsSync(configPath)) {
 }
 
 const config = JSON.parse(fs.readFileSync(configPath, 'utf8').replace(/^\uFEFF/, ''));
-const mainBotToken = config.BOT_TOKEN;
-const extraBotTokens = Array.isArray(config.EXTRA_BOT_TOKENS) ? config.EXTRA_BOT_TOKENS : [];
-const botPool = [mainBotToken, ...extraBotTokens].filter(t => t && t.length > 20);
-
+const botToken = config.BOT_TOKEN;
+const geminiApiKey = config.GEMINI_API_KEY || '';
 const allowedChatId = config.ALLOWED_CHAT_ID;
+const projectsRootDir = config.PROJECTS_ROOT_DIR || path.join(process.env.USERPROFILE, '.gemini', 'antigravity', 'scratch', 'model');
+const currentProject = config.CURRENT_PROJECT || 'Quin-Iu-Mthu';
+const currentProjectPath = config.CURRENT_PROJECT_PATH || path.join(projectsRootDir, currentProject);
+
+if (!fs.existsSync(currentProjectPath)) {
+    fs.mkdirSync(currentProjectPath, { recursive: true });
+}
+
 const conversationId = '7f7131ce-dc72-490f-97bd-4a675f9dd0c7';
 const transcriptPath = path.join(
     process.env.USERPROFILE,
@@ -45,33 +49,18 @@ const transcriptPath = path.join(
     'transcript.jsonl'
 );
 
-const langServer = path.join(
-    process.env.LOCALAPPDATA,
-    'Programs',
-    'antigravity',
-    'resources',
-    'bin',
-    'language_server.exe'
-);
-
 console.log('========================================================');
-console.log(' Fast Telegram Bridge v2.1 (Stream Flow, Typing & 10s Countdown)');
-console.log(' Bot Pool Size:', botPool.length, 'bots');
-console.log(' Conversation ID:', conversationId);
+console.log(' Fast Telegram Bridge v2.5 (Dual Mode: Remote & PC Mirror)');
+console.log(' Bot Token:', botToken ? botToken.substring(0, 10) + '...' : 'NONE');
+console.log(' Project Path:', currentProjectPath);
 console.log(' Transcript:', transcriptPath);
 console.log('========================================================');
 
 // --- TELEGRAM API HELPERS ---
 
-let currentBotIndex = 0;
-function getActiveBotToken() {
-    return botPool[currentBotIndex % botPool.length];
-}
-
 async function tgApi(method, data) {
-    const token = getActiveBotToken();
     try {
-        const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+        const res = await fetch(`https://api.telegram.org/bot${botToken}/${method}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
@@ -79,8 +68,9 @@ async function tgApi(method, data) {
         const json = await res.json();
         if (!json.ok) {
             if (json.error_code === 429 && json.parameters && json.parameters.retry_after) {
-                console.warn(`[429 Rate Limit Bot ${currentBotIndex}] Đổi bot trong pool...`);
-                currentBotIndex = (currentBotIndex + 1) % botPool.length;
+                const waitSec = json.parameters.retry_after;
+                console.warn(`[429 Rate Limit] Chờ ${waitSec}s trước khi gửi tiếp...`);
+                await new Promise(r => setTimeout(r, (waitSec + 1) * 1000));
                 return tgApi(method, data);
             }
             if (json.description && !json.description.includes('message to delete not found')) {
@@ -187,6 +177,7 @@ function mdToTgHtml(text) {
     text = escapeHtml(text);
     text = text.replace(/\*\*([^\*\r\n]+)\*\*/g, '<b>$1</b>');
     text = text.replace(/(?<!\w)\*([^\*\r\n]+)\*(?!\w)/g, '<i>$1</i>');
+    text = text.replace(/^&gt;\s*([^\r\n]+)/gm, '<blockquote>$1</blockquote>');
 
     codeBlocks.forEach((b, i) => { text = text.replace(`___CODE_BLOCK_${i}___`, b); });
     inlineCodes.forEach((b, i) => { text = text.replace(`___INLINE_${i}___`, b); });
@@ -283,57 +274,189 @@ async function runCountdownCleanup(chatId, threadId, msgIdsToDelete) {
     }
 }
 
-// --- STREAM FLOW STATE MANAGEMENT ---
+// --- REMOTE EXECUTION ENGINE (KHI NHẬN LỆNH TỪ TELEGRAM) ---
+
+const chatHistory = [];
+
+function executePowerShell(cmd, workDir) {
+    return new Promise(resolve => {
+        exec(cmd, { cwd: workDir, shell: 'powershell.exe', maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+            let out = (stdout || '') + (stderr || '');
+            if (!out && err) out = err.message;
+            resolve(out.trim());
+        });
+    });
+}
+
+async function callGeminiApi(promptText) {
+    const sysInstruction = `Bạn là trợ lý lập trình AI thông minh cao cấp cho QuinloveRin Code.
+Bạn đang điều khiển máy tính từ xa qua Telegram của người dùng.
+Thư mục dự án hiện tại: ${currentProjectPath}.
+Khi cần tạo hoặc sửa file, hãy xuất khối lệnh PowerShell trong khối \`\`\`run:
+Ví dụ:
+\`\`\`run
+Set-Content -Path "index.html" -Value @"
+<!DOCTYPE html>
+... nội dung ...
+"@ -Encoding UTF8
+\`\`\`
+QUY TẮC:
+- Trả lời bằng tiếng Việt chuẩn, súc tích, chuyên nghiệp. Xưng hô: 'tôi - bro'.
+- Luôn hoàn thành đúng yêu cầu, tạo mã nguồn chuẩn và lưu vào đúng thư mục dự án.`;
+
+    const contents = [
+        ...chatHistory.slice(-10),
+        { role: 'user', parts: [{ text: promptText }] }
+    ];
+
+    const modelsToTry = ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.5-flash'];
+
+    for (const m of modelsToTry) {
+        try {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${geminiApiKey}`;
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    systemInstruction: { parts: [{ text: sysInstruction }] },
+                    contents: contents
+                })
+            });
+            const data = await res.json();
+            if (data.candidates && data.candidates[0].content && data.candidates[0].content.parts[0].text) {
+                const text = data.candidates[0].content.parts[0].text;
+                chatHistory.push({ role: 'user', parts: [{ text: promptText }] });
+                chatHistory.push({ role: 'model', parts: [{ text: text }] });
+                return text;
+            }
+        } catch (e) {
+            console.warn(`[Gemini Error ${m}]:`, e.message);
+        }
+    }
+    return 'Hệ thống AI đang tạm thời bận, bro vui lòng thử lại sau vài giây nhé!';
+}
+
+let isExecutingFromTelegram = false;
+
+async function handleTelegramMessage(chatId, threadId, userText, isPhoto) {
+    if (isExecutingFromTelegram) {
+        await sendMsg(chatId, '⏳ <i>Máy tính đang xử lý một tác vụ trước đó, bro đợi vài giây nhé...</i>', threadId);
+        return;
+    }
+
+    isExecutingFromTelegram = true;
+    const localTempIds = [];
+    const startTime = Date.now();
+
+    try {
+        const previewClean = userText.replace(/[<>]/g, '');
+        const previewSafe = escapeHtml(previewClean.length > 55 ? previewClean.substring(0, 55) + '...' : previewClean);
+
+        // 1. Bóng đọc Prompt
+        const promptLabel = isPhoto
+            ? '📷 <b>[ĐÃ NHẬN ẢNH VÀ ĐANG PHÂN TÍCH, VUI LÒNG ĐỢI (1s)...]</b>'
+            : '📖 <b>[ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (1s)...]</b>';
+        const pMid = await sendMsg(chatId, `${promptLabel}\n<blockquote><i>${previewSafe}</i></blockquote>`, threadId);
+        if (pMid) localTempIds.push(pMid);
+
+        await new Promise(r => setTimeout(r, 600));
+
+        // 2. Bóng Đã Có Cách
+        const elapsedThink = Math.max(1, Math.round((Date.now() - startTime) / 1000));
+        const tMid = await sendMsg(chatId, `💡 <b>[ĐÃ CÓ CÁCH, ĐỢI MÌNH CHÚT - ${elapsedThink}s]</b>\n<blockquote><i>${previewSafe}</i></blockquote>`, threadId);
+        if (tMid) localTempIds.push(tMid);
+
+        // 3. Xử lý lệnh Terminal nhanh (/cmd hoặc $)
+        if (/^(?:\/cmd|\$|ps)\s+(.+)$/i.test(userText)) {
+            const cmd = userText.replace(/^(?:\/cmd|\$|ps)\s+/i, '').trim();
+            const safeCmd = escapeHtml(cmd);
+
+            const toolStart = Date.now();
+            const wMid = await sendMsg(chatId, `⚡ <b>[MÁY TÍNH ĐANG THỰC HIỆN]</b>\n▶ <code>${safeCmd}</code>`, threadId);
+            if (wMid) localTempIds.push(wMid);
+
+            const out = await executePowerShell(cmd, currentProjectPath);
+            const toolSec = Math.max(1, Math.round((Date.now() - toolStart) / 1000));
+
+            if (wMid) {
+                await editMsg(chatId, wMid, `✅ <b>[ĐÃ HOÀN TẤT TRONG ${toolSec}s]</b>: <code>${safeCmd}</code>`);
+            }
+
+            sendTyping(chatId, threadId);
+            const totalSec = Math.max(1, Math.round((Date.now() - startTime) / 1000));
+            const formattedOut = out ? `<pre><code>${escapeHtml(out)}</code></pre>` : '<i>(Lệnh đã thực thi xong, không có output)</i>';
+            await sendMsg(chatId, `🤖 <b>[MÁY TÍNH ĐÃ PHẢN HỒI XONG TRONG ${totalSec}s]:</b>\n\n${formattedOut}`, threadId);
+
+            runCountdownCleanup(chatId, threadId, localTempIds);
+            return;
+        }
+
+        // 4. Gọi Gemini AI xử lý yêu cầu lập trình
+        const aiAnswer = await callGeminiApi(userText);
+
+        // 5. Kiểm tra và thực thi code khối ```run nếu có
+        let cleanText = aiAnswer;
+        const runMatch = aiAnswer.match(/```(?:run|powershell|ps1|cmd|sh)\s*([\s\S]*?)```/);
+        if (runMatch) {
+            const scriptToRun = runMatch[1].trim();
+            cleanText = aiAnswer.replace(/```(?:run|powershell|ps1|cmd|sh)[\s\S]*?```/g, '').trim();
+
+            const toolStart = Date.now();
+            const wMid = await sendMsg(chatId, `⚡ <b>[MÁY TÍNH ĐANG THỰC HIỆN]</b>\n▶ <code>Cập nhật mã nguồn dự án</code>`, threadId);
+            if (wMid) localTempIds.push(wMid);
+
+            await executePowerShell(scriptToRun, currentProjectPath);
+            const toolSec = Math.max(1, Math.round((Date.now() - toolStart) / 1000));
+
+            if (wMid) {
+                await editMsg(chatId, wMid, `✅ <b>[ĐÃ HOÀN TẤT TRONG ${toolSec}s]</b>: <code>Cập nhật mã nguồn dự án</code>`);
+            }
+        }
+
+        // 6. Phát câu trả lời hoàn chỉnh
+        sendTyping(chatId, threadId);
+        const totalSec = Math.max(1, Math.round((Date.now() - startTime) / 1000));
+        await sendLongResponse(chatId, cleanText || aiAnswer, totalSec, threadId);
+
+        // 7. Kích hoạt đếm ngược 10 giây dọn dẹp tiến trình
+        runCountdownCleanup(chatId, threadId, localTempIds);
+
+    } catch (err) {
+        console.error('[Execute Exception]:', err.message);
+        await sendMsg(chatId, `❌ Lỗi thực thi: ${escapeHtml(err.message)}`, threadId);
+    } finally {
+        isExecutingFromTelegram = false;
+    }
+}
+
+// --- PC MIRROR WATCHER (KHI CHAT TRỰC TIẾP TRÊN ANTIGRAVITY PC) ---
 
 let activeChatId = allowedChatId || -1004457846636;
 let activeThreadId = null;
 
-let promptMsgId = null;
-let promptStartTime = null;
-let promptTextSaved = '';
-
-let thinkingSent = false;
-let currentWorkingMsgId = null;
-let currentToolStartTime = null;
-let currentToolSummary = '';
-
-let finalPrepMsgId = null;
-let isPreparingResponse = false;
-let typingInterval = null;
-
-let tempMsgIds = [];
-
-function forwardToAntigravity(text) {
-    if (fs.existsSync(langServer)) {
-        try {
-            const child = spawn(langServer, ['agentapi', 'send-message', conversationId, `[Điện thoại gửi]: ${text}`], {
-                detached: true,
-                stdio: 'ignore',
-                windowsHide: true
-            });
-            child.unref();
-            console.log('[Bridge -> PC] Đã chuyển prompt tới Antigravity:', text.substring(0, 60));
-        } catch (e) {
-            console.error('[Bridge Error] Lỗi chuyển prompt tới Antigravity:', e.message);
-        }
-    }
-}
+let mirrorPromptStartTime = null;
+let mirrorPromptSaved = '';
+let mirrorThinkingSent = false;
+let mirrorWorkingMsgId = null;
+let mirrorToolStartTime = null;
+let mirrorToolSummary = '';
+let mirrorTypingInterval = null;
+let mirrorTempMsgIds = [];
 
 let lastOffset = 0;
 if (fs.existsSync(transcriptPath)) {
     try {
         lastOffset = fs.statSync(transcriptPath).size;
-        console.log('[Bridge] Bắt đầu theo dõi transcript từ byte offset:', lastOffset);
+        console.log('[Bridge PC Mirror] Theo dõi transcript từ byte offset:', lastOffset);
     } catch (e) {}
 }
 
 async function processTranscript() {
+    if (isExecutingFromTelegram) return;
     if (!fs.existsSync(transcriptPath)) return;
-    let stat;
-    try {
-        stat = fs.statSync(transcriptPath);
-    } catch (e) { return; }
 
+    let stat;
+    try { stat = fs.statSync(transcriptPath); } catch (e) { return; }
     if (stat.size <= lastOffset) return;
 
     const fd = fs.openSync(transcriptPath, 'r');
@@ -350,105 +473,102 @@ async function processTranscript() {
         try {
             const entry = JSON.parse(line);
 
-            // Giai đoạn: AI bắt đầu suy nghĩ / đã có hướng
+            // Bắt Prompt từ PC nếu có
+            if (entry.type === 'USER_INPUT' && entry.content) {
+                mirrorPromptStartTime = Date.now();
+                mirrorPromptSaved = entry.content.toString().trim();
+                mirrorThinkingSent = false;
+
+                const pClean = mirrorPromptSaved.replace(/[<>]/g, '');
+                const pSafe = escapeHtml(pClean.length > 55 ? pClean.substring(0, 55) + '...' : pClean);
+                const pid = await sendMsg(
+                    activeChatId,
+                    `📖 <b>[ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (1s)...]</b>\n<blockquote><i>${pSafe}</i></blockquote>`,
+                    activeThreadId
+                );
+                if (pid) mirrorTempMsgIds.push(pid);
+            }
+
+            // Giai đoạn: Đã có cách
             if (entry.thinking && !entry.content && (!entry.tool_calls || entry.tool_calls.length === 0)) {
-                if (!thinkingSent) {
-                    thinkingSent = true;
-                    const elapsed = promptStartTime ? Math.max(1, Math.round((Date.now() - promptStartTime) / 1000)) : 1;
-                    const safe = escapeHtml(promptTextSaved);
+                if (!mirrorThinkingSent) {
+                    mirrorThinkingSent = true;
+                    const elapsed = mirrorPromptStartTime ? Math.max(1, Math.round((Date.now() - mirrorPromptStartTime) / 1000)) : 1;
+                    const safe = escapeHtml(mirrorPromptSaved);
                     const tid = await sendMsg(
                         activeChatId,
                         `💡 <b>[ĐÃ CÓ CÁCH, ĐỢI MÌNH CHÚT - ${elapsed}s]</b>\n<blockquote><i>${safe}</i></blockquote>`,
                         activeThreadId
                     );
-                    if (tid) tempMsgIds.push(tid);
+                    if (tid) mirrorTempMsgIds.push(tid);
                 }
             }
 
-            // Giai đoạn: Thực thi lệnh / công cụ (Tool Call)
+            // Giai đoạn: Tool Call
             if (entry.tool_calls && entry.tool_calls.length > 0) {
-                currentToolStartTime = Date.now();
+                mirrorToolStartTime = Date.now();
                 const tc = entry.tool_calls[0];
                 const toolName = tc.name;
-                currentToolSummary = tc.args && tc.args.toolSummary ? tc.args.toolSummary.replace(/^"|"$/g, '') : `Thực thi ${toolName}`;
+                mirrorToolSummary = tc.args && tc.args.toolSummary ? tc.args.toolSummary.replace(/^"|"$/g, '') : `Thực thi ${toolName}`;
 
-                const safeSummary = escapeHtml(currentToolSummary);
-
-                currentWorkingMsgId = await sendMsg(
+                const safeSummary = escapeHtml(mirrorToolSummary);
+                mirrorWorkingMsgId = await sendMsg(
                     activeChatId,
                     `⚡ <b>[MÁY TÍNH ĐANG THỰC HIỆN]</b>\n▶ <code>${safeSummary}</code>`,
                     activeThreadId
                 );
-                if (currentWorkingMsgId) tempMsgIds.push(currentWorkingMsgId);
+                if (mirrorWorkingMsgId) mirrorTempMsgIds.push(mirrorWorkingMsgId);
             }
 
-            // Giai đoạn: Kết quả lệnh hoàn tất (Tool Output)
+            // Giai đoạn: Tool Output
             if (entry.type === 'GENERIC' && entry.content) {
-                const wSec = currentToolStartTime ? Math.max(1, Math.round((Date.now() - currentToolStartTime) / 1000)) : 1;
-                const safeTask = escapeHtml(currentToolSummary || 'Tác vụ');
+                const wSec = mirrorToolStartTime ? Math.max(1, Math.round((Date.now() - mirrorToolStartTime) / 1000)) : 1;
+                const safeTask = escapeHtml(mirrorToolSummary || 'Tác vụ');
 
-                if (currentWorkingMsgId) {
+                if (mirrorWorkingMsgId) {
                     await editMsg(
                         activeChatId,
-                        currentWorkingMsgId,
+                        mirrorWorkingMsgId,
                         `✅ <b>[ĐÃ HOÀN TẤT TRONG ${wSec}s]</b>: <code>${safeTask}</code>`
                     );
-                    currentWorkingMsgId = null;
+                    mirrorWorkingMsgId = null;
                 }
 
-                // Khi xong tác vụ: Bật trạng thái chuẩn bị phát câu trả lời
-                if (!isPreparingResponse) {
-                    isPreparingResponse = true;
-                    finalPrepMsgId = await sendMsg(
-                        activeChatId,
-                        `⏳ <b>[ĐÃ XONG YÊU CẦU CỦA BẠN, CHỜ CHÚT TÔI ĐANG GỬI PHẢN HỒI...]</b>`,
-                        activeThreadId
-                    );
-                    if (finalPrepMsgId) tempMsgIds.push(finalPrepMsgId);
-
-                    // Bật typing liên tục
-                    sendTyping(activeChatId, activeThreadId);
-                    if (!typingInterval) {
-                        typingInterval = setInterval(() => {
-                            sendTyping(activeChatId, activeThreadId);
-                        }, 3000);
-                    }
+                sendTyping(activeChatId, activeThreadId);
+                if (!mirrorTypingInterval) {
+                    mirrorTypingInterval = setInterval(() => {
+                        sendTyping(activeChatId, activeThreadId);
+                    }, 3000);
                 }
             }
 
-            // Giai đoạn: Phản hồi hoàn chỉnh -> PHÁT CÂU TRẢ LỜI & KÍCH HOẠT ĐẾM NGƯỢC 10S XÓA SẠCH
+            // Giai đoạn: Final Response
             if (entry.type === 'PLANNER_RESPONSE' && entry.content && (!entry.tool_calls || entry.tool_calls.length === 0)) {
                 const answer = entry.content.toString().trim();
                 if (!answer) continue;
 
-                if (typingInterval) {
-                    clearInterval(typingInterval);
-                    typingInterval = null;
+                if (mirrorTypingInterval) {
+                    clearInterval(mirrorTypingInterval);
+                    mirrorTypingInterval = null;
                 }
-                isPreparingResponse = false;
 
-                const totalSec = promptStartTime ? Math.max(1, Math.round((Date.now() - promptStartTime) / 1000)) : 1;
-
-                // 1. Gửi câu trả lời hoàn chỉnh của Máy tính
-                console.log('[Bridge] Gửi câu trả lời hoàn chỉnh tới Telegram...');
+                const totalSec = mirrorPromptStartTime ? Math.max(1, Math.round((Date.now() - mirrorPromptStartTime) / 1000)) : 1;
+                console.log('[Bridge PC Mirror] Gửi câu trả lời hoàn chỉnh tới Telegram...');
                 await sendLongResponse(activeChatId, answer, totalSec, activeThreadId);
 
-                // Gom tất cả các tin nhắn tiến trình cần dọn dẹp
-                const toClean = [...tempMsgIds];
-                tempMsgIds = [];
-                promptStartTime = null;
-                promptTextSaved = '';
-                thinkingSent = false;
-                currentWorkingMsgId = null;
-                finalPrepMsgId = null;
+                const toClean = [...mirrorTempMsgIds];
+                mirrorTempMsgIds = [];
+                mirrorPromptStartTime = null;
+                mirrorPromptSaved = '';
+                mirrorThinkingSent = false;
+                mirrorWorkingMsgId = null;
 
-                // 2. Kích hoạt đếm ngược 10 giây để dọn dẹp
                 if (toClean.length > 0) {
                     runCountdownCleanup(activeChatId, activeThreadId, toClean);
                 }
             }
         } catch (e) {
-            console.error('[Bridge Error] Lỗi parse dòng transcript:', e.message);
+            console.error('[Mirror Parse Error]:', e.message);
         }
     }
 }
@@ -485,6 +605,9 @@ async function pollUpdates() {
                     const threadId = msg.message_thread_id || null;
                     const fromId = msg.from ? msg.from.id : 0;
 
+                    // Không xử lý tin nhắn của Bot
+                    if (msg.from && msg.from.is_bot) continue;
+
                     const isAllowed = allowedList.includes(Number(chatId)) || allowedList.includes(Number(fromId));
                     if (!isAllowed) {
                         console.log(`[Bridge Security] Chặn tin nhắn từ chatId=${chatId}, fromId=${fromId}`);
@@ -507,22 +630,7 @@ async function pollUpdates() {
                     if (!userText && !isPhoto) continue;
 
                     console.log(`[Telegram Nhận Tin] (${chatId}, thread=${threadId}): ${userText.substring(0, 50)}`);
-
-                    promptStartTime = Date.now();
-                    promptTextSaved = userText;
-                    thinkingSent = false;
-                    isPreparingResponse = false;
-
-                    const previewClean = userText.replace(/[<>]/g, '');
-                    const previewSafe = escapeHtml(previewClean.length > 50 ? previewClean.substring(0, 50) + '...' : previewClean);
-                    const promptLabel = isPhoto
-                        ? '📷 <b>[ĐÃ NHẬN ẢNH VÀ ĐANG PHÂN TÍCH, VUI LÒNG ĐỢI (1s)...]</b>'
-                        : '📖 <b>[ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (1s)...]</b>';
-
-                    promptMsgId = await sendMsg(chatId, `${promptLabel}\n<blockquote><i>${previewSafe}</i></blockquote>`, threadId);
-                    if (promptMsgId) tempMsgIds.push(promptMsgId);
-
-                    forwardToAntigravity(userText);
+                    handleTelegramMessage(chatId, threadId, userText, isPhoto);
                 }
             }
         } catch (e) {
