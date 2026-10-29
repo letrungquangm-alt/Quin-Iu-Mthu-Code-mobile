@@ -497,16 +497,11 @@ async function pollUpdates() {
         try {
             // 👉 KIỂM TRA CHẾ ĐỘ CLOUD STANDBY
             if (isCloudStandby) {
-                await new Promise(r => setTimeout(r, 4000));
+                await new Promise(r => setTimeout(r, 5000));
                 const whInfo = await tgApiRaw('getWebhookInfo');
                 if (whInfo.ok && (!whInfo.result.url || whInfo.result.url === '')) {
-                    console.log('[Bridge Standby] Phát hiện Webhook đã được gỡ! Máy tính thức tỉnh!');
+                    console.log('[Bridge Standby] Webhook đã được gỡ, máy tính tiếp tục Long Polling!');
                     isCloudStandby = false;
-                    await sendMsg(
-                        activeChatId,
-                        `⚡ <b>[MÁY TÍNH ĐÃ TIẾP QUẢN LẠI TỪ CLOUD!]</b>\n──────────────────────\n🖥️ <b>Cửa sổ Antigravity PC:</b> ĐÃ THỨC TỈNH & SẴN SÀNG 100%\n🚀 <b>Kênh làm việc:</b> Topic ${activeThreadId}\n✨ Máy tính đã lấy lại quyền điều khiển trực tiếp qua Long Polling!`,
-                        activeThreadId
-                    );
                 }
                 continue;
             }
@@ -514,11 +509,11 @@ async function pollUpdates() {
             const res = await tgApiRaw('getUpdates', { offset: pollOffset, timeout: 8 });
             if (!res.ok) {
                 if (res.error_code === 409) {
-                    isCloudStandby = true;
-                    await new Promise(r => setTimeout(r, 2000));
+                    console.warn('[Bridge Polling] 409 Conflict: Đang chờ 4s trước khi thử lại...');
+                    await new Promise(r => setTimeout(r, 4000));
                     continue;
                 }
-                await new Promise(r => setTimeout(r, 1500));
+                await new Promise(r => setTimeout(r, 2000));
                 continue;
             }
 
