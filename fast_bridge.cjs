@@ -320,38 +320,44 @@ async function runCountdownCleanup(chatId, threadId, msgIdsToDelete) {
 // --- COLOR-CODED TOOL CALL FORMATTER ---
 
 function formatToolCall(tc) {
-    const toolName = tc.name;
-    const args = tc.args || {};
-    const rawSummary = args.toolSummary ? args.toolSummary.replace(/^"|"$/g, '') : '';
-
-    let bubbleText = '';
-    let summary = rawSummary || `Thực thi ${toolName}`;
+    const fn = tc.function || tc;
+    const toolName = fn.name;
+    const args = fn.args || fn.arguments || {};
+    const rawSummary = args.toolSummary ? args.toolSummary.toString().replace(/^"|"$/g, '') : '';
+    let summary = '';
+    let runningFn = null;
+    let finishedFn = null;
 
     if (toolName === 'run_command') {
-        const cmd = args.CommandLine ? args.CommandLine.toString().trim() : '';
+        const cmd = args.CommandLine ? args.CommandLine.toString().replace(/^"|"$/g, '').trim() : '';
         const safeCmd = escapeHtml(cmd.length > 200 ? cmd.substring(0, 200) + '... [dài]' : cmd);
 
         if (/(Remove-Item|rm\s+|del\s+|rmdir|unlink)/i.test(cmd)) {
             summary = rawSummary || 'Xóa file / thư mục';
-            bubbleText = `🔴 <b>[XÓA FILE / THƯ MỤC]</b>\n<pre><code class="language-diff">- ${safeCmd}</code></pre>`;
+            runningFn = (s) => `🔴 <b>[XÓA FILE / THƯ MỤC (${s}s)...]</b>\n<pre><code class="language-diff">- ${safeCmd}</code></pre>`;
+            finishedFn = (s) => `🔴 <b>[ĐÃ XÓA FILE / THƯ MỤC XONG]</b>\n<pre><code class="language-diff">- ${safeCmd}</code></pre>\n<i>↳ ✅ Hoàn tất trong ${s}s</i>`;
         } else {
             summary = rawSummary || 'Chạy lệnh terminal';
-            bubbleText = `⚡ <b>[ĐANG XỬ LÝ]</b>\n▶ <code>${escapeHtml(summary)}</code>\n<pre><code class="language-powershell">${safeCmd}</code></pre>`;
+            runningFn = (s) => `⚡ <b>[ĐANG XỬ LÝ (${s}s)...]</b>\n▶ <code>${escapeHtml(summary)}</code>\n<pre><code class="language-powershell">${safeCmd}</code></pre>`;
+            finishedFn = (s) => `⚡ <b>[ĐÃ XỬ LÝ XONG]</b>\n▶ <code>${escapeHtml(summary)}</code>\n<pre><code class="language-powershell">${safeCmd}</code></pre>\n<i>↳ ✅ Hoàn tất trong ${s}s</i>`;
         }
     } else if (toolName === 'write_file') {
         const rawPath = args.Path ? args.Path.toString().replace(/^"|"$/g, '') : 'file';
         const fileName = path.basename(rawPath);
-        const isOverwrite = (args.Overwrite === true || args.Overwrite === 'true');
-        const isAppend = (args.Append === true || args.Append === 'true');
+        const isOverwrite = args.Overwrite === true || args.Overwrite === 'true';
+        const isAppend = args.Append === true || args.Append === 'true';
+        let fileExisted = false;
+        try { fileExisted = fs.existsSync(rawPath); } catch (e) {}
         const contentLines = args.Content ? args.Content.toString().split(/\r?\n/).length : 0;
-        const fileExisted = fs.existsSync(rawPath);
 
         if (isOverwrite || isAppend || fileExisted) {
             summary = rawSummary || `Cập nhật file ${fileName}`;
-            bubbleText = `🟠 <b>[SỬA FILE]:</b> <code>${fileName}</code>\n<pre><code class="language-diff">- Ghi đè thay thế nội dung cũ\n+ ${contentLines} dòng thêm mới</code></pre>`;
+            runningFn = (s) => `🟠 <b>[SỬA FILE (${s}s)...]:</b> <code>${fileName}</code>\n<pre><code class="language-diff">--- a/${fileName}\n- Ghi đè thay thế nội dung cũ\n+++ b/${fileName}\n+ ${contentLines} dòng thêm mới</code></pre>`;
+            finishedFn = (s) => `🟠 <b>[ĐÃ SỬA XONG FILE]:</b> <code>${fileName}</code>\n<pre><code class="language-diff">--- a/${fileName}\n- Ghi đè thay thế nội dung cũ\n+++ b/${fileName}\n+ ${contentLines} dòng thêm mới</code></pre>\n<i>↳ ✅ Hoàn tất trong ${s}s</i>`;
         } else {
             summary = rawSummary || `Tạo mới file ${fileName}`;
-            bubbleText = `🟢 <b>[TẠO FILE MỚI]:</b> <code>${fileName}</code>\n<pre><code class="language-diff">+ ${contentLines} dòng mã nguồn mới</code></pre>`;
+            runningFn = (s) => `🟢 <b>[TẠO FILE MỚI (${s}s)...]:</b> <code>${fileName}</code>\n<pre><code class="language-diff">+++ b/${fileName}\n+ ${contentLines} dòng mã nguồn mới</code></pre>`;
+            finishedFn = (s) => `🟢 <b>[ĐÃ TẠO XONG FILE]:</b> <code>${fileName}</code>\n<pre><code class="language-diff">+++ b/${fileName}\n+ ${contentLines} dòng mã nguồn mới</code></pre>\n<i>↳ ✅ Hoàn tất trong ${s}s</i>`;
         }
     } else if (toolName === 'edit_file') {
         const rawPath = args.Path ? args.Path.toString().replace(/^"|"$/g, '') : 'file';
@@ -359,13 +365,15 @@ function formatToolCall(tc) {
         const linesRemoved = args.Target ? args.Target.toString().split(/\r?\n/).length : 1;
         const linesAdded = args.Replacement ? args.Replacement.toString().split(/\r?\n/).length : 0;
         summary = rawSummary || `Chỉnh sửa code ${fileName}`;
-        bubbleText = `🟠 <b>[SỬA FILE]:</b> <code>${fileName}</code>\n<pre><code class="language-diff">- ${linesRemoved} dòng đã xóa\n+ ${linesAdded} dòng thêm</code></pre>`;
+        runningFn = (s) => `🟠 <b>[SỬA FILE (${s}s)...]:</b> <code>${fileName}</code>\n<pre><code class="language-diff">--- a/${fileName}\n- ${linesRemoved} dòng đã xóa\n+++ b/${fileName}\n+ ${linesAdded} dòng thêm</code></pre>`;
+        finishedFn = (s) => `🟠 <b>[ĐÃ SỬA XONG FILE]:</b> <code>${fileName}</code>\n<pre><code class="language-diff">--- a/${fileName}\n- ${linesRemoved} dòng đã xóa\n+++ b/${fileName}\n+ ${linesAdded} dòng thêm</code></pre>\n<i>↳ ✅ Hoàn tất trong ${s}s</i>`;
     } else if (toolName === 'read_file') {
         const rawPath = args.Path ? args.Path.toString().replace(/^"|"$/g, '') : 'file';
         const fileName = path.basename(rawPath);
         if (/\.(jpg|jpeg|png|webp|gif)$/i.test(fileName)) {
             summary = rawSummary || `Phân tích thị giác hình ảnh ${fileName}`;
-            bubbleText = `🖼️ <b>[PHÂN TÍCH HÌNH ẢNH]:</b> <code>${fileName}</code>`;
+            runningFn = (s) => `🖼️ <b>[PHÂN TÍCH HÌNH ẢNH (${s}s)...]:</b> <code>${fileName}</code>`;
+            finishedFn = (s) => `🖼️ <b>[ĐÃ PHÂN TÍCH HÌNH ẢNH XONG]:</b> <code>${fileName}</code>\n<i>↳ ✅ Hoàn tất trong ${s}s</i>`;
         } else {
             const sLine = args.StartLine || '';
             const eLine = args.EndLine || '';
@@ -374,21 +382,24 @@ function formatToolCall(tc) {
             else if (sLine) rangeInfo = `(Từ dòng ${sLine})`;
             else if (eLine) rangeInfo = `(Đến dòng ${eLine})`;
             summary = rawSummary || `Đọc nội dung ${fileName}`;
-            bubbleText = `📄 <b>[ĐỌC FILE]:</b> <code>${fileName}</code> <i>${rangeInfo}</i>`;
+            runningFn = (s) => `📄 <b>[ĐỌC FILE (${s}s)...]:</b> <code>${fileName}</code> <i>${rangeInfo}</i>`;
+            finishedFn = (s) => `📄 <b>[ĐÃ ĐỌC XONG FILE]:</b> <code>${fileName}</code> <i>${rangeInfo}</i>\n<i>↳ ✅ Hoàn tất trong ${s}s</i>`;
         }
     } else if (toolName === 'manage_task') {
         const action = args.Action || '';
         if (action === 'status' || action === 'list') {
-            return { summary: 'Kiểm tra trạng thái', bubbleText: null };
+            return { summary: 'Kiểm tra trạng thái', runningFn: null, finishedFn: null };
         }
         summary = rawSummary || `Đang xử lý (${action})`;
-        bubbleText = `⚡ <b>[ĐANG XỬ LÝ]:</b> <code>${escapeHtml(summary)}</code>`;
+        runningFn = (s) => `⚡ <b>[ĐANG XỬ LÝ (${s}s)...]:</b> <code>${escapeHtml(summary)}</code>`;
+        finishedFn = (s) => `⚡ <b>[ĐÃ XỬ LÝ XONG]:</b> <code>${escapeHtml(summary)}</code>\n<i>↳ ✅ Hoàn tất trong ${s}s</i>`;
     } else {
         summary = rawSummary || `Xử lý ${toolName}`;
-        bubbleText = `⚡ <b>[ĐANG XỬ LÝ]</b>\n▶ <code>${escapeHtml(summary)}</code>`;
+        runningFn = (s) => `⚡ <b>[ĐANG XỬ LÝ (${s}s)...]</b>\n▶ <code>${escapeHtml(summary)}</code>`;
+        finishedFn = (s) => `⚡ <b>[ĐÃ XỬ LÝ XONG]</b>\n▶ <code>${escapeHtml(summary)}</code>\n<i>↳ ✅ Hoàn tất trong ${s}s</i>`;
     }
 
-    return { summary, bubbleText };
+    return { summary, runningFn, finishedFn };
 }
 
 // --- SYNC BRIDGE DISPATCHER ---
@@ -481,6 +492,9 @@ let tempMsgIds = [];
 let currentCancelMsgId = null;
 let lastBubbleTexts = {};
 let waitingForPairCode = false;
+let currentToolRunningFn = null;
+let currentToolFinishedFn = null;
+let lastWorkingBubbleText = '';
 
 async function moveCancelButtonTo(chatId, newMsgId, newText, threadId = 315) {
     if (currentCancelMsgId && currentCancelMsgId !== newMsgId) {
@@ -716,36 +730,45 @@ async function processTranscript() {
                 }
             }
 
-            // Giai đoạn: Tool Call (Phân loại màu sắc)
+            // Giai đoạn: Tool Call (Phân loại màu sắc & Ticking)
             if (entry.tool_calls && entry.tool_calls.length > 0) {
                 currentToolStartTime = Date.now();
-                currentPhase = 'THINKING'; // Duy trì trạng thái ticking trong suốt quá trình tool chạy
-                startTicker(); // Tiếp tục đồng hồ nếu có thêm tool tiếp theo
+                currentPhase = 'WORKING';
+                startTicker();
                 for (const tc of entry.tool_calls) {
-                    const { summary, bubbleText } = formatToolCall(tc);
+                    const { summary, runningFn, finishedFn } = formatToolCall(tc);
                     currentToolSummary = summary;
-                    currentToolBubbleText = bubbleText;
+                    currentToolRunningFn = runningFn;
+                    currentToolFinishedFn = finishedFn;
                     console.log(`[Bridge Tool Call] ${summary}`);
 
-                    if (bubbleText) {
-                        currentWorkingMsgId = await sendMsg(activeChatId, bubbleText, activeThreadId, 'HTML', cancelKeyboard);
+                    if (runningFn) {
+                        const initialText = runningFn(1);
+                        lastWorkingBubbleText = initialText;
+                        currentWorkingMsgId = await sendMsg(
+                            activeChatId,
+                            initialText,
+                            activeThreadId,
+                            'HTML',
+                            cancelKeyboard
+                        );
                         if (currentWorkingMsgId) {
                             tempMsgIds.push(currentWorkingMsgId);
-                            await moveCancelButtonTo(activeChatId, currentWorkingMsgId, bubbleText, activeThreadId);
+                            currentCancelMsgId = currentWorkingMsgId;
                         }
                     }
                 }
             }
 
-            // Giai đoạn: Hoàn tất Tool Call -> Chuyển sang GENERATING (khởi tạo phản hồi & tiếp tục đếm giây)
+            // Giai đoạn: Hoàn tất Tool Call -> Hiển thị thời gian hoàn thành & gỡ nút Cancel
             if (entry.type === 'GENERIC' && entry.content) {
                 const wSec = currentToolStartTime ? Math.max(1, Math.round((Date.now() - currentToolStartTime) / 1000)) : 1;
                 const safeTask = escapeHtml(currentToolSummary || 'Tác vụ');
                 console.log(`[Bridge Tool Done in ${wSec}s] ${safeTask}`);
 
                 if (currentWorkingMsgId) {
-                    const finishedBubble = currentToolBubbleText
-                        ? `${currentToolBubbleText}\n<i>↳ ✅ Hoàn tất trong ${wSec}s</i>`
+                    const finishedBubble = currentToolFinishedFn
+                        ? currentToolFinishedFn(wSec)
                         : `✅ <b>[ĐÃ HOÀN TẤT TRONG ${wSec}s]</b>: <code>${safeTask}</code>`;
                     lastBubbleTexts[currentWorkingMsgId] = finishedBubble;
                     await editMsg(
@@ -756,13 +779,15 @@ async function processTranscript() {
                         { inline_keyboard: [] }
                     );
                     currentWorkingMsgId = null;
-                    currentToolBubbleText = '';
+                    currentToolRunningFn = null;
+                    currentToolFinishedFn = null;
+                    lastWorkingBubbleText = '';
                 }
 
                 currentPhase = 'THINKING';
                 startTicker();
                 if (promptMsgId) {
-                    await moveCancelButtonTo(activeChatId, promptMsgId, lastStatusText, activeThreadId);
+                    currentCancelMsgId = promptMsgId;
                     await updateStatusBubble();
                 }
 
