@@ -168,11 +168,13 @@ async function handleDisconnectCloud() {
     promptMsgId = null;
     currentWorkingMsgId = null;
 
-    const handoverText = `☁️ <b>[ĐÃ NGẮT KẾT NỐI VỚI PC - BÀN GIAO CHO HUGGING FACE CLOUD 24/7]</b>\n──────────────────────\n🖥️ <b>Máy tính:</b> Đã ngưng tiếp nhận lệnh trực tiếp (Chế độ Chờ)\n🌐 <b>Hugging Face Cloud:</b> ĐÃ TIẾP QUẢN 24/7!\n\n✨ Giờ bro có thể chat, yêu cầu code hoặc commit file ngay cả khi máy tính tắt nguồn!\n\n👉 Khi muốn kết nối lại máy tính, chỉ cần gõ <code>/pc</code> hoặc nhập mã PIN <code>2726</code>.`;
+    const handoverText = `☁️ <b>[ĐÃ NGẮT KẾT NỐI VỚI PC - BÀN GIAO CHO HUGGING FACE CLOUD 24/7]</b>\n──────────────────────\n🖥️ <b>Máy tính:</b> Đã ngưng tiếp nhận lệnh trực tiếp (Chế độ Chờ)\n🌐 <b>Hugging Face Cloud (Gemini 3.8 Flash):</b> ĐÃ TIẾP QUẢN 24/7!\n\n✨ Giờ bro có thể chat, yêu cầu code hoặc commit file ngay cả khi máy tính tắt nguồn!\n\n👉 Khi muốn kết nối lại máy tính, chỉ cần gõ <code>/pc</code> hoặc nhập mã PIN <code>2726</code>.`;
     await sendMsg(activeChatId, handoverText, activeThreadId, 'HTML', { inline_keyboard: [] });
 
     try {
-        await tgApiRaw('setWebhook', { url: 'https://trungm-quinloverin.hf.space/api/webhook' });
+        await tgApiRaw('deleteWebhook');
+        await fetch('https://trungm-quinloverin.hf.space/force-cloud').catch(() => {});
+        console.log('[Bridge Disconnect] Đã gỡ webhook và kích hoạt Hugging Face tiếp quản 24/7!');
     } catch (e) {}
 }
 
@@ -383,12 +385,7 @@ async function pollUpdates() {
         try {
             // 👉 KIỂM TRA CHẾ ĐỘ CLOUD STANDBY
             if (isCloudStandby) {
-                await new Promise(r => setTimeout(r, 5000));
-                const whInfo = await tgApiRaw('getWebhookInfo');
-                if (whInfo.ok && (!whInfo.result.url || whInfo.result.url === '')) {
-                    console.log('[Bridge Standby] Webhook đã được gỡ, máy tính tiếp tục Long Polling!');
-                    isCloudStandby = false;
-                }
+                await new Promise(r => setTimeout(r, 4000));
                 continue;
             }
 
@@ -805,9 +802,10 @@ let isShuttingDown = false;
 async function restoreCloudOnExit(reason) {
     if (isShuttingDown) return;
     isShuttingDown = true;
-    console.log(`[Bridge Exit] Tiến trình kết thúc (${reason}), tự động chuyển giao Webhook cho Hugging Face Cloud 24/7...`);
+    console.log(`[Bridge Exit] Tiến trình kết thúc (${reason}), tự động chuyển giao cho Hugging Face Cloud 24/7...`);
     try {
-        await tgApiRaw('setWebhook', { url: 'https://trungm-quinloverin.hf.space/api/webhook' });
+        await tgApiRaw('deleteWebhook');
+        await fetch('https://trungm-quinloverin.hf.space/force-cloud').catch(() => {});
         console.log('[Bridge Exit] Đã bàn giao Hugging Face Cloud thành công!');
     } catch (e) {
         console.error('[Bridge Exit Error]:', e.message);
@@ -817,5 +815,12 @@ async function restoreCloudOnExit(reason) {
 process.on('SIGINT', async () => { await restoreCloudOnExit('SIGINT'); process.exit(0); });
 process.on('SIGTERM', async () => { await restoreCloudOnExit('SIGTERM'); process.exit(0); });
 process.on('beforeExit', async () => { await restoreCloudOnExit('beforeExit'); });
+
+// Gửi nhịp tim định kỳ tới Hugging Face Space để báo PC vẫn đang online
+setInterval(() => {
+    if (!isCloudStandby) {
+        fetch('https://trungm-quinloverin.hf.space/heartbeat').catch(() => {});
+    }
+}, 25000);
 
 pollUpdates();
