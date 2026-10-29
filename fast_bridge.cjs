@@ -1,11 +1,12 @@
 /**
- * QuinloveRin Code - Fast Telegram Bridge v1.3 (.cjs)
- * - Đúng chuẩn wording yêu cầu của bro:
- *   + Khi nhận: "ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (Xs)..."
- *   + Khi có hướng giải quyết: "ĐÃ CÓ CÁCH, ĐỢI MÌNH CHÚT - Xs"
- * - Bộ đếm giây động (Live Stopwatch 2s/lần) mượt mà.
- * - Cơ chế tự xóa bóng mồ côi qua bridge_state.json (không bao giờ kẹt bóng cũ).
- * - Multi-Bot Failover Pool (3 bots) chống nghẽn Telegram.
+ * QuinloveRin Code - Fast Telegram Bridge v1.4 (.cjs)
+ * - Tinh gọn UX chuyên nghiệp theo đúng chuẩn bro yêu cầu:
+ *   + Lúc đầu: Hiện "Đã đọc prompt..." rồi chuyển "Đã có cách, đợi mình chút..."
+ *   + Khi chạy lệnh: Bỏ hẳn chữ "Đã có cách", CHỈ hiện tác vụ đang làm, số giây tác vụ & tổng số giây.
+ *   + Khi lệnh xong: Báo hoàn tất tác vụ đó + số giây & tổng thời gian.
+ *   + Khi trả lời xong: Phát đáp án và dọn sạch bóng trạng thái.
+ * - Live Stopwatch cập nhật thời gian thực.
+ * - Multi-Bot Failover Pool (3 bots) & Auto Self-Healing.
  */
 
 const fs = require('fs');
@@ -49,13 +50,13 @@ const langServer = path.join(
 );
 
 console.log('========================================================');
-console.log(' Fast Telegram Bridge v1.3 (Auto Self-Healing & Custom Wording)');
+console.log(' Fast Telegram Bridge v1.4 (Professional Minimal UX)');
 console.log(' Bot Pool Size:', botPool.length, 'bots');
 console.log(' Conversation ID:', conversationId);
 console.log(' Transcript:', transcriptPath);
 console.log('========================================================');
 
-// --- STATE FILE PERSISTENCE (Chống kẹt bóng mồ côi khi restart) ---
+// --- STATE FILE PERSISTENCE ---
 
 function saveState(data) {
     try { fs.writeFileSync(statePath, JSON.stringify(data, null, 2)); } catch (e) {}
@@ -247,7 +248,7 @@ async function sendLongResponse(chatId, answerText, threadId = null) {
 (async () => {
     const old = loadState();
     if (old.statusMsgId && old.chatId) {
-        console.log('[Self-Healing] Tìm thấy bóng mồ côi phiên trước:', old.statusMsgId, '-> Tiến hành xóa');
+        console.log('[Self-Healing] Dọn dẹp bóng mồ côi:', old.statusMsgId);
         await tgApi('deleteMessage', { chat_id: old.chatId, message_id: old.statusMsgId });
         saveState({});
     }
@@ -262,17 +263,28 @@ let singleStatusMsgId = null;
 let promptStartTime = null;
 let promptTextSaved = '';
 let toolStartTime = null;
+let currentTaskSummary = '';
 let currentPhase = 'IDLE'; // 'READING' | 'THINKING' | 'WORKING' | 'IDLE'
 
-// Live Stopwatch Timer cho giai đoạn đọc prompt (mỗi 2s)
+// Live Stopwatch Timer (mỗi 2s)
 setInterval(async () => {
-    if (currentPhase === 'READING' && singleStatusMsgId && promptStartTime) {
-        const sec = Math.max(1, Math.round((Date.now() - promptStartTime) / 1000));
+    if (!singleStatusMsgId || !promptStartTime) return;
+    const totalSec = Math.max(1, Math.round((Date.now() - promptStartTime) / 1000));
+
+    if (currentPhase === 'READING') {
         const safe = escapeHtml(promptTextSaved);
         await editMsg(
             activeChatId,
             singleStatusMsgId,
-            `📖 <b>[ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (${sec}s)...]</b>\n<blockquote><i>${safe}</i></blockquote>`
+            `📖 <b>[ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (${totalSec}s)...]</b>\n<blockquote><i>${safe}</i></blockquote>`
+        );
+    } else if (currentPhase === 'WORKING' && toolStartTime && currentTaskSummary) {
+        const toolSec = Math.max(1, Math.round((Date.now() - toolStartTime) / 1000));
+        const safeTask = escapeHtml(currentTaskSummary);
+        await editMsg(
+            activeChatId,
+            singleStatusMsgId,
+            `⚡ <b>[MÁY TÍNH ĐANG THỰC HIỆN (${toolSec}s)...]</b>\n▶ <code>${safeTask}</code>\n⏱️ <i>Tổng thời gian: ${totalSec}s</i>`
         );
     }
 }, 2000);
@@ -326,7 +338,7 @@ async function processTranscript() {
         try {
             const entry = JSON.parse(line);
 
-            // Giai đoạn: AI bắt đầu suy nghĩ / đã có hướng
+            // Giai đoạn: AI bắt đầu suy nghĩ / đã có hướng (chưa gọi tool)
             if (entry.thinking && !entry.content && (!entry.tool_calls || entry.tool_calls.length === 0)) {
                 currentPhase = 'THINKING';
                 if (singleStatusMsgId) {
@@ -335,28 +347,28 @@ async function processTranscript() {
                     await editMsg(
                         activeChatId,
                         singleStatusMsgId,
-                        `💡 <b>[ĐÃ CÓ CÁCH, ĐỢI MÌNH CHÚT - ${elapsed}s]</b>\n<blockquote><i>${safe}</i></blockquote>\n🧠 <i>(Đang tính toán các bước hoàn hảo...)</i>`
+                        `💡 <b>[ĐÃ CÓ CÁCH, ĐỢI MÌNH CHÚT - ${elapsed}s]</b>\n<blockquote><i>${safe}</i></blockquote>\n🧠 <i>(Đang chuẩn bị các bước thực hiện...)</i>`
                     );
                 }
             }
 
             // Giai đoạn: Thực thi lệnh / công cụ (Tool Call)
+            // TINH GỌN: Bỏ hẳn "Đã có cách...", chỉ hiện tác vụ + số giây tác vụ + tổng số giây!
             if (entry.tool_calls && entry.tool_calls.length > 0) {
                 currentPhase = 'WORKING';
                 toolStartTime = Date.now();
                 const tc = entry.tool_calls[0];
                 const toolName = tc.name;
-                const summary = tc.args && tc.args.toolSummary ? tc.args.toolSummary.replace(/^"|"$/g, '') : `Thực thi ${toolName}`;
+                currentTaskSummary = tc.args && tc.args.toolSummary ? tc.args.toolSummary.replace(/^"|"$/g, '') : `Thực thi ${toolName}`;
 
-                const elapsed = promptStartTime ? Math.max(1, Math.round((Date.now() - promptStartTime) / 1000)) : 1;
-                const safePrompt = escapeHtml(promptTextSaved);
-                const safeSummary = escapeHtml(summary);
+                const totalSec = promptStartTime ? Math.max(1, Math.round((Date.now() - promptStartTime) / 1000)) : 1;
+                const safeSummary = escapeHtml(currentTaskSummary);
 
                 if (singleStatusMsgId) {
                     await editMsg(
                         activeChatId,
                         singleStatusMsgId,
-                        `💡 <b>[ĐÃ CÓ CÁCH, ĐỢI MÌNH CHÚT - ${elapsed}s]</b>\n<blockquote><i>${safePrompt}</i></blockquote>\n⚡ <b>[MÁY TÍNH ĐANG THỰC HIỆN]</b> ▶ <code>${safeSummary}</code>`
+                        `⚡ <b>[MÁY TÍNH ĐANG THỰC HIỆN (1s)...]</b>\n▶ <code>${safeSummary}</code>\n⏱️ <i>Tổng thời gian: ${totalSec}s</i>`
                     );
                 }
             }
@@ -364,11 +376,14 @@ async function processTranscript() {
             // Giai đoạn: Kết quả lệnh hoàn tất (Tool Output)
             if (entry.type === 'GENERIC' && entry.content) {
                 const wSec = toolStartTime ? Math.max(1, Math.round((Date.now() - toolStartTime) / 1000)) : 1;
+                const totalSec = promptStartTime ? Math.max(1, Math.round((Date.now() - promptStartTime) / 1000)) : 1;
+                const safeTask = escapeHtml(currentTaskSummary || 'Tác vụ');
+
                 if (singleStatusMsgId) {
                     await editMsg(
                         activeChatId,
                         singleStatusMsgId,
-                        `✅ <b>[MÁY TÍNH ĐÃ HOÀN TẤT - ${wSec}s]</b>\n🧠 <b>[AI ĐANG TỔNG HỢP CÂU TRẢ LỜI...]</b>`
+                        `✅ <b>[ĐÃ HOÀN TẤT TRONG ${wSec}s]</b>: <code>${safeTask}</code>\n🧠 <b>[AI ĐANG TỔNG HỢP CÂU TRẢ LỜI...]</b> <i>(Tổng: ${totalSec}s)</i>`
                     );
                 }
             }
@@ -389,6 +404,7 @@ async function processTranscript() {
                     promptStartTime = null;
                     promptTextSaved = '';
                     toolStartTime = null;
+                    currentTaskSummary = '';
                     saveState({});
 
                     setTimeout(async () => {
@@ -450,7 +466,6 @@ async function pollUpdates() {
 
                     console.log(`[Telegram Nhận Tin] (${chatId}, thread=${threadId}): ${userText.substring(0, 50)}`);
 
-                    // Xóa bóng cũ nếu còn tồn đọng trước đó
                     if (singleStatusMsgId) {
                         await deleteMsgs(chatId, [singleStatusMsgId]);
                         singleStatusMsgId = null;
@@ -459,6 +474,7 @@ async function pollUpdates() {
                     promptStartTime = Date.now();
                     promptTextSaved = userText;
                     currentPhase = 'READING';
+                    currentTaskSummary = '';
 
                     const previewClean = userText.replace(/[<>]/g, '');
                     const previewSafe = escapeHtml(previewClean.length > 50 ? previewClean.substring(0, 50) + '...' : previewClean);
@@ -468,7 +484,6 @@ async function pollUpdates() {
 
                     singleStatusMsgId = await sendMsg(chatId, `${promptLabel}\n<blockquote><i>${previewSafe}</i></blockquote>`, threadId);
 
-                    // Lưu state phòng trường hợp tiến trình bị tắt
                     saveState({
                         statusMsgId: singleStatusMsgId,
                         chatId: chatId,
@@ -476,7 +491,6 @@ async function pollUpdates() {
                         timestamp: Date.now()
                     });
 
-                    // Chuyển prompt tới máy tính (Antigravity PC)
                     forwardToAntigravity(userText);
                 }
             }
