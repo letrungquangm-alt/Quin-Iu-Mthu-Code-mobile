@@ -1,4 +1,4 @@
-﻿# ========================================================
+# ========================================================
 # QuinloveRin Code - Trinh Cai Dat Tu Dong 1-Click Cho May Tinh Moi
 # ========================================================
 
@@ -47,7 +47,7 @@ if (Test-Path (Join-Path $targetDir ".git")) {
     & $gitExe clone $repoUrl . 2>&1 | Out-Null
 }
 
-# 3. Tao file cau hinh bao mat config.json neu duoc cung cap
+# 3. Tao file cau hinh bao mat config.json
 $configPath = Join-Path $targetDir "config.json"
 if (-not (Test-Path $configPath) -and $BotToken) {
     Write-Host "[2/5] Cau hinh Token bao mat (Telegram, Gemini, GitHub, Vercel)..." -ForegroundColor Yellow
@@ -68,6 +68,9 @@ if (-not (Test-Path $configPath) -and $BotToken) {
         PROJECTS_ROOT_DIR = $projectsRootDir
         CURRENT_PROJECT = "Quin-Iu-Mthu"
         CURRENT_PROJECT_PATH = $modelDir
+        IS_SUPER_ADMIN = $true
+        PROJECT_PIN = "2726"
+        SYNC_CODE = "GM_2726_Mthu"
     }
     $cfg | ConvertTo-Json -Depth 5 | Set-Content $configPath -Encoding UTF8
 }
@@ -78,7 +81,7 @@ $syncPath = Join-Path $targetDir "sync_bridge.json"
 $syncData = @{
     messages = @()
     active = $true
-    syncCode = "GM_6585_Mthu"
+    syncCode = "GM_2726_Mthu"
     conversationId = $ConversationId
     status = "CONNECTED"
     isWorking = $false
@@ -86,15 +89,14 @@ $syncData = @{
 }
 $syncData | ConvertTo-Json -Depth 5 | Set-Content $syncPath -Encoding UTF8
 
-# 5. Dung cac tien trinh cu neu co va chay Watchdog + Mirror Worker
-Write-Host "[4/5] Khoi dong Bot va Live Mirror Worker..." -ForegroundColor Yellow
-Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" | Where-Object { $_.CommandLine -like "*bot.ps1*" -or $_.CommandLine -like "*watchdog.ps1*" -or $_.CommandLine -like "*mirror_worker.ps1*" } | ForEach-Object {
+# 5. Khoi dong Cau Noi Fast Bridge (Node.js) chay ngam
+Write-Host "[4/5] Khoi dong Cau Noi Fast Bridge (Node.js)..." -ForegroundColor Yellow
+Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" | Where-Object { $_.CommandLine -like "*fast_bridge.cjs*" } | ForEach-Object {
     Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
 }
 Start-Sleep -Seconds 1
 
-Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$targetDir\watchdog.ps1`"" -WindowStyle Hidden
-Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$targetDir\mirror_worker.ps1`"" -WindowStyle Hidden
+Start-Process -FilePath "node" -ArgumentList "fast_bridge.cjs" -WorkingDirectory $targetDir -WindowStyle Hidden
 
 # 6. Gui tin nhan thong bao ve Telegram cho nguoi dung
 Write-Host "[5/5] Gui thong bao xac nhan ve Telegram..." -ForegroundColor Yellow
@@ -102,21 +104,27 @@ if (Test-Path $configPath) {
     try {
         $loadedCfg = Get-Content $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
         $tokenToUse = $loadedCfg.BOT_TOKEN
-        $chatToUse = $loadedCfg.ALLOWED_CHAT_ID
+        $chatToUse = "-1004457846636"
+        $threadToUse = 1160
 
         $msg = @(
-            "[MAY TINH MOI DA SAN SANG!]",
+            "🖥️ <b>[MÁY TÍNH MỚI ĐÃ KẾT NỐI THÀNH CÔNG!]</b>",
+            "──────────────────────",
+            "🚀 <b>QuinloveRin Code:</b> Đã đồng bộ & kích hoạt trên PC này!",
+            "🔑 <b>Mã PIN:</b> <code>2726</code>",
+            "🌐 <b>Cloud:</b> https://quiniumthucode.vercel.app",
+            "📦 <b>Repo:</b> https://github.com/letrungquangm-alt/Quin-Iu-Mthu-Code-mobile",
             "",
-            "Tool QuinloveRin Code da duoc cai dat va thiet lap thanh cong tren may tinh nay!",
-            "Cau noi dong bo: DA KET NOI (GM_6585_Mthu)",
-            "Vercel Live Web: https://quiniumthucode.vercel.app",
-            "GitHub Repo: https://github.com/letrungquangm-alt/Quin-Iu-Mthu-Code-mobile",
-            "",
-            "Tu bay gio moi lenh va code ban gui tu dien thoai se duoc thuc thi truc tiep tren may tinh nay!"
+            "✨ Bro chỉ cần gửi lệnh từ điện thoại, máy tính sẽ tự động lập trình và báo cáo tiến độ ngay lập tức!"
         ) -join "`n"
 
         $sendUrl = "https://api.telegram.org/bot${tokenToUse}/sendMessage"
-        $body = @{ chat_id = $chatToUse; text = $msg } | ConvertTo-Json -Compress
+        $body = @{
+            chat_id = $chatToUse
+            message_thread_id = $threadToUse
+            text = $msg
+            parse_mode = "HTML"
+        } | ConvertTo-Json -Compress
         Invoke-RestMethod -Uri $sendUrl -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($body)) -TimeoutSec 10 | Out-Null
     } catch {}
 }
