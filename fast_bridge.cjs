@@ -200,43 +200,18 @@ async function sendLongResponse(chatId, answerText, totalSec, threadId = 315) {
     }
 }
 
-// --- COUNTDOWN CLEANUP 5S ---
+// --- SILENT CLEANUP (ZERO SPAM, 1 API CALL) ---
 
 async function runCountdownCleanup(chatId, threadId, msgIdsToDelete) {
     if (!msgIdsToDelete || msgIdsToDelete.length === 0) return;
-    const targetThreadId = threadId || activeThreadId || 315;
     try {
-        console.log(`[Countdown Cleanup] Bắt đầu dọn dẹp ${msgIdsToDelete.length} tin nhắn tạm trong 5s...`);
-        const countdownMsgId = await sendMsg(
-            chatId,
-            `🧹 <b>[ĐANG DỌN DẸP TIẾN TRÌNH TRONG 5 GIÂY...]</b>`,
-            targetThreadId
-        );
-
-        for (let s = 4; s >= 1; s--) {
-            await new Promise(r => setTimeout(r, 1000));
-            if (countdownMsgId) {
-                await editMsg(
-                    chatId,
-                    countdownMsgId,
-                    `🧹 <b>[ĐANG DỌN DẸP TIẾN TRÌNH TRONG ${s} GIÂY...]</b>`
-                );
-            }
-        }
-        await new Promise(r => setTimeout(r, 1000));
-
-        console.log('[Countdown Cleanup] Xóa toàn bộ tiến trình tạm...');
-        await deleteMsgs(chatId, msgIdsToDelete);
-
-        if (countdownMsgId) {
-            await editMsg(chatId, countdownMsgId, `✨ <b>[ĐÃ DỌN DẸP THÀNH CÔNG!]</b>`);
-            setTimeout(async () => {
-                await deleteMsgs(chatId, [countdownMsgId]);
-                console.log('[Countdown Cleanup] Hoàn tất, khung chat sạch bong!');
-            }, 3000);
-        }
+        console.log(`[Cleanup] Dọn dẹp ${msgIdsToDelete.length} tin nhắn tạm sau 1.5s...`);
+        setTimeout(async () => {
+            await deleteMsgs(chatId, msgIdsToDelete);
+            console.log('[Cleanup] Hoàn tất, khung chat sạch bong!');
+        }, 1500);
     } catch (e) {
-        console.error('[Countdown Cleanup Error]:', e.message);
+        console.error('[Cleanup Error]:', e.message);
     }
 }
 
