@@ -1,417 +1,45 @@
-/**
- * QuinloveRin Code - Fast Telegram Bridge v2.9 (.cjs)
- * - TỰ ĐỘNG GỠ WEBHOOK CLOUD KHI MÁY TÍNH BẬT (CHUYỂN GIAO MƯỢT MÀ VỀ PC).
- * - NÚT BẤM INLINE 1 CHẠM [🛑 DỪNG TÁC VỤ (CANCEL)]: Hủy ngay lập tức từ điện thoại.
- * - HỖ TRỢ SỬA TIN NHẮN (EDIT MESSAGE): Sửa prompt trên Telegram = Tái khởi động tác vụ mới.
- * - ĐỒNG HỒ BẤM GIỜ NHẢY GIÂY LIVE LIÊN TỤC (2.0s/LẦN) XUYÊN SUỐT CÁC GIAI ĐOẠN:
- *   + 📖 [ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (Xs)...]
- *   + ✏️ [ĐÃ CẬP NHẬT PROMPT MỚI, KHỞI ĐỘNG LẠI (Xs)...]
- *   + 💡 [ĐÃ CÓ CÁCH, ĐỢI MÌNH CHÚT - Xs]
- *   + ⏳ [ĐÃ XONG YÊU CẦU CỦA BẠN, CHỜ CHÚT TÔI ĐANG GỬI PHẢN HỒI YÊU CẦU CỦA BẠN (Xs)...]
- * - DỌN DẸP 5 GIÂY TỐI ƯU HÓA: Không spam edit, triệt tiêu 100% lỗi Telegram 429 Rate Limit.
- * - MÀU SẮC TRỰC QUAN CHO CÔNG CỤ (Diff Syntax Highlighting):
- *   + 🟢 [TẠO FILE MỚI] (+ X dòng mã nguồn mới - Xanh lá)
- *   + 🟠 [SỬA FILE] (+ X dòng thêm, - Y dòng sửa, ! Ghi đè - Cam)
- *   + 🔴 [XÓA FILE / THƯ MỤC] (- Lệnh xóa - Đỏ)
- *   + 📄 [ĐỌC FILE] (Kèm phạm vi dòng)
- *   + ⚡ [MÁY TÍNH ĐANG THỰC HIỆN] (Chạy lệnh terminal)
- * - PHẢN CHIẾU 100% TIẾN TRÌNH VÀO BOX CHAT ANTIGRAVITY PC:
- *   + Pop-up nổi Toast trên màn hình máy tính (show_notification.ps1).
- *   + Nạp tin nhắn vào box chat máy tính qua agentapi send-message.
- *   + Giữ câu trả lời vĩnh viễn trên Topic 315.
- */
-
 const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
 
+const {
+    botToken,
+    allowedChatId,
+    cancelKeyboard,
+    tgApi,
+    sendMsg,
+    editMsg,
+    deleteMsgs,
+    downloadTelegramPhoto,
+    sendTyping,
+    escapeHtml,
+    mdToTgHtml,
+    recordBubbleText,
+    moveCancelButtonTo,
+    removeCancelButtonFrom,
+    clearAllCancelButtons,
+    getActiveCancelMsgId,
+    setActiveCancelMsgId
+} = require('./lib/telegram.cjs');
+
+const { formatToolCall } = require('./lib/formatter.cjs');
+const { getPinDisplay, getKeypadMarkup } = require('./lib/numpad.cjs');
+
 const rootDir = __dirname;
-const configPath = path.join(rootDir, 'config.json');
-const syncBridgePath = path.join(rootDir, 'sync_bridge.json');
-const notifScript = path.join(rootDir, 'show_notification.ps1');
-
-if (!fs.existsSync(configPath)) {
-    console.error('[Bridge Error] Không tìm thấy config.json tại:', configPath);
-    process.exit(1);
-}
-
-const config = JSON.parse(fs.readFileSync(configPath, 'utf8').replace(/^\uFEFF/, ''));
-const botToken = config.BOT_TOKEN;
-const allowedChatId = config.ALLOWED_CHAT_ID;
 const conversationId = '7f7131ce-dc72-490f-97bd-4a675f9dd0c7';
-
-const transcriptPath = path.join(
-    process.env.USERPROFILE,
-    '.gemini',
-    'antigravity',
-    'brain',
-    conversationId,
-    '.system_generated',
-    'logs',
-    'transcript.jsonl'
-);
-
-const langServer = path.join(
-    process.env.LOCALAPPDATA,
-    'Programs',
-    'antigravity',
-    'resources',
-    'bin',
-    'language_server.exe'
-);
-
-const cancelKeyboard = {
-    inline_keyboard: [
-        [{ text: '🛑 Dừng tác vụ (Cancel)', callback_data: 'cancel_task' }]
-    ]
-};
+const transcriptPath = `C:\\Users\\letru\\.gemini\\antigravity\\brain\\${conversationId}\\.system_generated\\logs\\transcript.jsonl`;
+const langServer = 'C:\\Users\\letru\\.gemini\\antigravity\\language_server_windows_x64.exe';
+const notifScript = path.join(rootDir, 'show_notification.ps1');
+const syncBridgePath = path.join(rootDir, 'sync_bridge.json');
 
 console.log('========================================================');
-console.log(' Fast Telegram Bridge v2.9 (Edit Message & 1-Touch Cancel)');
-console.log(' Bot Token:', botToken ? botToken.substring(0, 10) + '...' : 'NONE');
-console.log(' Conversation ID:', conversationId);
-console.log(' Transcript:', transcriptPath);
+console.log(' Fast Modular Telegram Bridge v3.0 (Zero Lag & Strict 1-Cancel)');
+console.log(` Bot Token: ${botToken.substring(0, 10)}...`);
+console.log(` Conversation ID: ${conversationId}`);
+console.log(` Transcript: ${transcriptPath}`);
 console.log('========================================================');
 
-// --- TELEGRAM API HELPERS ---
-
-let apiQueue = Promise.resolve();
-
-function tgApi(method, data) {
-    const nextCall = () => tgApiDirect(method, data);
-    apiQueue = apiQueue.then(nextCall, nextCall);
-    return apiQueue;
-}
-
-async function tgApiDirect(method, data) {
-    try {
-        const res = await fetch(`https://api.telegram.org/bot${botToken}/${method}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data)
-        });
-        const json = await res.json();
-        if (!json.ok) {
-            if (json.error_code === 429 && json.parameters && json.parameters.retry_after) {
-                const waitSec = json.parameters.retry_after;
-                console.warn(`[429 Rate Limit] Chờ ${waitSec}s trước khi gửi tiếp...`);
-                await new Promise(r => setTimeout(r, (waitSec + 1) * 1000));
-                return tgApiDirect(method, data);
-            }
-            if (json.description &&
-                !json.description.includes('message to delete not found') &&
-                !json.description.includes('message is not modified')) {
-                console.warn(`[API ${method} Fail]:`, json.description);
-            }
-        }
-        await new Promise(r => setTimeout(r, 150)); // Giãn cách 150ms chống 429 burst
-        return json;
-    } catch (e) {
-        console.error(`[API ${method} Ex]:`, e.message);
-        return { ok: false, error: e.message };
-    }
-}
-
-async function downloadTelegramPhoto(fileId, savePath) {
-    try {
-        const fileRes = await tgApi('getFile', { file_id: fileId });
-        if (fileRes.ok && fileRes.result && fileRes.result.file_path) {
-            const fileUrl = `https://api.telegram.org/file/bot${botToken}/${fileRes.result.file_path}`;
-            const res = await fetch(fileUrl);
-            const buffer = Buffer.from(await res.arrayBuffer());
-            fs.writeFileSync(savePath, buffer);
-            console.log(`[Bridge Photo] Đã tải ảnh Telegram về: ${savePath} (${buffer.length} bytes)`);
-            return savePath;
-        }
-    } catch (e) {
-        console.error('[Bridge Photo Error]:', e.message);
-    }
-    return null;
-}
-
-async function sendTyping(chatId, threadId = 315) {
-    const payload = { chat_id: chatId, action: 'typing' };
-    if (threadId) payload.message_thread_id = threadId;
-    await tgApi('sendChatAction', payload);
-}
-
-async function sendMsg(chatId, text, threadId = 315, parseMode = 'HTML', replyMarkup = null) {
-    const targetThread = threadId || 315;
-    const payload = {
-        chat_id: chatId,
-        text: text,
-        disable_web_page_preview: true,
-        message_thread_id: targetThread
-    };
-    if (parseMode) payload.parse_mode = parseMode;
-    if (replyMarkup) payload.reply_markup = replyMarkup;
-
-    const res = await tgApi('sendMessage', payload);
-    if (!res.ok && parseMode) {
-        delete payload.parse_mode;
-        payload.text = text.replace(/<[^>]+>/g, '');
-        const fallbackRes = await tgApi('sendMessage', payload);
-        return fallbackRes.result ? fallbackRes.result.message_id : null;
-    }
-    return res.result ? res.result.message_id : null;
-}
-
-async function editMsg(chatId, messageId, text, parseMode = 'HTML', replyMarkup = null) {
-    if (!messageId) return;
-    const payload = {
-        chat_id: chatId,
-        message_id: messageId,
-        text: text,
-        disable_web_page_preview: true
-    };
-    if (parseMode) payload.parse_mode = parseMode;
-    if (replyMarkup !== null) {
-        payload.reply_markup = replyMarkup;
-    }
-    const res = await tgApi('editMessageText', payload);
-    if (!res.ok && parseMode) {
-        delete payload.parse_mode;
-        payload.text = text.replace(/<[^>]+>/g, '');
-        await tgApi('editMessageText', payload);
-    }
-}
-
-async function deleteMsgs(chatId, messageIds) {
-    if (!messageIds || messageIds.length === 0) return;
-    const validIds = messageIds.filter(id => typeof id === 'number' && id > 0);
-    if (validIds.length === 0) return;
-
-    if (validIds.length === 1) {
-        await tgApi('deleteMessage', { chat_id: chatId, message_id: validIds[0] });
-        return;
-    }
-
-    for (let i = 0; i < validIds.length; i += 80) {
-        const batch = validIds.slice(i, i + 80);
-        const res = await tgApi('deleteMessages', { chat_id: chatId, message_ids: batch });
-        if (!res.ok) {
-            for (const mid of batch) {
-                await tgApi('deleteMessage', { chat_id: chatId, message_id: mid });
-                await new Promise(r => setTimeout(r, 120));
-            }
-        }
-    }
-}
-
-function escapeHtml(str) {
-    return (str || '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-}
-
-function mdToTgHtml(text) {
-    if (!text) return '';
-    const codeBlocks = [];
-    text = text.replace(/```([a-zA-Z0-9_\-\+]*)\r?\n([\s\S]*?)```/g, (m, lang, code) => {
-        const c = escapeHtml(code);
-        const l = lang || 'text';
-        const idx = codeBlocks.length;
-        codeBlocks.push(`<pre><code class="language-${l}">${c}</code></pre>`);
-        return `___CODE_BLOCK_${idx}___`;
-    });
-
-    const inlineCodes = [];
-    text = text.replace(/`([^`\r\n]+)`/g, (m, code) => {
-        const c = escapeHtml(code);
-        const idx = inlineCodes.length;
-        inlineCodes.push(`<code>${c}</code>`);
-        return `___INLINE_${idx}___`;
-    });
-
-    text = escapeHtml(text);
-    text = text.replace(/\*\*([^\*\r\n]+)\*\*/g, '<b>$1</b>');
-    text = text.replace(/(?<!\w)\*([^\*\r\n]+)\*(?!\w)/g, '<i>$1</i>');
-    text = text.replace(/^&gt;\s*([^\r\n]+)/gm, '<blockquote>$1</blockquote>');
-
-    codeBlocks.forEach((b, i) => { text = text.replace(`___CODE_BLOCK_${i}___`, b); });
-    inlineCodes.forEach((b, i) => { text = text.replace(`___INLINE_${i}___`, b); });
-    return text;
-}
-
-async function sendLongResponse(chatId, answerText, totalSec, threadId = 315) {
-    if (!answerText) return;
-
-    const targetThreadId = threadId || activeThreadId || 315;
-    const maxLen = 3500;
-    const headerTitle = `🤖 <b>[MÁY TÍNH ĐÃ PHẢN HỒI (Hoàn tất trong ${totalSec}s)]:</b>\n\n`;
-
-    if (answerText.length <= maxLen) {
-        const html = mdToTgHtml(answerText);
-        await sendMsg(chatId, `${headerTitle}${html}`, targetThreadId);
-        return;
-    }
-
-    const paragraphs = answerText.split(/\r?\n\r?\n/);
-    const chunks = [];
-    let currentChunk = '';
-
-    for (const p of paragraphs) {
-        if ((currentChunk + '\n\n' + p).length > maxLen) {
-            if (currentChunk) chunks.push(currentChunk.trim());
-            if (p.length > maxLen) {
-                const lines = p.split(/\r?\n/);
-                let lineChunk = '';
-                for (const l of lines) {
-                    if ((lineChunk + '\n' + l).length > maxLen) {
-                        if (lineChunk) chunks.push(lineChunk.trim());
-                        lineChunk = l;
-                    } else {
-                        lineChunk = lineChunk ? lineChunk + '\n' + l : l;
-                    }
-                }
-                if (lineChunk) currentChunk = lineChunk;
-            } else {
-                currentChunk = p;
-            }
-        } else {
-            currentChunk = currentChunk ? currentChunk + '\n\n' + p : p;
-        }
-    }
-    if (currentChunk) chunks.push(currentChunk.trim());
-
-    for (let i = 0; i < chunks.length; i++) {
-        const html = mdToTgHtml(chunks[i]);
-        const header = (i === 0) ? headerTitle : `<i>(Phần ${i + 1}/${chunks.length})</i>\n\n`;
-        await sendMsg(chatId, `${header}${html}`, targetThreadId);
-        if (i < chunks.length - 1) {
-            await new Promise(r => setTimeout(r, 200));
-        }
-    }
-}
-
-// --- CƠ CHẾ DỌN DẸP ĐẾM NGƯỢC 5S (KHÔNG GÂY LỖI 429 RATE LIMIT) ---
-
-async function runCountdownCleanup(chatId, threadId, msgIdsToDelete) {
-    if (!msgIdsToDelete || msgIdsToDelete.length === 0) return;
-    const targetThreadId = threadId || activeThreadId || 315;
-    try {
-        console.log(`[Countdown Cleanup] Bắt đầu dọn dẹp ${msgIdsToDelete.length} tin nhắn tạm trong 5s...`);
-        const countdownMsgId = await sendMsg(
-            chatId,
-            `🧹 <b>[ĐANG DỌN DẸP TIẾN TRÌNH TRONG 5 GIÂY...]</b>`,
-            targetThreadId
-        );
-
-        for (let s = 4; s >= 1; s--) {
-            await new Promise(r => setTimeout(r, 1000));
-            if (countdownMsgId) {
-                await editMsg(
-                    chatId,
-                    countdownMsgId,
-                    `🧹 <b>[ĐANG DỌN DẸP TIẾN TRÌNH TRONG ${s} GIÂY...]</b>`
-                );
-            }
-        }
-        await new Promise(r => setTimeout(r, 1000));
-
-        console.log('[Countdown Cleanup] Xóa toàn bộ tiến trình tạm...');
-        await deleteMsgs(chatId, msgIdsToDelete);
-
-        if (countdownMsgId) {
-            await editMsg(chatId, countdownMsgId, `✨ <b>[ĐÃ DỌN DẸP THÀNH CÔNG!]</b>`);
-            setTimeout(async () => {
-                await tgApi('deleteMessage', { chat_id: chatId, message_id: countdownMsgId });
-                console.log('[Countdown Cleanup] Hoàn tất, khung chat sạch bong!');
-            }, 1500);
-        }
-    } catch (e) {
-        console.error('[Countdown Cleanup Error]:', e.message);
-    }
-}
-
-// --- COLOR-CODED TOOL CALL FORMATTER ---
-
-function formatToolCall(tc) {
-    const fn = tc.function || tc;
-    const toolName = fn.name;
-    const args = fn.args || fn.arguments || {};
-    const rawSummary = args.toolSummary ? args.toolSummary.toString().replace(/^"|"$/g, '') : '';
-    let summary = '';
-    let runningFn = null;
-    let finishedFn = null;
-
-    if (toolName === 'run_command') {
-        const cmd = args.CommandLine ? args.CommandLine.toString().replace(/^"|"$/g, '').trim() : '';
-        const safeCmd = escapeHtml(cmd.length > 200 ? cmd.substring(0, 200) + '... [dài]' : cmd);
-
-        if (/(Remove-Item|rm\s+|del\s+|rmdir|unlink)/i.test(cmd)) {
-            summary = rawSummary || 'Xóa file / thư mục';
-            runningFn = (s) => `🔴 <b>[XÓA FILE / THƯ MỤC (${s}s)...]</b>\n<pre><code class="language-diff">- ${safeCmd}</code></pre>`;
-            finishedFn = (s) => `🔴 <b>[ĐÃ XÓA FILE / THƯ MỤC XONG]</b>\n<pre><code class="language-diff">- ${safeCmd}</code></pre>\n<i>↳ ✅ Hoàn tất trong ${s}s</i>`;
-        } else {
-            summary = rawSummary || 'Chạy lệnh terminal';
-            runningFn = (s) => `⚡ <b>[ĐANG XỬ LÝ (${s}s)...]</b>\n▶ <code>${escapeHtml(summary)}</code>\n<pre><code class="language-powershell">${safeCmd}</code></pre>`;
-            finishedFn = (s) => `⚡ <b>[ĐÃ XỬ LÝ XONG]</b>\n▶ <code>${escapeHtml(summary)}</code>\n<pre><code class="language-powershell">${safeCmd}</code></pre>\n<i>↳ ✅ Hoàn tất trong ${s}s</i>`;
-        }
-    } else if (toolName === 'write_file') {
-        const rawPath = args.Path ? args.Path.toString().replace(/^"|"$/g, '') : 'file';
-        const fileName = path.basename(rawPath);
-        const isOverwrite = args.Overwrite === true || args.Overwrite === 'true';
-        const isAppend = args.Append === true || args.Append === 'true';
-        let fileExisted = false;
-        try { fileExisted = fs.existsSync(rawPath); } catch (e) {}
-        const contentLines = args.Content ? args.Content.toString().split(/\r?\n/).length : 0;
-
-        if (isOverwrite || isAppend || fileExisted) {
-            summary = rawSummary || `Cập nhật file ${fileName}`;
-            runningFn = (s) => `🟠 <b>[SỬA FILE (${s}s)...]:</b> <code>${fileName}</code>\n<pre><code class="language-diff">--- a/${fileName}\n- Ghi đè thay thế nội dung cũ\n+++ b/${fileName}\n+ ${contentLines} dòng thêm mới</code></pre>`;
-            finishedFn = (s) => `🟠 <b>[ĐÃ SỬA XONG FILE]:</b> <code>${fileName}</code>\n<pre><code class="language-diff">--- a/${fileName}\n- Ghi đè thay thế nội dung cũ\n+++ b/${fileName}\n+ ${contentLines} dòng thêm mới</code></pre>\n<i>↳ ✅ Hoàn tất trong ${s}s</i>`;
-        } else {
-            summary = rawSummary || `Tạo mới file ${fileName}`;
-            runningFn = (s) => `🟢 <b>[TẠO FILE MỚI (${s}s)...]:</b> <code>${fileName}</code>\n<pre><code class="language-diff">+++ b/${fileName}\n+ ${contentLines} dòng mã nguồn mới</code></pre>`;
-            finishedFn = (s) => `🟢 <b>[ĐÃ TẠO XONG FILE]:</b> <code>${fileName}</code>\n<pre><code class="language-diff">+++ b/${fileName}\n+ ${contentLines} dòng mã nguồn mới</code></pre>\n<i>↳ ✅ Hoàn tất trong ${s}s</i>`;
-        }
-    } else if (toolName === 'edit_file') {
-        const rawPath = args.Path ? args.Path.toString().replace(/^"|"$/g, '') : 'file';
-        const fileName = path.basename(rawPath);
-        const linesRemoved = args.Target ? args.Target.toString().split(/\r?\n/).length : 1;
-        const linesAdded = args.Replacement ? args.Replacement.toString().split(/\r?\n/).length : 0;
-        summary = rawSummary || `Chỉnh sửa code ${fileName}`;
-        runningFn = (s) => `🟠 <b>[SỬA FILE (${s}s)...]:</b> <code>${fileName}</code>\n<pre><code class="language-diff">--- a/${fileName}\n- ${linesRemoved} dòng đã xóa\n+++ b/${fileName}\n+ ${linesAdded} dòng thêm</code></pre>`;
-        finishedFn = (s) => `🟠 <b>[ĐÃ SỬA XONG FILE]:</b> <code>${fileName}</code>\n<pre><code class="language-diff">--- a/${fileName}\n- ${linesRemoved} dòng đã xóa\n+++ b/${fileName}\n+ ${linesAdded} dòng thêm</code></pre>\n<i>↳ ✅ Hoàn tất trong ${s}s</i>`;
-    } else if (toolName === 'read_file') {
-        const rawPath = args.Path ? args.Path.toString().replace(/^"|"$/g, '') : 'file';
-        const fileName = path.basename(rawPath);
-        if (/\.(jpg|jpeg|png|webp|gif)$/i.test(fileName)) {
-            summary = rawSummary || `Phân tích thị giác hình ảnh ${fileName}`;
-            runningFn = (s) => `🖼️ <b>[PHÂN TÍCH HÌNH ẢNH (${s}s)...]:</b> <code>${fileName}</code>`;
-            finishedFn = (s) => `🖼️ <b>[ĐÃ PHÂN TÍCH HÌNH ẢNH XONG]:</b> <code>${fileName}</code>\n<i>↳ ✅ Hoàn tất trong ${s}s</i>`;
-        } else {
-            const sLine = args.StartLine || '';
-            const eLine = args.EndLine || '';
-            let rangeInfo = '(Đọc toàn bộ file)';
-            if (sLine && eLine) rangeInfo = `(Dòng ${sLine} - ${eLine})`;
-            else if (sLine) rangeInfo = `(Từ dòng ${sLine})`;
-            else if (eLine) rangeInfo = `(Đến dòng ${eLine})`;
-            summary = rawSummary || `Đọc nội dung ${fileName}`;
-            runningFn = (s) => `📄 <b>[ĐỌC FILE (${s}s)...]:</b> <code>${fileName}</code> <i>${rangeInfo}</i>`;
-            finishedFn = (s) => `📄 <b>[ĐÃ ĐỌC XONG FILE]:</b> <code>${fileName}</code> <i>${rangeInfo}</i>\n<i>↳ ✅ Hoàn tất trong ${s}s</i>`;
-        }
-    } else if (toolName === 'manage_task') {
-        const action = args.Action || '';
-        if (action === 'status' || action === 'list') {
-            return { summary: 'Kiểm tra trạng thái', runningFn: null, finishedFn: null };
-        }
-        summary = rawSummary || `Đang xử lý (${action})`;
-        runningFn = (s) => `⚡ <b>[ĐANG XỬ LÝ (${s}s)...]:</b> <code>${escapeHtml(summary)}</code>`;
-        finishedFn = (s) => `⚡ <b>[ĐÃ XỬ LÝ XONG]:</b> <code>${escapeHtml(summary)}</code>\n<i>↳ ✅ Hoàn tất trong ${s}s</i>`;
-    } else {
-        summary = rawSummary || `Xử lý ${toolName}`;
-        runningFn = (s) => `⚡ <b>[ĐANG XỬ LÝ (${s}s)...]</b>\n▶ <code>${escapeHtml(summary)}</code>`;
-        finishedFn = (s) => `⚡ <b>[ĐÃ XỬ LÝ XONG]</b>\n▶ <code>${escapeHtml(summary)}</code>\n<i>↳ ✅ Hoàn tất trong ${s}s</i>`;
-    }
-
-    return { summary, runningFn, finishedFn };
-}
-
-// --- SYNC BRIDGE DISPATCHER ---
+// --- DISPATCHERS ---
 
 function showScreenToast(title, msg) {
     if (fs.existsSync(notifScript)) {
@@ -474,109 +102,150 @@ let activeThreadId = 315;
 
 if (fs.existsSync(syncBridgePath)) {
     try {
-        const br = JSON.parse(fs.readFileSync(syncBridgePath, 'utf8').replace(/^\uFEFF/, ''));
-        if (br.activeChatId) activeChatId = Number(br.activeChatId);
-        if (br.activeThreadId) activeThreadId = Number(br.activeThreadId);
+        const raw = fs.readFileSync(syncBridgePath, 'utf8').replace(/^\uFEFF/, '');
+        const br = JSON.parse(raw);
+        if (br.chatId) activeChatId = Number(br.chatId);
+        if (br.threadId) activeThreadId = Number(br.threadId);
     } catch (e) {}
 }
-if (!activeThreadId) activeThreadId = 315;
-if (!activeChatId) activeChatId = -1004457846636;
 
+let promptMsgId = null;
 let promptStartTime = null;
 let promptTextSaved = '';
-let promptMsgId = null;
 let isPhotoSaved = false;
 let isEditedPrompt = false;
-let currentPhase = 'IDLE'; // 'IDLE' | 'READING' | 'THINKING' | 'PREPARING_RESPONSE'
+let currentPhase = 'IDLE'; // 'IDLE' | 'READING' | 'THINKING' | 'WORKING' | 'CANCELED'
+let isCanceled = false;
 let tickerInterval = null;
 let lastStatusText = '';
 let isUpdatingStatus = false;
-let thinkingSent = false;
 let currentWorkingMsgId = null;
 let currentToolStartTime = null;
 let currentToolSummary = '';
-let currentToolBubbleText = '';
-let typingInterval = null;
-let tempMsgIds = [];
-let currentCancelMsgId = null;
-let lastBubbleTexts = {};
-let waitingForPairCode = false;
 let currentToolRunningFn = null;
 let currentToolFinishedFn = null;
 let lastWorkingBubbleText = '';
-
-async function moveCancelButtonTo(chatId, newMsgId, newText, threadId = 315) {
-    if (currentCancelMsgId && currentCancelMsgId !== newMsgId) {
-        await removeCancelButtonFrom(chatId, currentCancelMsgId);
-    }
-    currentCancelMsgId = newMsgId;
-    if (newMsgId && newText) {
-        lastBubbleTexts[newMsgId] = newText;
-    }
-}
-
-async function removeCancelButtonFrom(chatId, msgId) {
-    if (!msgId) return;
-    const prevText = lastBubbleTexts[msgId];
-    if (prevText) {
-        await editMsg(chatId, msgId, prevText, 'HTML', { inline_keyboard: [] });
-    }
-}
-
-async function removeAllCancelButtons(chatId) {
-    if (currentCancelMsgId) {
-        await removeCancelButtonFrom(chatId, currentCancelMsgId);
-        currentCancelMsgId = null;
-    }
-    if (promptMsgId) {
-        await removeCancelButtonFrom(chatId, promptMsgId);
-    }
-}
-
-// --- PIN KEYPAD SYSTEM (3x3 NUMPAD + HỦY, XÓA, ENTER) ---
-
+let typingInterval = null;
+let tempMsgIds = [];
 let currentPin = '';
 let pinFailedCount = 0;
+let waitingForPairCode = false;
 
-function getPinDisplay(pin) {
-    const slots = ['_', '_', '_', '_'];
-    for (let i = 0; i < (pin || '').length && i < 4; i++) {
-        slots[i] = pin[i];
+// --- LONG RESPONSE SENDER ---
+
+async function sendLongResponse(chatId, answerText, totalSec, threadId = 315) {
+    if (!answerText) return;
+    const targetThreadId = threadId || activeThreadId || 315;
+    const maxLen = 3500;
+    const headerTitle = `🤖 <b>[MÁY TÍNH ĐÃ PHẢN HỒI (Hoàn tất trong ${totalSec}s)]:</b>\n\n`;
+
+    if (answerText.length <= maxLen) {
+        const html = mdToTgHtml(answerText);
+        await sendMsg(chatId, `${headerTitle}${html}`, targetThreadId);
+        return;
     }
-    return `[ ${slots.join('  ')} ]`;
+
+    const paragraphs = answerText.split(/\r?\n\r?\n/);
+    const chunks = [];
+    let currentChunk = '';
+
+    for (const p of paragraphs) {
+        if ((currentChunk + '\n\n' + p).length > maxLen) {
+            if (currentChunk) chunks.push(currentChunk.trim());
+            if (p.length > maxLen) {
+                const lines = p.split(/\r?\n/);
+                let lineChunk = '';
+                for (const l of lines) {
+                    if ((lineChunk + '\n' + l).length > maxLen) {
+                        if (lineChunk) chunks.push(lineChunk.trim());
+                        lineChunk = l;
+                    } else {
+                        lineChunk = lineChunk ? lineChunk + '\n' + l : l;
+                    }
+                }
+                if (lineChunk) currentChunk = lineChunk;
+            } else {
+                currentChunk = p;
+            }
+        } else {
+            currentChunk = currentChunk ? currentChunk + '\n\n' + p : p;
+        }
+    }
+    if (currentChunk) chunks.push(currentChunk.trim());
+
+    for (let i = 0; i < chunks.length; i++) {
+        const html = mdToTgHtml(chunks[i]);
+        const header = (i === 0) ? headerTitle : `<i>(Phần ${i + 1}/${chunks.length})</i>\n\n`;
+        await sendMsg(chatId, `${header}${html}`, targetThreadId);
+        if (i < chunks.length - 1) {
+            await new Promise(r => setTimeout(r, 200));
+        }
+    }
 }
 
-function getKeypadMarkup() {
-    return {
-        inline_keyboard: [
-            [
-                { text: '1', callback_data: 'pin_num_1' },
-                { text: '2', callback_data: 'pin_num_2' },
-                { text: '3', callback_data: 'pin_num_3' }
-            ],
-            [
-                { text: '4', callback_data: 'pin_num_4' },
-                { text: '5', callback_data: 'pin_num_5' },
-                { text: '6', callback_data: 'pin_num_6' }
-            ],
-            [
-                { text: '7', callback_data: 'pin_num_7' },
-                { text: '8', callback_data: 'pin_num_8' },
-                { text: '9', callback_data: 'pin_num_9' }
-            ],
-            [
-                { text: '❌ Hủy', callback_data: 'pin_action_cancel' },
-                { text: '⌫ Xóa', callback_data: 'pin_action_backspace' },
-                { text: '↵ Enter', callback_data: 'pin_action_enter' }
-            ]
-        ]
-    };
+// --- COUNTDOWN CLEANUP 5S ---
+
+async function runCountdownCleanup(chatId, threadId, msgIdsToDelete) {
+    if (!msgIdsToDelete || msgIdsToDelete.length === 0) return;
+    const targetThreadId = threadId || activeThreadId || 315;
+    try {
+        console.log(`[Countdown Cleanup] Bắt đầu dọn dẹp ${msgIdsToDelete.length} tin nhắn tạm trong 5s...`);
+        const countdownMsgId = await sendMsg(
+            chatId,
+            `🧹 <b>[ĐANG DỌN DẸP TIẾN TRÌNH TRONG 5 GIÂY...]</b>`,
+            targetThreadId
+        );
+
+        for (let s = 4; s >= 1; s--) {
+            await new Promise(r => setTimeout(r, 1000));
+            if (countdownMsgId) {
+                await editMsg(
+                    chatId,
+                    countdownMsgId,
+                    `🧹 <b>[ĐANG DỌN DẸP TIẾN TRÌNH TRONG ${s} GIÂY...]</b>`
+                );
+            }
+        }
+        await new Promise(r => setTimeout(r, 1000));
+
+        console.log('[Countdown Cleanup] Xóa toàn bộ tiến trình tạm...');
+        await deleteMsgs(chatId, msgIdsToDelete);
+
+        if (countdownMsgId) {
+            await editMsg(chatId, countdownMsgId, `✨ <b>[ĐÃ DỌN DẸP THÀNH CÔNG!]</b>`);
+            setTimeout(async () => {
+                await deleteMsgs(chatId, [countdownMsgId]);
+                console.log('[Countdown Cleanup] Hoàn tất, khung chat sạch bong!');
+            }, 3000);
+        }
+    } catch (e) {
+        console.error('[Countdown Cleanup Error]:', e.message);
+    }
 }
 
-// --- LIVE TICKING STOPWATCH (EVERY 2.0 SECONDS - CHỐNG NGHẼN 429) ---
+// --- LIVE TICKING STOPWATCH (EVERY 2.0S) ---
 
 async function updateStatusBubble() {
-    if (!promptMsgId || !promptStartTime || currentPhase === 'IDLE' || isUpdatingStatus) return;
+    if (isUpdatingStatus || currentPhase === 'IDLE' || currentPhase === 'CANCELED') return;
+
+    // A. Nếu có tool đang chạy, đếm giây trực tiếp trên bong bóng tool
+    if (currentWorkingMsgId && currentToolStartTime && currentToolRunningFn) {
+        const toolElapsed = Math.max(1, Math.round((Date.now() - currentToolStartTime) / 1000));
+        const updatedToolText = currentToolRunningFn(toolElapsed);
+        if (updatedToolText !== lastWorkingBubbleText) {
+            lastWorkingBubbleText = updatedToolText;
+            recordBubbleText(currentWorkingMsgId, updatedToolText);
+            isUpdatingStatus = true;
+            try {
+                await editMsg(activeChatId, currentWorkingMsgId, updatedToolText, 'HTML', cancelKeyboard);
+            } catch (e) {}
+            isUpdatingStatus = false;
+        }
+        return;
+    }
+
+    // B. Nếu không có tool nào đang chạy, đếm giây trên promptMsgId
+    if (!promptMsgId || !promptStartTime) return;
 
     const elapsed = Math.max(1, Math.round((Date.now() - promptStartTime) / 1000));
     let text = '';
@@ -593,8 +262,6 @@ async function updateStatusBubble() {
     } else if (currentPhase === 'THINKING') {
         const safe = escapeHtml(promptTextSaved || 'Yêu cầu của bạn');
         text = `💡 <b>[ĐANG SUY NGHĨ & XỬ LÝ (${elapsed}s)...]</b>\n<blockquote><i>${safe}</i></blockquote>`;
-    } else if (currentPhase === 'GENERATING') {
-        text = `⏳ <b>[ĐANG KHỞI TẠO PHẢN HỒI CHO BẠN, VUI LÒNG CHỜ TRONG GIÂY LÁT (${elapsed}s)...]</b>`;
     } else {
         return;
     }
@@ -603,15 +270,12 @@ async function updateStatusBubble() {
 
     isUpdatingStatus = true;
     try {
-        const kb = (currentCancelMsgId === promptMsgId ? cancelKeyboard : { inline_keyboard: [] });
+        const kb = (getActiveCancelMsgId() === promptMsgId ? cancelKeyboard : { inline_keyboard: [] });
         await editMsg(activeChatId, promptMsgId, text, 'HTML', kb);
         lastStatusText = text;
-        lastBubbleTexts[promptMsgId] = text;
-    } catch (e) {
-        // Ignored
-    } finally {
-        isUpdatingStatus = false;
-    }
+        recordBubbleText(promptMsgId, text);
+    } catch (e) {}
+    isUpdatingStatus = false;
 }
 
 function startTicker() {
@@ -627,34 +291,52 @@ function stopTicker() {
     }
 }
 
-// --- XỬ LÝ LỆNH HỦY (CANCEL) ---
+// --- HANDLE CANCEL ACTION (STOP IMMEDIATELY) ---
 
 async function handleCancelAction(source = 'button') {
     console.log(`[Bridge Action] Người dùng yêu cầu hủy tác vụ (${source})`);
-    currentPhase = 'IDLE';
+    isCanceled = true;
+    currentPhase = 'CANCELED';
     stopTicker();
+
     if (typingInterval) {
         clearInterval(typingInterval);
         typingInterval = null;
     }
 
-    const cancelMsg = `🛑 <b>[ĐÃ HỦY TÁC VỤ THEO YÊU CẦU CỦA BRO!]</b>\n<i>Đã dừng tiến trình và dọn dẹp các tác vụ đang thực thi.</i>`;
-    if (promptMsgId) {
-        await editMsg(activeChatId, promptMsgId, cancelMsg, 'HTML', { inline_keyboard: [] });
+    // Nhảy cóc offset transcript tới cuối file để bỏ qua mọi tool call đang dở dang
+    if (fs.existsSync(transcriptPath)) {
+        try {
+            lastOffset = fs.statSync(transcriptPath).size;
+            console.log('[Bridge Cancel] Đã tua nhanh offset transcript để ngừng đọc các tác vụ dở dang:', lastOffset);
+        } catch (e) {}
     }
 
-    // Gửi tín hiệu thông báo vào Box Chat PC
-    forwardToAntigravity(`[LỆNH HỦY TỪ ĐIỆN THOẠI]: Người dùng đã yêu cầu dừng/hủy tác vụ hiện tại.`);
+    // Gỡ sạch mọi nút Cancel trong cuộc trò chuyện
+    await clearAllCancelButtons(activeChatId, tempMsgIds);
+
+    const cancelMsg = `🛑 <b>[ĐÃ HỦY TÁC VỤ THEO YÊU CẦU CỦA BRO!]</b>\n<i>Đã dừng tiến trình, không chạy tiếp các phần còn lại và tiến hành dọn dẹp.</i>`;
+    if (promptMsgId) {
+        await editMsg(activeChatId, promptMsgId, cancelMsg, 'HTML', { inline_keyboard: [] });
+    } else {
+        await sendMsg(activeChatId, cancelMsg, activeThreadId, 'HTML', { inline_keyboard: [] });
+    }
+
+    // Báo ngay sang Antigravity PC
+    forwardToAntigravity(`[LỆNH HỦY TỪ ĐIỆN THOẠI]: Người dùng đã yêu cầu dừng/hủy tác vụ hiện tại. Ngừng ngay lập tức mọi hoạt động.`);
 
     const toClean = [...tempMsgIds];
     tempMsgIds = [];
+    promptMsgId = null;
     promptStartTime = null;
     promptTextSaved = '';
     lastStatusText = '';
     isPhotoSaved = false;
     isEditedPrompt = false;
-    thinkingSent = false;
     currentWorkingMsgId = null;
+    currentToolRunningFn = null;
+    currentToolFinishedFn = null;
+    lastWorkingBubbleText = '';
 
     if (toClean.length > 0) {
         runCountdownCleanup(activeChatId, activeThreadId, toClean);
@@ -684,65 +366,17 @@ async function processTranscript() {
     fs.closeSync(fd);
     lastOffset = stat.size;
 
+    // Nếu đã bị hủy, bỏ qua xử lý các khối tool cũ
+    if (isCanceled) {
+        return;
+    }
+
     const content = buf.toString('utf8');
     const lines = content.split(/\r?\n/).filter(l => l.trim().length > 0);
 
     for (const line of lines) {
         try {
             const entry = JSON.parse(line);
-
-            // Bắt Prompt nhập từ PC
-            if (entry.type === 'USER_INPUT' && entry.content) {
-                const uText = entry.content.toString().trim();
-                promptStartTime = Date.now();
-                promptTextSaved = uText;
-                isPhotoSaved = false;
-                isEditedPrompt = false;
-                thinkingSent = false;
-                currentPhase = 'READING';
-
-                const previewClean = uText.replace(/[<>]/g, '');
-                const previewSafe = escapeHtml(previewClean.length > 55 ? previewClean.substring(0, 55) + '...' : previewClean);
-                const initialText = `📖 <b>[ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (1s)...]</b>\n<blockquote><i>${previewSafe}</i></blockquote>`;
-
-                if (!promptMsgId) {
-                    promptMsgId = await sendMsg(
-                        activeChatId,
-                        initialText,
-                        activeThreadId,
-                        'HTML',
-                        cancelKeyboard
-                    );
-                    if (promptMsgId) {
-                        tempMsgIds.push(promptMsgId);
-                        lastStatusText = initialText;
-                        await moveCancelButtonTo(activeChatId, promptMsgId, initialText, activeThreadId);
-                        startTicker();
-                    }
-                }
-            }
-
-            // Giai đoạn: AI đang suy nghĩ -> Chuyển pha THINKING & tiếp tục đếm giây
-            if (entry.thinking && !entry.content && (!entry.tool_calls || entry.tool_calls.length === 0)) {
-                if (!thinkingSent) {
-                    thinkingSent = true;
-                    currentPhase = 'THINKING';
-                    startTicker();
-                    if (!promptMsgId) {
-                        const elapsed = promptStartTime ? Math.max(1, Math.round((Date.now() - promptStartTime) / 1000)) : 1;
-                        const safe = escapeHtml(promptTextSaved || 'Yêu cầu của bạn');
-                        const text = `💡 <b>[ĐANG SUY NGHĨ, ĐỢI MÌNH CHÚT (${elapsed}s)...]</b>\n<blockquote><i>${safe}</i></blockquote>`;
-                        promptMsgId = await sendMsg(activeChatId, text, activeThreadId, 'HTML', cancelKeyboard);
-                        if (promptMsgId) {
-                            tempMsgIds.push(promptMsgId);
-                            lastStatusText = text;
-                            await moveCancelButtonTo(activeChatId, promptMsgId, text, activeThreadId);
-                        }
-                    } else {
-                        await updateStatusBubble();
-                    }
-                }
-            }
 
             // Giai đoạn: Tool Call (Phân loại màu sắc & Ticking)
             if (entry.tool_calls && entry.tool_calls.length > 0) {
@@ -758,13 +392,13 @@ async function processTranscript() {
                     console.log(`[Bridge Tool Call] ${summary}`);
 
                     if (runningFn) {
-                        // 1. Gỡ nút Cancel ở bong bóng trước đó (ví dụ promptMsgId) để đảm bảo CHỈ CÓ DUY NHẤT 1 NÚT
-                        if (currentCancelMsgId) {
-                            await removeCancelButtonFrom(activeChatId, currentCancelMsgId);
-                            currentCancelMsgId = null;
+                        // 1. Gỡ nút Cancel ở bong bóng trước đó (đảm bảo CHỈ CÓ 1 NÚT DUY NHẤT)
+                        const prevCancelId = getActiveCancelMsgId();
+                        if (prevCancelId) {
+                            await removeCancelButtonFrom(activeChatId, prevCancelId);
                         }
 
-                        // 2. Gửi bong bóng mới nhất KÈM NÚT CANCEL
+                        // 2. Gửi bong bóng mới KÈM NÚT CANCEL
                         const initialText = runningFn(1);
                         lastWorkingBubbleText = initialText;
                         currentWorkingMsgId = await sendMsg(
@@ -776,8 +410,8 @@ async function processTranscript() {
                         );
                         if (currentWorkingMsgId) {
                             tempMsgIds.push(currentWorkingMsgId);
-                            currentCancelMsgId = currentWorkingMsgId;
-                            lastBubbleTexts[currentWorkingMsgId] = initialText;
+                            setActiveCancelMsgId(currentWorkingMsgId);
+                            recordBubbleText(currentWorkingMsgId, initialText);
                         }
                     }
                 }
@@ -793,9 +427,9 @@ async function processTranscript() {
                     const finishedBubble = currentToolFinishedFn
                         ? currentToolFinishedFn(wSec)
                         : `✅ <b>[ĐÃ HOÀN TẤT TRONG ${wSec}s]</b>: <code>${safeTask}</code>`;
-                    lastBubbleTexts[currentWorkingMsgId] = finishedBubble;
+                    recordBubbleText(currentWorkingMsgId, finishedBubble);
                     
-                    // Gỡ nút cancel khỏi tool vừa hoàn tất
+                    // Gỡ nút cancel khỏi tool vừa hoàn tất và chốt kết quả
                     await editMsg(
                         activeChatId,
                         currentWorkingMsgId,
@@ -803,7 +437,7 @@ async function processTranscript() {
                         'HTML',
                         { inline_keyboard: [] }
                     );
-                    currentCancelMsgId = null;
+                    setActiveCancelMsgId(null);
                     currentWorkingMsgId = null;
                     currentToolRunningFn = null;
                     currentToolFinishedFn = null;
@@ -815,12 +449,12 @@ async function processTranscript() {
 
                 // Đưa nút Cancel về lại promptMsgId (vì agent đang tiếp tục suy nghĩ / viết kết luận)
                 if (promptMsgId) {
-                    currentCancelMsgId = promptMsgId;
+                    setActiveCancelMsgId(promptMsgId);
                     const elapsed = promptStartTime ? Math.max(1, Math.round((Date.now() - promptStartTime) / 1000)) : 1;
                     const safe = escapeHtml(promptTextSaved || 'Yêu cầu của bạn');
                     const text = `💡 <b>[ĐANG SUY NGHĨ & XỬ LÝ (${elapsed}s)...]</b>\n<blockquote><i>${safe}</i></blockquote>`;
                     lastStatusText = text;
-                    lastBubbleTexts[promptMsgId] = text;
+                    recordBubbleText(promptMsgId, text);
                     await editMsg(activeChatId, promptMsgId, text, 'HTML', cancelKeyboard);
                 }
 
@@ -838,6 +472,7 @@ async function processTranscript() {
                 if (!answer) continue;
 
                 currentPhase = 'IDLE';
+                isCanceled = false;
                 stopTicker();
 
                 if (typingInterval) {
@@ -846,8 +481,10 @@ async function processTranscript() {
                 }
 
                 const totalSec = promptStartTime ? Math.max(1, Math.round((Date.now() - promptStartTime) / 1000)) : 1;
-                console.log('[Bridge] Gửi câu trả lời hoàn chỉnh từ PC tới Telegram...');
-                await removeAllCancelButtons(activeChatId);
+                console.log(`[Bridge] Gửi câu trả lời hoàn chỉnh từ PC tới Telegram (Hoàn tất trong ${totalSec}s)...`);
+                
+                // Gỡ sạch mọi nút Cancel
+                await clearAllCancelButtons(activeChatId, tempMsgIds);
                 await sendLongResponse(activeChatId, answer, totalSec, activeThreadId);
 
                 const toClean = [...tempMsgIds];
@@ -858,7 +495,6 @@ async function processTranscript() {
                 lastStatusText = '';
                 isPhotoSaved = false;
                 isEditedPrompt = false;
-                thinkingSent = false;
                 currentWorkingMsgId = null;
 
                 if (toClean.length > 0) {
@@ -873,16 +509,14 @@ async function processTranscript() {
 
 setInterval(processTranscript, 100);
 
-// --- TELEGRAM POLLING LOOP ---
-
-let pollOffset = 0;
+// --- TELEGRAM LONG POLLING DISPATCHER ---
 
 async function pollUpdates() {
+    let pollOffset = 0;
     console.log('[Bridge Polling] Khởi động vòng lặp lắng nghe Telegram...');
 
-    // 1. TỰ ĐỘNG GỠ WEBHOOK CLOUD ĐỂ MÁY TÍNH TIẾP QUẢN
     try {
-        const delRes = await tgApi('deleteWebhook', { drop_pending_updates: false });
+        const delRes = await tgApi('deleteWebhook');
         if (delRes.ok) {
             console.log('[Bridge Polling] Đã gỡ Webhook Cloud, máy tính tiếp quản Long Polling thành công!');
         }
@@ -943,7 +577,7 @@ async function pollUpdates() {
                             continue;
                         }
 
-                        // C. XỬ LÝ NÚT HỦY (CANCEL KEYPAD) -> Về lại Cloud bình thường
+                        // C. XỬ LÝ NÚT HỦY PIN KEYPAD -> Về lại Cloud bình thường
                         if (cbData === 'pin_action_cancel') {
                             currentPin = '';
                             pinFailedCount = 0;
@@ -964,6 +598,7 @@ async function pollUpdates() {
                                 pinFailedCount = 0;
                                 currentPin = '';
                                 currentPhase = 'IDLE';
+                                isCanceled = false;
                                 stopTicker();
                                 if (typingInterval) {
                                     clearInterval(typingInterval);
@@ -979,7 +614,6 @@ async function pollUpdates() {
                                 continue;
                             } else {
                                 pinFailedCount++;
-                                const wrongPin = currentPin;
                                 currentPin = '';
 
                                 if (pinFailedCount >= 3) {
@@ -1003,6 +637,11 @@ async function pollUpdates() {
                                 callback_query_id: cb.id,
                                 text: '🛑 Đang dừng tác vụ...'
                             });
+                            // Ngay lập tức gỡ bỏ nút trên chính tin nhắn vừa được bấm
+                            if (cb.message && cb.message.message_id) {
+                                const msgText = cb.message.text ? escapeHtml(cb.message.text) : '🛑 Đang dừng tác vụ...';
+                                await editMsg(chatId, cb.message.message_id, msgText, 'HTML', { inline_keyboard: [] });
+                            }
                             await handleCancelAction('Inline Button');
                             continue;
                         }
@@ -1034,13 +673,16 @@ async function pollUpdates() {
                     let isPhoto = false;
                     let photoFileId = null;
 
-                    if (msg.photo && msg.photo.length > 0) {
-                        isPhoto = true;
-                        userText = msg.caption ? msg.caption.trim() : 'Phân tích hình ảnh này';
-                        const bestPhoto = msg.photo[msg.photo.length - 1];
-                        photoFileId = bestPhoto.file_id;
-                    } else if (msg.text) {
+                    if (msg.text) {
                         userText = msg.text.trim();
+                    } else if (msg.caption) {
+                        userText = msg.caption.trim();
+                    }
+
+                    if (msg.photo && Array.isArray(msg.photo) && msg.photo.length > 0) {
+                        isPhoto = true;
+                        photoFileId = msg.photo[msg.photo.length - 1].file_id;
+                        if (!userText) userText = 'Phân tích hình ảnh này';
                     }
 
                     if (!userText && !isPhoto) continue;
@@ -1052,9 +694,9 @@ async function pollUpdates() {
                     }
 
                     // 1. Kiểm tra nếu đang chờ mã 4 số kết nối lại
-                    if (waitingForPairCode && (/^\d{4}$/.test(userText.trim()) || /6585/i.test(userText))) {
+                    if ((waitingForPairCode && /^\d{4}$/.test(userText.trim())) || userText.trim() === '6585') {
                         const code = userText.trim();
-                        if (code === '6585' || /6585/i.test(code)) {
+                        if (code === '6585') {
                             waitingForPairCode = false;
                             console.log(`[Bridge Pair] Đã xác thực thành công mã 4 số: 6585`);
                             forwardToAntigravity(`[LỆNH CƯỠNG CHẾ KẾT NỐI LẠI]: Người dùng đã nhập đúng mã 6585 từ Telegram. Đồng bộ tức thì với cửa sổ Antigravity PC.`);
@@ -1089,8 +731,8 @@ async function pollUpdates() {
 
                         if (providedCode === '6585' || /6585/i.test(providedCode)) {
                             waitingForPairCode = false;
-                            console.log(`[Bridge Reconnect] Nhận lệnh cưỡng chế kết nối lại với mã 6585 từ Telegram...`);
                             currentPhase = 'IDLE';
+                            isCanceled = false;
                             stopTicker();
                             if (typingInterval) {
                                 clearInterval(typingInterval);
@@ -1125,32 +767,41 @@ async function pollUpdates() {
                         console.log(`[Telegram Nhận Tin] (${chatId}, thread=${threadId}): ${userText.substring(0, 50)}`);
                     }
 
-                    // Khởi động lại ticker
-                    stopTicker();
-                    promptStartTime = Date.now();
-                    promptTextSaved = userText;
-                    isPhotoSaved = isPhoto;
-                    isEditedPrompt = isEdit;
-                    thinkingSent = false;
-                    currentPhase = 'READING';
-
+                    // Tải ảnh nếu có
                     let localPhotoPath = null;
                     if (isPhoto && photoFileId) {
                         const targetPhoto = path.join(rootDir, 'incoming_photo.jpg');
                         localPhotoPath = await downloadTelegramPhoto(photoFileId, targetPhoto);
                     }
 
-                    // 👉 GỬI PROMPT SANG ANTIGRAVITY PC NGAY LẬP TỨC (SIÊU TỐC KHÔNG CHỜ TELEGRAM UI)
                     const forwardPrompt = localPhotoPath
                         ? `[Điện thoại gửi ảnh]: ${userText} (Đã tải ảnh về máy tại: ${localPhotoPath})`
                         : (isEdit ? `[Điện thoại sửa prompt thành]: ${userText}` : `[Điện thoại gửi]: ${userText}`);
+
+                    // 👉 1. BẮN PROMPT SANG ANTIGRAVITY PC NGAY LẬP TỨC (SIÊU TỐC 1MS)
                     forwardToAntigravity(forwardPrompt);
-                    console.log(`[Bridge Dispatch] Đã chuyển prompt sang PC thành công: ${userText.substring(0, 50)}`);
+                    console.log(`[Bridge Dispatch OK] Đã nạp prompt sang PC: ${userText.substring(0, 50)}`);
 
                     const previewClean = userText.replace(/[<>]/g, '');
                     const previewSafe = escapeHtml(previewClean.length > 55 ? previewClean.substring(0, 55) + '...' : previewClean);
                     showScreenToast(isEdit ? '✏️ Telegram -> Prompt Sửa' : '📱 Telegram -> PC Sync', previewClean);
                     recordSyncMessage(isEdit ? `[Sửa tin]: ${userText}` : userText);
+
+                    // 👉 2. NẾU MÁY TÍNH ĐANG BẬN CHẠY TÁC VỤ KHÁC: BÁO RÕ RÀNG VÀO HÀNG ĐỢI
+                    if (currentPhase !== 'IDLE' && currentPhase !== 'CANCELED') {
+                        const queueNotice = `📥 <b>[ĐÃ NẠP VÀO HÀNG ĐỢI PC]</b>\n<blockquote><i>${previewSafe}</i></blockquote>\n<i>Máy tính đang xử lý tác vụ trước đó. Prompt mới của bro đã được nạp vào hàng đợi và PC sẽ thực thi tiếp nối ngay!</i>`;
+                        await sendMsg(chatId, queueNotice, activeThreadId, 'HTML');
+                        continue;
+                    }
+
+                    // 👉 3. NẾU MÁY TÍNH ĐANG IDLE: BẬT TIẾN TRÌNH MỚI
+                    isCanceled = false;
+                    currentPhase = 'READING';
+                    stopTicker();
+                    promptStartTime = Date.now();
+                    promptTextSaved = userText;
+                    isPhotoSaved = isPhoto;
+                    isEditedPrompt = isEdit;
 
                     const promptLabel = isEdit
                         ? '✏️ <b>[ĐÃ CẬP NHẬT PROMPT MỚI, KHỞI ĐỘNG LẠI (1s)...]</b>'
@@ -1163,20 +814,18 @@ async function pollUpdates() {
                     if (isEdit && promptMsgId) {
                         await editMsg(chatId, promptMsgId, initialText, 'HTML', cancelKeyboard);
                         lastStatusText = initialText;
-                        lastBubbleTexts[promptMsgId] = initialText;
-                        currentCancelMsgId = promptMsgId;
+                        recordBubbleText(promptMsgId, initialText);
+                        setActiveCancelMsgId(promptMsgId);
                         startTicker();
                     } else {
-                        if (currentCancelMsgId) {
-                            await removeCancelButtonFrom(chatId, currentCancelMsgId);
-                            currentCancelMsgId = null;
-                        }
+                        // Gỡ sạch mọi nút cancel cũ trước khi tạo tin nhắn mới
+                        await clearAllCancelButtons(chatId);
                         promptMsgId = await sendMsg(chatId, initialText, activeThreadId, 'HTML', cancelKeyboard);
                         if (promptMsgId) {
                             tempMsgIds.push(promptMsgId);
                             lastStatusText = initialText;
-                            lastBubbleTexts[promptMsgId] = initialText;
-                            currentCancelMsgId = promptMsgId;
+                            recordBubbleText(promptMsgId, initialText);
+                            setActiveCancelMsgId(promptMsgId);
                             startTicker();
                         }
                     }
