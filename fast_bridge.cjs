@@ -372,12 +372,11 @@ async function processTranscript() {
                 const toolName = tc.name;
                 currentToolSummary = tc.args && tc.args.toolSummary ? tc.args.toolSummary.replace(/^"|"$/g, '') : `Thực thi ${toolName}`;
 
-                const totalSec = promptStartTime ? Math.max(1, Math.round((Date.now() - promptStartTime) / 1000)) : 1;
                 const safeSummary = escapeHtml(currentToolSummary);
 
                 currentWorkingMsgId = await sendMsg(
                     activeChatId,
-                    `⚡ <b>[MÁY TÍNH ĐANG THỰC HIỆN]</b>\n▶ <code>${safeSummary}</code>\n⏱️ <i>Tổng thời gian: ${totalSec}s</i>`,
+                    `⚡ <b>[MÁY TÍNH ĐANG THỰC HIỆN]</b>\n▶ <code>${safeSummary}</code>`,
                     activeThreadId
                 );
                 if (currentWorkingMsgId) tempMsgIds.push(currentWorkingMsgId);
@@ -386,14 +385,13 @@ async function processTranscript() {
             // Giai đoạn: Kết quả lệnh hoàn tất (Tool Output)
             if (entry.type === 'GENERIC' && entry.content) {
                 const wSec = currentToolStartTime ? Math.max(1, Math.round((Date.now() - currentToolStartTime) / 1000)) : 1;
-                const totalSec = promptStartTime ? Math.max(1, Math.round((Date.now() - promptStartTime) / 1000)) : 1;
                 const safeTask = escapeHtml(currentToolSummary || 'Tác vụ');
 
                 if (currentWorkingMsgId) {
                     await editMsg(
                         activeChatId,
                         currentWorkingMsgId,
-                        `✅ <b>[ĐÃ HOÀN TẤT TRONG ${wSec}s]</b>: <code>${safeTask}</code>\n⏱️ <i>Tổng thời gian: ${totalSec}s</i>`
+                        `✅ <b>[ĐÃ HOÀN TẤT TRONG ${wSec}s]</b>: <code>${safeTask}</code>`
                     );
                     currentWorkingMsgId = null;
                 }
@@ -403,7 +401,7 @@ async function processTranscript() {
                     isPreparingResponse = true;
                     finalPrepMsgId = await sendMsg(
                         activeChatId,
-                        `⏳ <b>[ĐÃ XONG YÊU CẦU CỦA BẠN, CHỜ CHÚT TÔI ĐANG GỬI PHẢN HỒI (1s)...]</b>`,
+                        `⏳ <b>[ĐÃ XONG YÊU CẦU CỦA BẠN, CHỜ CHÚT TÔI ĐANG GỬI PHẢN HỒI...]</b>`,
                         activeThreadId
                     );
                     if (finalPrepMsgId) tempMsgIds.push(finalPrepMsgId);
