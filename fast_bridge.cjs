@@ -128,7 +128,7 @@ function forwardToAntigravity(text) {
 // --- STATE MANAGEMENT ---
 
 let activeChatId = -1004457846636;
-let activeThreadId = 315;
+let activeThreadId = 1114;
 
 if (fs.existsSync(syncBridgePath)) {
     try {
@@ -827,77 +827,163 @@ async function pollUpdates() {
                             continue;
                         }
 
-                        // K. MASTER HUB: TẠO DỰ ÁN MỚI (KÈM EASTER EGG GÕ 7 LẦN)
+                        // K. MASTER LOBBY: TẠO DỰ ÁN MỚI (KÈM EASTER EGG GÕ 7 LẦN)
                         if (cbData === 'hub_create_proj') {
-                            const result = handleCreateProjectClick(
-                                chatId,
-                                activeThreadId,
+                            const res = handleCreateProjectClick(
                                 async () => {
-                                    // 🚀 KÍCH HOẠT KHI NHẤP 7 LẦN LIÊN TỤC
-                                    await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: '🔒 ĐÃ KÍCH HOẠT CHẾ ĐỘ BÍ MẬT 7-CLICK!' });
+                                    // 🚀 KÍCH HOẠT KHI ĐỦ 7 LẦN
+                                    await tgApiRaw('answerCallbackQuery', {
+                                        callback_query_id: cb.id,
+                                        text: '🔒 [7/7] ĐÃ KÍCH HOẠT CHẾ ĐỘ SUPER ADMIN!',
+                                        show_alert: true
+                                    });
                                     const secretPrompt = `🔒 <b>[PHÁT HIỆN GÕ 7 LẦN LIÊN TỤC - KÍCH HOẠT CHẾ ĐỘ SUPER ADMIN]</b>\n──────────────────────\nBro vừa mở khóa cổng bảo mật bí mật của hệ sinh thái QuinloveRin Code!\n\n<i>Vui lòng nhập mật khẩu tối cao để nắm toàn quyền sử dụng repo này:</i>`;
                                     await sendMsg(chatId, secretPrompt, activeThreadId, 'HTML');
                                 },
                                 async () => {
-                                    // 📁 BẤM 1 LẦN BÌNH THƯỜNG -> KHỞI TẠO DỰ ÁN
-                                    await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: '📁 Bắt đầu tạo dự án mới...' });
+                                    // 📁 BẤM 1 LẦN BÌNH THƯỜNG -> BẮT ĐẦU TẠO DỰ ÁN
                                     const wiz = getProjectWizard();
                                     wiz.active = true;
                                     wiz.chatId = chatId;
                                     wiz.threadId = activeThreadId;
                                     wiz.step = 'AWAITING_NAME';
+                                    wiz.selectedDrive = '';
                                     const askName = `📁 <b>[KHỞI TẠO DỰ ÁN MỚI - BƯỚC 1/2]</b>\n──────────────────────\nBro muốn đặt tên cho dự án mới là gì?\n<i>(Ví dụ: <code>App-Ban-Hang</code>, <code>Landing-Page</code>, <code>Bot-Crypto</code>...)</i>\n\n👉 Hãy gửi tên dự án vào ô chat:`;
                                     await sendMsg(chatId, askName, activeThreadId, 'HTML');
                                 }
                             );
-                            if (result === 'WAITING_CLICKS') {
-                                await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: '...' });
+
+                            if (res.action === 'PROGRESS') {
+                                await tgApiRaw('answerCallbackQuery', {
+                                    callback_query_id: cb.id,
+                                    text: `👆 [${res.count}/7] Nhấp tiếp để mở khóa Admin...`
+                                });
                             }
                             continue;
                         }
 
-                        // L. MASTER HUB: DANH SÁCH DỰ ÁN
-                        if (cbData === 'hub_list_proj') {
-                            await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: 'Đang tải danh sách...' });
-                            let listText = `📂 <b>[DANH SÁCH DỰ ÁN HIỆN CÓ]:</b>\n──────────────────────\n`;
-                            listText += `• <b>Dự án chính:</b> <code>Quin-Iu-Mthu</code> (Đang chạy tại Topic 315)\n`;
-                            listText += `• <b>Thư mục gốc:</b> <code>E:\\MThu Mobile Code</code>\n\n`;
-                            listText += `<i>Bro có thể bấm nút "🚀 Tạo Dự Án Mới" để spawn thêm không gian làm việc mới độc lập!</i>`;
-                            await sendMsg(chatId, listText, activeThreadId, 'HTML', getMainMenuMarkup());
+                        // L. MASTER LOBBY: QUẢN LÝ Ổ ĐĨA & DỰ ÁN PC (KIỂM TRA Ổ CỨNG TRỰC TIẾP TRÊN PC)
+                        if (cbData === 'hub_explore_drives') {
+                            await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: '🔍 Đang quét toàn bộ ổ cứng PC...' });
+                            const drives = getPCDrives();
+                            let text = `💾 <b>[QUẢN LÝ Ổ ĐĨA &amp; DỰ ÁN TRÊN MÁY TÍNH]</b>\n──────────────────────\nĐã kết nối trực tiếp với PC và phát hiện <b>${drives.length} ổ cứng vật lý</b>:\n\n`;
+                            for (const d of drives) {
+                                text += `• <b>Ổ ${d.drive}:</b> Còn trống <b>${d.freeGB} GB</b> (Tổng: ${d.totalGB} GB)\n`;
+                            }
+                            text += `\n<i>👉 Chọn một ổ đĩa bên dưới để xem danh sách dự án / thư mục:</i>`;
+                            await sendMsg(chatId, text, activeThreadId, 'HTML', getDriveSelectionMarkup('browse_drive_'));
                             continue;
                         }
 
-                        // M. MASTER HUB: TRẠNG THÁI HỆ THỐNG
-                        if (cbData === 'hub_status') {
-                            await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: 'Trạng thái: Trực tuyến 100%' });
-                            const adminStatus = isSuperAdmin() ? '👑 Super Admin (Đã mở khóa)' : '🛡️ User Mode';
-                            const statusText = `⚡ <b>[TRẠNG THÁI HỆ THỐNG QUINLOVERIN CODE]</b>\n──────────────────────\n🖥️ <b>Máy tính:</b> SẴN SÀNG 100% (Long Polling)\n🔒 <b>Quyền hạn:</b> ${adminStatus}\n🚀 <b>Dự án:</b> Quin-Iu-Mthu (Topic 315)\n🌐 <b>Cloud Edge:</b> quiniumthucode.vercel.app\n⏱️ <b>Ticking Engine:</b> Live 1.5s Stopwatch\n\n✨ Mọi tiến trình đều đang hoạt động hoàn hảo!`;
-                            await sendMsg(chatId, statusText, activeThreadId, 'HTML', getMainMenuMarkup());
+                        // L2. DUYỆT THƯ MỤC TRONG Ổ ĐĨA ĐƯỢC CHỌN
+                        if (cbData.startsWith('browse_drive_')) {
+                            const d = cbData.replace('browse_drive_', '');
+                            await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: `Đang đọc ổ ${d}:...` });
+                            const folders = getDriveFolders(d);
+                            let text = `📂 <b>[DANH SÁCH THƯ MỤC / DỰ ÁN TRÊN Ổ ${d}:]</b>\n──────────────────────\n`;
+                            if (folders.length === 0) {
+                                text += `<i>Ổ đĩa chưa có thư mục nào.</i>\n`;
+                            } else {
+                                folders.forEach((f, idx) => {
+                                    text += `${idx + 1}. 📁 <code>${d}:\\${f}</code>\n`;
+                                });
+                            }
+                            text += `\n<i>👉 Bấm vào thư mục bên dưới để khởi chạy Cửa sổ làm việc mới, hoặc tạo thư mục mới:</i>`;
+                            await sendMsg(chatId, text, activeThreadId, 'HTML', getFolderSelectionMarkup(d));
                             continue;
                         }
 
-                        // N. MASTER HUB: BÀN GIAO CLOUD
+                        // L3. CHỌN 1 FOLDER CỤ THỂ ĐỂ KHỞI CHẠY CỬA SỔ MỚI
+                        if (cbData.startsWith('sel_folder:')) {
+                            const [, drive, fName] = cbData.split(':');
+                            const fullPath = `${drive}:\\${fName}`;
+                            await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: `Khởi chạy: ${fName}` });
+
+                            // 1. Tạo Forum Topic mới trên Telegram Supergroup
+                            let newTopicId = null;
+                            try {
+                                const topicRes = await tgApiRaw('createForumTopic', {
+                                    chat_id: activeChatId,
+                                    name: `🚀 Dự Án: ${fName}`
+                                });
+                                if (topicRes.ok && topicRes.result?.message_thread_id) {
+                                    newTopicId = topicRes.result.message_thread_id;
+                                    await sendMsg(
+                                        activeChatId,
+                                        `🎉 <b>[CỬA SỔ DỰ ÁN ĐÃ KHỞI CHẠY]</b>\n──────────────────────\n📁 <b>Dự án:</b> <code>${fName}</code>\n💾 <b>Đường dẫn PC:</b> <code>${fullPath}</code>\n🚀 <b>Topic ID:</b> <code>#${newTopicId}</code>\n\n✨ Cửa sổ Antigravity PC và Topic Telegram đã được kích hoạt! Bro trao đổi code tại Topic này nhé!`,
+                                        newTopicId,
+                                        'HTML'
+                                    );
+                                }
+                            } catch (e) {}
+
+                            // 2. Mở Cửa Sổ Antigravity IDE Mới trên PC
+                            try {
+                                const agyExe = 'C:\\Users\\letru\\AppData\\Local\\Programs\\antigravity\\Antigravity.exe';
+                                if (fs.existsSync(agyExe)) {
+                                    execFile(agyExe, [fullPath], { detached: true, stdio: 'ignore' }).unref();
+                                    console.log(`[Bridge Spawner] Đã mở Antigravity IDE cho: ${fullPath}`);
+                                }
+                            } catch (e) {}
+
+                            const topicNote = newTopicId ? `\n🚀 <b>Telegram Topic mới:</b> <code>#${newTopicId}</code>` : '';
+                            const openMsg = `⚡ <b>[ĐÃ KHỞI CHẠY CỬA SỔ DỰ ÁN MỚI]</b>\n──────────────────────\n📁 <b>Thư mục:</b> <code>${fullPath}</code>\n🖥️ <b>Cửa sổ Antigravity PC:</b> ĐÃ BẬT MỞ${topicNote}\n\n✨ Sảnh Lobby (QuinloveRin Code) vẫn giữ nguyên để bro tiếp tục quản lý!`;
+                            await sendMsg(chatId, openMsg, activeThreadId, 'HTML', getMainMenuMarkup());
+                            continue;
+                        }
+
+                        // L4. TẠO THƯ MỤC MỚI TRONG Ổ ĐÃ CHỌN
+                        if (cbData.startsWith('new_in_drive:')) {
+                            const drive = cbData.replace('new_in_drive:', '');
+                            const wiz = getProjectWizard();
+                            wiz.active = true;
+                            wiz.chatId = chatId;
+                            wiz.threadId = activeThreadId;
+                            wiz.step = 'AWAITING_NAME';
+                            wiz.selectedDrive = drive;
+                            await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: `Tạo dự án mới tại ổ ${drive}:` });
+                            await sendMsg(
+                                chatId,
+                                `📁 <b>[TẠO DỰ ÁN MỚI TẠI Ổ ${drive}:]</b>\n──────────────────────\nBro muốn đặt tên cho thư mục / dự án mới là gì?\n<i>(Ví dụ: <code>MyProject</code>, <code>BotApp</code>...)</i>\n\n👉 Hãy gửi tên dự án vào ô chat:`,
+                                activeThreadId,
+                                'HTML'
+                            );
+                            continue;
+                        }
+
+                        // M. MASTER LOBBY: BÀN GIAO CLOUD 24/7 (MỞ CỬA SỔ TOPIC RIÊNG BIỆT)
                         if (cbData === 'hub_cloud') {
-                            await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: '☁️ Chuyển giao Vercel Cloud...' });
+                            await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: '☁️ Khởi tạo Cửa sổ Cloud 24/7...' });
+                            
+                            let cloudTopicId = null;
+                            try {
+                                const topicRes = await tgApiRaw('createForumTopic', {
+                                    chat_id: activeChatId,
+                                    name: '☁️ Cloud GitOps 24/7'
+                                });
+                                if (topicRes.ok && topicRes.result?.message_thread_id) {
+                                    cloudTopicId = topicRes.result.message_thread_id;
+                                    await sendMsg(
+                                        activeChatId,
+                                        `☁️ <b>[CỬA SỔ BÀN GIAO CLOUD 24/7]</b>\n──────────────────────\n🌐 <b>Hạ tầng:</b> Vercel Serverless Edge Global\n⚡ <b>Trạng thái:</b> SẴN SÀNG TIẾP NHẬN 24/7\n\nBro có thể chat, yêu cầu code và commit lên GitHub tại Topic này ngay cả khi máy tính tắt nguồn!\n👉 Khi bật lại máy tính, gõ <code>/pc</code> hoặc nhập mã <code>6585</code>.`,
+                                        cloudTopicId,
+                                        'HTML'
+                                    );
+                                }
+                            } catch (e) {}
+
                             await handleDisconnectCloud();
+                            const note = cloudTopicId ? ` qua Topic <code>#${cloudTopicId} (Cloud GitOps 24/7)</code>` : '';
+                            await sendMsg(chatId, `☁️ <b>[ĐÃ BÀN GIAO CHO CLOUD 24/7 THÀNH CÔNG]</b>\n──────────────────────\nMáy tính chuyển sang chế độ Chờ. Bro có thể tiếp tục làm việc${note}!`, activeThreadId, 'HTML', getMainMenuMarkup());
                             continue;
                         }
 
-                        // O. MASTER HUB: BÀN PHÍM PIN
-                        if (cbData === 'hub_pin') {
-                            await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: 'Bàn phím PIN 6585' });
-                            currentPin = '';
-                            const initialScreen = `📟 <b>[BÀN PHÍM XÁC THỰC KẾT NỐI]</b>\n──────────────────────\nMàn hình: <code>${getPinDisplay('')}</code>\n<i>(Nhập mã 4 số rồi bấm ↵ Enter để kết nối với PC)</i>`;
-                            await sendMsg(chatId, initialScreen, activeThreadId, 'HTML', getKeypadMarkup());
-                            continue;
-                        }
-
-                        // P. PROJECT WIZARD: CHỌN Ổ ĐĨA E: HOẶC C:
-                        if (cbData === 'wizard_drive_E' || cbData === 'wizard_drive_C') {
-                            const drive = cbData === 'wizard_drive_E' ? 'E' : 'C';
+                        // P. PROJECT WIZARD: CHỌN Ổ ĐĨA KHI TẠO MỚI (TỰ ĐỘNG PHÁT HIỆN TẤT CẢ Ổ CỨNG PC)
+                        if (cbData.startsWith('wizard_drive_')) {
+                            const drive = cbData.replace('wizard_drive_', '');
                             const wiz = getProjectWizard();
                             const pName = wiz.projectName || 'New-Project';
-                            const pPath = drive === 'E' ? `E:\\${pName}` : `C:\\Users\\letru\\.gemini\\antigravity\\scratch\\model\\${pName}`;
+                            const pPath = `${drive}:\\${pName}`;
                             
                             try {
                                 if (!fs.existsSync(pPath)) {
@@ -919,7 +1005,7 @@ async function pollUpdates() {
                                     console.log(`[Bridge Spawner] Đã tạo Telegram Topic mới: #${newTopicId} (${pName})`);
                                     await sendMsg(
                                         activeChatId,
-                                        `🎉 <b>[CỬA SỔ DỰ ÁN MỚI ĐÃ KHỞI TẠO]</b>\n──────────────────────\n📁 <b>Tên dự án:</b> <code>${pName}</code>\n💾 <b>Thư mục PC:</b> <code>${pPath}</code>\n🚀 <b>Topic ID:</b> <code>${newTopicId}</code>\n\n✨ Cửa sổ Antigravity PC và Topic Telegram đã sẵn sàng! Bro gửi yêu cầu code ngay tại Topic này nhé!`,
+                                        `🎉 <b>[CỬA SỔ DỰ ÁN MỚI ĐÃ KHỞI TẠO]</b>\n──────────────────────\n📁 <b>Tên dự án:</b> <code>${pName}</code>\n💾 <b>Thư mục PC:</b> <code>${pPath}</code>\n🚀 <b>Topic ID:</b> <code>#${newTopicId}</code>\n\n✨ Cửa sổ Antigravity PC và Topic Telegram đã sẵn sàng! Bro gửi yêu cầu code ngay tại Topic này nhé!`,
                                         newTopicId,
                                         'HTML'
                                     );
@@ -951,8 +1037,8 @@ async function pollUpdates() {
                         // Q. PROJECT WIZARD: HỦY TẠO DỰ ÁN
                         if (cbData === 'wizard_cancel') {
                             resetProjectWizard();
-                            await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: 'Đã hủy tạo dự án' });
-                            await sendMsg(chatId, `❌ <b>[ĐÃ HỦY KHỞI TẠO DỰ ÁN]</b>`, activeThreadId, 'HTML', getMainMenuMarkup());
+                            await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: 'Đã hủy thao tác' });
+                            await sendMsg(chatId, `❌ <b>[ĐÃ HỦY THAO TÁC]</b>`, activeThreadId, 'HTML', getMainMenuMarkup());
                             continue;
                         }
 
@@ -965,7 +1051,7 @@ async function pollUpdates() {
                     const isEdit = !!update.edited_message;
 
                     const chatId = msg.chat.id;
-                    const threadId = msg.message_thread_id || 315;
+                    const threadId = msg.message_thread_id || 1114;
                     const fromId = msg.from ? msg.from.id : 0;
 
                     if (msg.from && msg.from.is_bot) continue;
@@ -977,7 +1063,7 @@ async function pollUpdates() {
                     }
 
                     activeChatId = chatId;
-                    activeThreadId = threadId || 315;
+                    activeThreadId = threadId || 1114;
 
                     let userText = '';
                     let isPhoto = false;
@@ -1038,9 +1124,55 @@ async function pollUpdates() {
                             continue;
                         }
                         currentWiz.projectName = cleanProjectName;
+
+                        // Nếu đã chọn sẵn ổ đĩa trước đó
+                        if (currentWiz.selectedDrive) {
+                            const drive = currentWiz.selectedDrive;
+                            const pPath = `${drive}:\\${cleanProjectName}`;
+                            try {
+                                if (!fs.existsSync(pPath)) fs.mkdirSync(pPath, { recursive: true });
+                                const geminiDoc = `# Dự Án: ${cleanProjectName}\n\n- Khởi tạo lúc: ${new Date().toLocaleString('vi-VN')}\n- Vị trí: ${pPath}\n- Hệ điều hành: Windows\n- Trạng thái: Sẵn sàng\n`;
+                                fs.writeFileSync(path.join(pPath, 'GEMINI.md'), geminiDoc, 'utf8');
+                            } catch (e) {}
+
+                            // Tạo Forum Topic mới
+                            let newTopicId = null;
+                            try {
+                                const topicRes = await tgApiRaw('createForumTopic', {
+                                    chat_id: activeChatId,
+                                    name: `🚀 Dự Án: ${cleanProjectName}`
+                                });
+                                if (topicRes.ok && topicRes.result?.message_thread_id) {
+                                    newTopicId = topicRes.result.message_thread_id;
+                                    await sendMsg(
+                                        activeChatId,
+                                        `🎉 <b>[CỬA SỔ DỰ ÁN MỚI ĐÃ KHỞI TẠO]</b>\n──────────────────────\n📁 <b>Tên dự án:</b> <code>${cleanProjectName}</code>\n💾 <b>Thư mục PC:</b> <code>${pPath}</code>\n🚀 <b>Topic ID:</b> <code>#${newTopicId}</code>\n\n✨ Cửa sổ Antigravity PC và Topic Telegram đã sẵn sàng! Bro gửi yêu cầu code ngay tại Topic này nhé!`,
+                                        newTopicId,
+                                        'HTML'
+                                    );
+                                }
+                            } catch (e) {}
+
+                            // Mở Antigravity IDE
+                            try {
+                                const agyExe = 'C:\\Users\\letru\\AppData\\Local\\Programs\\antigravity\\Antigravity.exe';
+                                if (fs.existsSync(agyExe)) {
+                                    execFile(agyExe, [pPath], { detached: true, stdio: 'ignore' }).unref();
+                                }
+                            } catch (e) {}
+
+                            const topicNote = newTopicId ? `\n🚀 <b>Telegram Topic mới:</b> <code>#${newTopicId}</code>` : '';
+                            const createdText = `🎉 <b>[ĐÃ KHỞI TẠO DỰ ÁN MỚI THÀNH CÔNG!]</b>\n──────────────────────\n📁 <b>Tên dự án:</b> <code>${cleanProjectName}</code>\n💾 <b>Vị trí lưu trữ:</b> <code>${pPath}</code>\n🖥️ <b>Cửa sổ Antigravity PC:</b> ĐÃ BẬT MỞ${topicNote}\n\n✨ Cửa sổ làm việc mới trên PC và Topic Telegram đã được đồng bộ song song 1-1!`;
+                            resetProjectWizard();
+                            await sendMsg(chatId, createdText, activeThreadId, 'HTML', getMainMenuMarkup());
+                            forwardToAntigravity(`[DỰ ÁN MỚI ĐÃ TẠO]: Người dùng vừa tạo dự án mới '${cleanProjectName}' tại: ${pPath}${topicNote}`);
+                            continue;
+                        }
+
+                        // Chưa chọn ổ đĩa -> Quét và hiển thị toàn bộ ổ cứng vật lý trên PC
                         currentWiz.step = 'AWAITING_DRIVE';
-                        const drivePrompt = `💾 <b>[KHỞI TẠO DỰ ÁN MỚI - BƯỚC 2/2]</b>\n──────────────────────\n• <b>Tên dự án:</b> <code>${cleanProjectName}</code>\n\nBro muốn lưu trữ dự án này trên ổ đĩa nào?`;
-                        await sendMsg(chatId, drivePrompt, activeThreadId, 'HTML', getDriveSelectionMarkup());
+                        const drivePrompt = `💾 <b>[KHỞI TẠO DỰ ÁN MỚI - BƯỚC 2/2]</b>\n──────────────────────\n• <b>Tên dự án:</b> <code>${cleanProjectName}</code>\n\nĐã phát hiện các ổ cứng trên PC của bro. Chọn vị trí lưu trữ dự án:`;
+                        await sendMsg(chatId, drivePrompt, activeThreadId, 'HTML', getDriveSelectionMarkup('wizard_drive_'));
                         continue;
                     }
 
