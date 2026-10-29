@@ -1,10 +1,14 @@
 /**
- * QuinloveRin Code - Fast Telegram Bridge v2.8 (.cjs)
+ * QuinloveRin Code - Fast Telegram Bridge v2.9 (.cjs)
  * - TỰ ĐỘNG GỠ WEBHOOK CLOUD KHI MÁY TÍNH BẬT (CHUYỂN GIAO MƯỢT MÀ VỀ PC).
- * - ĐỒNG HỒ BẤM GIỜ NHẢY GIÂY LIVE LIÊN TỤC (1.5s/LẦN) XUYÊN SUỐT CÁC GIAI ĐOẠN:
+ * - NÚT BẤM INLINE 1 CHẠM [🛑 DỪNG TÁC VỤ (CANCEL)]: Hủy ngay lập tức từ điện thoại.
+ * - HỖ TRỢ SỬA TIN NHẮN (EDIT MESSAGE): Sửa prompt trên Telegram = Tái khởi động tác vụ mới.
+ * - ĐỒNG HỒ BẤM GIỜ NHẢY GIÂY LIVE LIÊN TỤC (2.0s/LẦN) XUYÊN SUỐT CÁC GIAI ĐOẠN:
  *   + 📖 [ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (Xs)...]
+ *   + ✏️ [ĐÃ CẬP NHẬT PROMPT MỚI, KHỞI ĐỘNG LẠI (Xs)...]
  *   + 💡 [ĐÃ CÓ CÁCH, ĐỢI MÌNH CHÚT - Xs]
  *   + ⏳ [ĐÃ XONG YÊU CẦU CỦA BẠN, CHỜ CHÚT TÔI ĐANG GỬI PHẢN HỒI YÊU CẦU CỦA BẠN (Xs)...]
+ * - DỌN DẸP 5 GIÂY TỐI ƯU HÓA: Không spam edit, triệt tiêu 100% lỗi Telegram 429 Rate Limit.
  * - MÀU SẮC TRỰC QUAN CHO CÔNG CỤ (Diff Syntax Highlighting):
  *   + 🟢 [TẠO FILE MỚI] (+ X dòng mã nguồn mới - Xanh lá)
  *   + 🟠 [SỬA FILE] (+ X dòng thêm, - Y dòng sửa, ! Ghi đè - Cam)
@@ -14,7 +18,7 @@
  * - PHẢN CHIẾU 100% TIẾN TRÌNH VÀO BOX CHAT ANTIGRAVITY PC:
  *   + Pop-up nổi Toast trên màn hình máy tính (show_notification.ps1).
  *   + Nạp tin nhắn vào box chat máy tính qua agentapi send-message.
- *   + Đếm ngược 10s tự hủy tiến trình tạm thời, giữ câu trả lời vĩnh viễn.
+ *   + Giữ câu trả lời vĩnh viễn trên Topic 315.
  */
 
 const fs = require('fs');
@@ -56,8 +60,14 @@ const langServer = path.join(
     'language_server.exe'
 );
 
+const cancelKeyboard = {
+    inline_keyboard: [
+        [{ text: '🛑 Dừng tác vụ (Cancel)', callback_data: 'cancel_task' }]
+    ]
+};
+
 console.log('========================================================');
-console.log(' Fast Telegram Bridge v2.8 (Live 1.5s Stopwatch & Color Diffs)');
+console.log(' Fast Telegram Bridge v2.9 (Edit Message & 1-Touch Cancel)');
 console.log(' Bot Token:', botToken ? botToken.substring(0, 10) + '...' : 'NONE');
 console.log(' Conversation ID:', conversationId);
 console.log(' Transcript:', transcriptPath);
@@ -99,7 +109,7 @@ async function sendTyping(chatId, threadId = 315) {
     await tgApi('sendChatAction', payload);
 }
 
-async function sendMsg(chatId, text, threadId = 315, parseMode = 'HTML') {
+async function sendMsg(chatId, text, threadId = 315, parseMode = 'HTML', replyMarkup = null) {
     const targetThread = threadId || 315;
     const payload = {
         chat_id: chatId,
@@ -108,6 +118,7 @@ async function sendMsg(chatId, text, threadId = 315, parseMode = 'HTML') {
         message_thread_id: targetThread
     };
     if (parseMode) payload.parse_mode = parseMode;
+    if (replyMarkup) payload.reply_markup = replyMarkup;
 
     const res = await tgApi('sendMessage', payload);
     if (!res.ok && parseMode) {
@@ -119,7 +130,7 @@ async function sendMsg(chatId, text, threadId = 315, parseMode = 'HTML') {
     return res.result ? res.result.message_id : null;
 }
 
-async function editMsg(chatId, messageId, text, parseMode = 'HTML') {
+async function editMsg(chatId, messageId, text, parseMode = 'HTML', replyMarkup = null) {
     if (!messageId) return;
     const payload = {
         chat_id: chatId,
@@ -128,6 +139,9 @@ async function editMsg(chatId, messageId, text, parseMode = 'HTML') {
         disable_web_page_preview: true
     };
     if (parseMode) payload.parse_mode = parseMode;
+    if (replyMarkup !== null) {
+        payload.reply_markup = replyMarkup;
+    }
     const res = await tgApi('editMessageText', payload);
     if (!res.ok && parseMode) {
         delete payload.parse_mode;
@@ -245,37 +259,26 @@ async function sendLongResponse(chatId, answerText, totalSec, threadId = 315) {
     }
 }
 
-// --- CƠ CHẾ ĐẾM NGƯỢC 10S DỌN DẸP TIẾN TRÌNH ---
+// --- CƠ CHẾ DỌN DẸP 5S (KHÔNG GÂY LỖI 429 RATE LIMIT) ---
 
 async function runCountdownCleanup(chatId, threadId, msgIdsToDelete) {
     if (!msgIdsToDelete || msgIdsToDelete.length === 0) return;
     const targetThreadId = threadId || activeThreadId || 315;
     try {
-        console.log(`[Countdown Cleanup] Bắt đầu đếm ngược 10s để dọn ${msgIdsToDelete.length} tin nhắn...`);
+        console.log(`[Countdown Cleanup] Bắt đầu dọn dẹp ${msgIdsToDelete.length} tin nhắn tạm trong 5s...`);
         const countdownMsgId = await sendMsg(
             chatId,
-            `🧹 <b>[ĐANG DỌN DẸP TIẾN TRÌNH TRONG VÒNG 10 GIÂY...]</b>`,
+            `🧹 <b>[ĐANG DỌN DẸP TIẾN TRÌNH TRONG 5 GIÂY...]</b>`,
             targetThreadId
         );
 
-        const countdownSteps = [8, 6, 4, 2, 1];
-        for (const s of countdownSteps) {
-            await new Promise(r => setTimeout(r, 2000));
-            if (countdownMsgId) {
-                await editMsg(
-                    chatId,
-                    countdownMsgId,
-                    `🧹 <b>[ĐANG DỌN DẸP TIẾN TRÌNH TRONG VÒNG ${s} GIÂY...]</b>`
-                );
-            }
-        }
+        await new Promise(r => setTimeout(r, 5000));
 
         console.log('[Countdown Cleanup] Xóa toàn bộ tiến trình tạm...');
         await deleteMsgs(chatId, msgIdsToDelete);
 
         if (countdownMsgId) {
             await editMsg(chatId, countdownMsgId, `✨ <b>[ĐÃ DỌN DẸP THÀNH CÔNG!]</b>`);
-
             setTimeout(async () => {
                 await tgApi('deleteMessage', { chat_id: chatId, message_id: countdownMsgId });
                 console.log('[Countdown Cleanup] Hoàn tất, khung chat sạch bong!');
@@ -397,11 +400,11 @@ function recordSyncMessage(text) {
 
 function forwardToAntigravity(text) {
     if (fs.existsSync(langServer)) {
-        execFile(langServer, ['agentapi', 'send-message', conversationId, `[Điện thoại gửi]: ${text}`], (err, stdout) => {
+        execFile(langServer, ['agentapi', 'send-message', conversationId, text], (err, stdout) => {
             if (err) {
-                console.error('[Bridge IPC Error] Không thể chuyển prompt tới Antigravity:', err.message);
+                console.error('[Bridge IPC Error] Không thể chuyển tin nhắn tới Antigravity:', err.message);
             } else {
-                console.log('[Bridge IPC OK] Đã nạp prompt vào Box Chat Antigravity PC:', text.substring(0, 50));
+                console.log('[Bridge IPC OK] Đã nạp tin nhắn vào Box Chat Antigravity PC:', text.substring(0, 50));
             }
         });
     } else {
@@ -428,6 +431,7 @@ let promptStartTime = null;
 let promptTextSaved = '';
 let promptMsgId = null;
 let isPhotoSaved = false;
+let isEditedPrompt = false;
 let currentPhase = 'IDLE'; // 'IDLE' | 'READING' | 'THINKING' | 'PREPARING_RESPONSE'
 let tickerInterval = null;
 let lastStatusText = '';
@@ -439,7 +443,7 @@ let currentToolSummary = '';
 let typingInterval = null;
 let tempMsgIds = [];
 
-// --- LIVE TICKING STOPWATCH (EVERY 1.5 SECONDS) ---
+// --- LIVE TICKING STOPWATCH (EVERY 2.0 SECONDS - CHỐNG NGHẼN 429) ---
 
 async function updateStatusBubble() {
     if (!promptMsgId || !promptStartTime || currentPhase === 'IDLE' || isUpdatingStatus) return;
@@ -448,9 +452,11 @@ async function updateStatusBubble() {
     let text = '';
 
     if (currentPhase === 'READING') {
-        const promptLabel = isPhotoSaved
-            ? `📷 <b>[ĐÃ NHẬN ẢNH VÀ ĐANG PHÂN TÍCH, VUI LÒNG ĐỢI (${elapsed}s)...]</b>`
-            : `📖 <b>[ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (${elapsed}s)...]</b>`;
+        const promptLabel = isEditedPrompt
+            ? `✏️ <b>[ĐÃ CẬP NHẬT PROMPT MỚI, KHỞI ĐỘNG LẠI (${elapsed}s)...]</b>`
+            : (isPhotoSaved
+                ? `📷 <b>[ĐÃ NHẬN ẢNH VÀ ĐANG PHÂN TÍCH, VUI LÒNG ĐỢI (${elapsed}s)...]</b>`
+                : `📖 <b>[ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (${elapsed}s)...]</b>`);
         const previewClean = (promptTextSaved || '').replace(/[<>]/g, '');
         const previewSafe = escapeHtml(previewClean.length > 55 ? previewClean.substring(0, 55) + '...' : previewClean);
         text = `${promptLabel}\n<blockquote><i>${previewSafe}</i></blockquote>`;
@@ -467,7 +473,7 @@ async function updateStatusBubble() {
 
     isUpdatingStatus = true;
     try {
-        await editMsg(activeChatId, promptMsgId, text);
+        await editMsg(activeChatId, promptMsgId, text, 'HTML', cancelKeyboard);
         lastStatusText = text;
     } catch (e) {
         // Ignored
@@ -478,7 +484,7 @@ async function updateStatusBubble() {
 
 function startTicker() {
     if (!tickerInterval) {
-        tickerInterval = setInterval(updateStatusBubble, 1500);
+        tickerInterval = setInterval(updateStatusBubble, 2000);
     }
 }
 
@@ -486,6 +492,40 @@ function stopTicker() {
     if (tickerInterval) {
         clearInterval(tickerInterval);
         tickerInterval = null;
+    }
+}
+
+// --- XỬ LÝ LỆNH HỦY (CANCEL) ---
+
+async function handleCancelAction(source = 'button') {
+    console.log(`[Bridge Action] Người dùng yêu cầu hủy tác vụ (${source})`);
+    currentPhase = 'IDLE';
+    stopTicker();
+    if (typingInterval) {
+        clearInterval(typingInterval);
+        typingInterval = null;
+    }
+
+    const cancelMsg = `🛑 <b>[ĐÃ HỦY TÁC VỤ THEO YÊU CẦU CỦA BRO!]</b>\n<i>Đã dừng tiến trình và dọn dẹp các tác vụ đang thực thi.</i>`;
+    if (promptMsgId) {
+        await editMsg(activeChatId, promptMsgId, cancelMsg, 'HTML', { inline_keyboard: [] });
+    }
+
+    // Gửi tín hiệu thông báo vào Box Chat PC
+    forwardToAntigravity(`[LỆNH HỦY TỪ ĐIỆN THOẠI]: Người dùng đã yêu cầu dừng/hủy tác vụ hiện tại.`);
+
+    const toClean = [...tempMsgIds];
+    tempMsgIds = [];
+    promptStartTime = null;
+    promptTextSaved = '';
+    lastStatusText = '';
+    isPhotoSaved = false;
+    isEditedPrompt = false;
+    thinkingSent = false;
+    currentWorkingMsgId = null;
+
+    if (toClean.length > 0) {
+        runCountdownCleanup(activeChatId, activeThreadId, toClean);
     }
 }
 
@@ -525,6 +565,7 @@ async function processTranscript() {
                 promptStartTime = Date.now();
                 promptTextSaved = uText;
                 isPhotoSaved = false;
+                isEditedPrompt = false;
                 thinkingSent = false;
                 currentPhase = 'READING';
 
@@ -536,7 +577,9 @@ async function processTranscript() {
                     promptMsgId = await sendMsg(
                         activeChatId,
                         initialText,
-                        activeThreadId
+                        activeThreadId,
+                        'HTML',
+                        cancelKeyboard
                     );
                     if (promptMsgId) {
                         tempMsgIds.push(promptMsgId);
@@ -555,7 +598,7 @@ async function processTranscript() {
                         const elapsed = promptStartTime ? Math.max(1, Math.round((Date.now() - promptStartTime) / 1000)) : 1;
                         const safe = escapeHtml(promptTextSaved || 'Yêu cầu của bạn');
                         const text = `💡 <b>[ĐÃ CÓ CÁCH, ĐỢI MÌNH CHÚT - ${elapsed}s]</b>\n<blockquote><i>${safe}</i></blockquote>`;
-                        promptMsgId = await sendMsg(activeChatId, text, activeThreadId);
+                        promptMsgId = await sendMsg(activeChatId, text, activeThreadId, 'HTML', cancelKeyboard);
                         if (promptMsgId) {
                             tempMsgIds.push(promptMsgId);
                             lastStatusText = text;
@@ -630,6 +673,7 @@ async function processTranscript() {
                 promptTextSaved = '';
                 lastStatusText = '';
                 isPhotoSaved = false;
+                isEditedPrompt = false;
                 thinkingSent = false;
                 currentWorkingMsgId = null;
 
@@ -678,8 +722,32 @@ async function pollUpdates() {
                 for (const update of res.result) {
                     pollOffset = update.update_id + 1;
 
-                    if (!update.message) continue;
-                    const msg = update.message;
+                    // 1. XỬ LÝ NÚT BẤM INLINE (CALLBACK QUERY)
+                    if (update.callback_query) {
+                        const cb = update.callback_query;
+                        const cbData = cb.data;
+                        const fromId = cb.from ? cb.from.id : 0;
+                        const chatId = cb.message && cb.message.chat ? cb.message.chat.id : activeChatId;
+
+                        const isAllowed = allowedList.includes(Number(chatId)) || allowedList.includes(Number(fromId));
+                        if (!isAllowed) continue;
+
+                        await tgApi('answerCallbackQuery', {
+                            callback_query_id: cb.id,
+                            text: '🛑 Đang dừng tác vụ...'
+                        });
+
+                        if (cbData === 'cancel_task') {
+                            await handleCancelAction('Inline Button');
+                        }
+                        continue;
+                    }
+
+                    // 2. XỬ LÝ TIN NHẮN MỚI HOẶC TIN NHẮN ĐƯỢC CHỈNH SỬA
+                    const msg = update.message || update.edited_message;
+                    if (!msg) continue;
+                    const isEdit = !!update.edited_message;
+
                     const chatId = msg.chat.id;
                     const threadId = msg.message_thread_id || 315;
                     const fromId = msg.from ? msg.from.id : 0;
@@ -708,7 +776,11 @@ async function pollUpdates() {
 
                     if (!userText && !isPhoto) continue;
 
-                    console.log(`[Telegram Nhận Tin] (${chatId}, thread=${threadId}): ${userText.substring(0, 50)}`);
+                    // Xử lý lệnh hủy nhanh
+                    if (/^(?:\/cancel|stop|hủy|dừng|dừng lại)$/i.test(userText)) {
+                        await handleCancelAction(isEdit ? 'Edit message to STOP' : 'Text STOP');
+                        continue;
+                    }
 
                     // Xử lý lệnh nhanh /pc hoặc /local
                     if (/^(?:\/pc|\/local|kết nối lại máy tính)$/i.test(userText)) {
@@ -716,36 +788,48 @@ async function pollUpdates() {
                         continue;
                     }
 
+                    if (isEdit) {
+                        console.log(`[Telegram Sửa Tin] (${chatId}, thread=${threadId}): ${userText.substring(0, 50)}`);
+                    } else {
+                        console.log(`[Telegram Nhận Tin] (${chatId}, thread=${threadId}): ${userText.substring(0, 50)}`);
+                    }
+
+                    // Khởi động lại ticker
+                    stopTicker();
                     promptStartTime = Date.now();
                     promptTextSaved = userText;
                     isPhotoSaved = isPhoto;
+                    isEditedPrompt = isEdit;
                     thinkingSent = false;
                     currentPhase = 'READING';
 
                     const previewClean = userText.replace(/[<>]/g, '');
                     const previewSafe = escapeHtml(previewClean.length > 55 ? previewClean.substring(0, 55) + '...' : previewClean);
 
-                    // 1. Phản hồi tức thì bằng bóng đọc prompt
-                    const promptLabel = isPhoto
-                        ? '📷 <b>[ĐÃ NHẬN ẢNH VÀ ĐANG PHÂN TÍCH, VUI LÒNG ĐỢI (1s)...]</b>'
-                        : '📖 <b>[ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (1s)...]</b>';
+                    const promptLabel = isEdit
+                        ? '✏️ <b>[ĐÃ CẬP NHẬT PROMPT MỚI, KHỞI ĐỘNG LẠI (1s)...]</b>'
+                        : (isPhoto
+                            ? '📷 <b>[ĐÃ NHẬN ẢNH VÀ ĐANG PHÂN TÍCH, VUI LÒNG ĐỢI (1s)...]</b>'
+                            : '📖 <b>[ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (1s)...]</b>');
+
                     const initialText = `${promptLabel}\n<blockquote><i>${previewSafe}</i></blockquote>`;
 
-                    promptMsgId = await sendMsg(chatId, initialText, activeThreadId);
-                    if (promptMsgId) {
-                        tempMsgIds.push(promptMsgId);
+                    if (isEdit && promptMsgId) {
+                        await editMsg(chatId, promptMsgId, initialText, 'HTML', cancelKeyboard);
                         lastStatusText = initialText;
                         startTicker();
+                    } else {
+                        promptMsgId = await sendMsg(chatId, initialText, activeThreadId, 'HTML', cancelKeyboard);
+                        if (promptMsgId) {
+                            tempMsgIds.push(promptMsgId);
+                            lastStatusText = initialText;
+                            startTicker();
+                        }
                     }
 
-                    // 2. Bật Popup Toast trên màn hình PC
-                    showScreenToast('📱 Telegram -> PC Sync', previewClean);
-
-                    // 3. Ghi vào sync_bridge.json
-                    recordSyncMessage(userText);
-
-                    // 4. Đẩy thẳng Prompt vào Box Chat Antigravity PC
-                    forwardToAntigravity(userText);
+                    showScreenToast(isEdit ? '✏️ Telegram -> Prompt Sửa' : '📱 Telegram -> PC Sync', previewClean);
+                    recordSyncMessage(isEdit ? `[Sửa tin]: ${userText}` : userText);
+                    forwardToAntigravity(isEdit ? `[Điện thoại sửa prompt thành]: ${userText}` : `[Điện thoại gửi]: ${userText}`);
                 }
             }
         } catch (e) {
