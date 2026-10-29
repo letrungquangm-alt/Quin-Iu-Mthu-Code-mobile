@@ -168,11 +168,11 @@ async function handleDisconnectCloud() {
     promptMsgId = null;
     currentWorkingMsgId = null;
 
-    const handoverText = `☁️ <b>[ĐÃ NGẮT KẾT NỐI VỚI PC - BÀN GIAO CHO VERCEL CLOUD 24/7]</b>\n──────────────────────\n🖥️ <b>Máy tính:</b> Đã ngưng tiếp nhận lệnh trực tiếp (Chế độ Chờ)\n🌐 <b>Vercel Cloud:</b> ĐÃ TIẾP QUẢN 24/7!\n\n✨ Giờ bro có thể chat, yêu cầu code hoặc commit file ngay cả khi máy tính tắt nguồn!\n\n👉 Khi muốn kết nối lại máy tính, chỉ cần gõ <code>/pc</code> hoặc nhập mã <code>6585</code>.`;
+    const handoverText = `☁️ <b>[ĐÃ NGẮT KẾT NỐI VỚI PC - BÀN GIAO CHO HUGGING FACE CLOUD 24/7]</b>\n──────────────────────\n🖥️ <b>Máy tính:</b> Đã ngưng tiếp nhận lệnh trực tiếp (Chế độ Chờ)\n🌐 <b>Hugging Face Cloud:</b> ĐÃ TIẾP QUẢN 24/7!\n\n✨ Giờ bro có thể chat, yêu cầu code hoặc commit file ngay cả khi máy tính tắt nguồn!\n\n👉 Khi muốn kết nối lại máy tính, chỉ cần gõ <code>/pc</code> hoặc nhập mã PIN <code>2726</code>.`;
     await sendMsg(activeChatId, handoverText, activeThreadId, 'HTML', { inline_keyboard: [] });
 
     try {
-        await tgApiRaw('setWebhook', { url: 'https://quiniumthucode.vercel.app/api/webhook' });
+        await tgApiRaw('setWebhook', { url: 'https://trungm-quinloverin.hf.space/api/webhook' });
     } catch (e) {}
 }
 
@@ -805,10 +805,10 @@ let isShuttingDown = false;
 async function restoreCloudOnExit(reason) {
     if (isShuttingDown) return;
     isShuttingDown = true;
-    console.log(`[Bridge Exit] Tiến trình kết thúc (${reason}), tự động chuyển giao Webhook cho Vercel Cloud 24/7...`);
+    console.log(`[Bridge Exit] Tiến trình kết thúc (${reason}), tự động chuyển giao Webhook cho Hugging Face Cloud 24/7...`);
     try {
-        await tgApiRaw('setWebhook', { url: 'https://quiniumthucode.vercel.app/api/webhook' });
-        console.log('[Bridge Exit] Đã bàn giao Vercel Cloud thành công!');
+        await tgApiRaw('setWebhook', { url: 'https://trungm-quinloverin.hf.space/api/webhook' });
+        console.log('[Bridge Exit] Đã bàn giao Hugging Face Cloud thành công!');
     } catch (e) {
         console.error('[Bridge Exit Error]:', e.message);
     }
