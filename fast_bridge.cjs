@@ -75,7 +75,15 @@ console.log('========================================================');
 
 // --- TELEGRAM API HELPERS ---
 
-async function tgApi(method, data) {
+let apiQueue = Promise.resolve();
+
+function tgApi(method, data) {
+    const nextCall = () => tgApiDirect(method, data);
+    apiQueue = apiQueue.then(nextCall, nextCall);
+    return apiQueue;
+}
+
+async function tgApiDirect(method, data) {
     try {
         const res = await fetch(`https://api.telegram.org/bot${botToken}/${method}`, {
             method: 'POST',
@@ -88,7 +96,7 @@ async function tgApi(method, data) {
                 const waitSec = json.parameters.retry_after;
                 console.warn(`[429 Rate Limit] Chờ ${waitSec}s trước khi gửi tiếp...`);
                 await new Promise(r => setTimeout(r, (waitSec + 1) * 1000));
-                return tgApi(method, data);
+                return tgApiDirect(method, data);
             }
             if (json.description &&
                 !json.description.includes('message to delete not found') &&
@@ -96,6 +104,7 @@ async function tgApi(method, data) {
                 console.warn(`[API ${method} Fail]:`, json.description);
             }
         }
+        await new Promise(r => setTimeout(r, 150)); // Giãn cách 150ms chống 429 burst
         return json;
     } catch (e) {
         console.error(`[API ${method} Ex]:`, e.message);
@@ -496,26 +505,21 @@ let currentToolRunningFn = null;
 let currentToolFinishedFn = null;
 let lastWorkingBubbleText = '';
 
-async function moveCancelButtonTo(chatId, newMsgId, newText, threadId = 315) {
-    if (currentCancelMsgId && currentCancelMsgId !== newMsgId) {
-        const prevText = lastBubbleTexts[currentCancelMsgId];
-        if (prevText) {
-            await editMsg(chatId, currentCancelMsgId, prevText, 'HTML', { inline_keyboard: [] });
-        }
-    }
-    currentCancelMsgId = newMsgId;
-    if (newMsgId && newText) {
-        lastBubbleTexts[newMsgId] = newText;
+async function removeCancelButtonFrom(chatId, msgId) {
+    if (!msgId) return;
+    const prevText = lastBubbleTexts[msgId];
+    if (prevText) {
+        await editMsg(chatId, msgId, prevText, 'HTML', { inline_keyboard: [] });
     }
 }
 
 async function removeAllCancelButtons(chatId) {
     if (currentCancelMsgId) {
-        const prevText = lastBubbleTexts[currentCancelMsgId];
-        if (prevText) {
-            await editMsg(chatId, currentCancelMsgId, prevText, 'HTML', { inline_keyboard: [] });
-        }
+        await removeCancelButtonFrom(chatId, currentCancelMsgId);
         currentCancelMsgId = null;
+    }
+    if (promptMsgId) {
+        await removeCancelButtonFrom(chatId, promptMsgId);
     }
 }
 
@@ -735,6 +739,7 @@ async function processTranscript() {
                 currentToolStartTime = Date.now();
                 currentPhase = 'WORKING';
                 startTicker();
+
                 for (const tc of entry.tool_calls) {
                     const { summary, runningFn, finishedFn } = formatToolCall(tc);
                     currentToolSummary = summary;
@@ -743,6 +748,13 @@ async function processTranscript() {
                     console.log(`[Bridge Tool Call] ${summary}`);
 
                     if (runningFn) {
+                        // 1. Gỡ nút Cancel ở bong bóng trước đó (ví dụ promptMsgId) để đảm bảo CHỈ CÓ DUY NHẤT 1 NÚT
+                        if (currentCancelMsgId) {
+                            await removeCancelButtonFrom(activeChatId, currentCancelMsgId);
+                            currentCancelMsgId = null;
+                        }
+
+                        // 2. Gửi bong bóng mới nhất KÈM NÚT CANCEL
                         const initialText = runningFn(1);
                         lastWorkingBubbleText = initialText;
                         currentWorkingMsgId = await sendMsg(
@@ -755,12 +767,13 @@ async function processTranscript() {
                         if (currentWorkingMsgId) {
                             tempMsgIds.push(currentWorkingMsgId);
                             currentCancelMsgId = currentWorkingMsgId;
+                            lastBubbleTexts[currentWorkingMsgId] = initialText;
                         }
                     }
                 }
             }
 
-            // Giai đoạn: Hoàn tất Tool Call -> Hiển thị thời gian hoàn thành & gỡ nút Cancel
+            // Giai đoạn: Hoàn tất Tool Call -> Hiển thị thời gian hoàn thành & chuyển nút Cancel
             if (entry.type === 'GENERIC' && entry.content) {
                 const wSec = currentToolStartTime ? Math.max(1, Math.round((Date.now() - currentToolStartTime) / 1000)) : 1;
                 const safeTask = escapeHtml(currentToolSummary || 'Tác vụ');
@@ -771,6 +784,8 @@ async function processTranscript() {
                         ? currentToolFinishedFn(wSec)
                         : `✅ <b>[ĐÃ HOÀN TẤT TRONG ${wSec}s]</b>: <code>${safeTask}</code>`;
                     lastBubbleTexts[currentWorkingMsgId] = finishedBubble;
+                    
+                    // Gỡ nút cancel khỏi tool vừa hoàn tất
                     await editMsg(
                         activeChatId,
                         currentWorkingMsgId,
@@ -778,6 +793,7 @@ async function processTranscript() {
                         'HTML',
                         { inline_keyboard: [] }
                     );
+                    currentCancelMsgId = null;
                     currentWorkingMsgId = null;
                     currentToolRunningFn = null;
                     currentToolFinishedFn = null;
@@ -786,9 +802,16 @@ async function processTranscript() {
 
                 currentPhase = 'THINKING';
                 startTicker();
+
+                // Đưa nút Cancel về lại promptMsgId (vì agent đang tiếp tục suy nghĩ / viết kết luận)
                 if (promptMsgId) {
                     currentCancelMsgId = promptMsgId;
-                    await updateStatusBubble();
+                    const elapsed = promptStartTime ? Math.max(1, Math.round((Date.now() - promptStartTime) / 1000)) : 1;
+                    const safe = escapeHtml(promptTextSaved || 'Yêu cầu của bạn');
+                    const text = `💡 <b>[ĐANG SUY NGHĨ & XỬ LÝ (${elapsed}s)...]</b>\n<blockquote><i>${safe}</i></blockquote>`;
+                    lastStatusText = text;
+                    lastBubbleTexts[promptMsgId] = text;
+                    await editMsg(activeChatId, promptMsgId, text, 'HTML', cancelKeyboard);
                 }
 
                 sendTyping(activeChatId, activeThreadId);
