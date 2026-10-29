@@ -231,7 +231,7 @@ async function sendLongResponse(chatId, answerText, totalSec, threadId = 315) {
 
     const targetThreadId = threadId || activeThreadId || 315;
     const maxLen = 3500;
-    const headerTitle = `🤖 <b>[MÁY TÍNH ĐÃ PHẢN HỒI XONG TRONG ${totalSec}s]:</b>\n\n`;
+    const headerTitle = `🤖 <b>[MÁY TÍNH ĐÃ PHẢN HỒI (Hoàn tất trong ${totalSec}s)]:</b>\n\n`;
 
     if (answerText.length <= maxLen) {
         const html = mdToTgHtml(answerText);
@@ -348,10 +348,10 @@ function formatToolCall(tc) {
 
         if (isOverwrite || isAppend || fileExisted) {
             summary = rawSummary || `Cập nhật file ${fileName}`;
-            bubbleText = `🟠 <b>[SỬA FILE]:</b> <code>${fileName}</code>\n<pre><code class="language-diff">--- a/${fileName}\n- Ghi đè thay thế nội dung cũ\n+++ b/${fileName}\n+ ${contentLines} dòng thêm mới</code></pre>`;
+            bubbleText = `🟠 <b>[SỬA FILE]:</b> <code>${fileName}</code>\n<pre><code class="language-diff">- Ghi đè thay thế nội dung cũ\n+ ${contentLines} dòng thêm mới</code></pre>`;
         } else {
             summary = rawSummary || `Tạo mới file ${fileName}`;
-            bubbleText = `🟢 <b>[TẠO FILE MỚI]:</b> <code>${fileName}</code>\n<pre><code class="language-diff">+++ b/${fileName}\n+ ${contentLines} dòng mã nguồn mới</code></pre>`;
+            bubbleText = `🟢 <b>[TẠO FILE MỚI]:</b> <code>${fileName}</code>\n<pre><code class="language-diff">+ ${contentLines} dòng mã nguồn mới</code></pre>`;
         }
     } else if (toolName === 'edit_file') {
         const rawPath = args.Path ? args.Path.toString().replace(/^"|"$/g, '') : 'file';
@@ -359,7 +359,7 @@ function formatToolCall(tc) {
         const linesRemoved = args.Target ? args.Target.toString().split(/\r?\n/).length : 1;
         const linesAdded = args.Replacement ? args.Replacement.toString().split(/\r?\n/).length : 0;
         summary = rawSummary || `Chỉnh sửa code ${fileName}`;
-        bubbleText = `🟠 <b>[SỬA FILE]:</b> <code>${fileName}</code>\n<pre><code class="language-diff">--- a/${fileName}\n- ${linesRemoved} dòng đã xóa\n+++ b/${fileName}\n+ ${linesAdded} dòng thêm</code></pre>`;
+        bubbleText = `🟠 <b>[SỬA FILE]:</b> <code>${fileName}</code>\n<pre><code class="language-diff">- ${linesRemoved} dòng đã xóa\n+ ${linesAdded} dòng thêm</code></pre>`;
     } else if (toolName === 'read_file') {
         const rawPath = args.Path ? args.Path.toString().replace(/^"|"$/g, '') : 'file';
         const fileName = path.basename(rawPath);
@@ -564,7 +564,7 @@ async function updateStatusBubble() {
         text = `${promptLabel}\n<blockquote><i>${previewSafe}</i></blockquote>`;
     } else if (currentPhase === 'THINKING') {
         const safe = escapeHtml(promptTextSaved || 'Yêu cầu của bạn');
-        text = `💡 <b>[ĐANG SUY NGHĨ, ĐỢI MÌNH CHÚT (${elapsed}s)...]</b>\n<blockquote><i>${safe}</i></blockquote>`;
+        text = `💡 <b>[ĐANG SUY NGHĨ & XỬ LÝ (${elapsed}s)...]</b>\n<blockquote><i>${safe}</i></blockquote>`;
     } else if (currentPhase === 'GENERATING') {
         text = `⏳ <b>[ĐANG KHỞI TẠO PHẢN HỒI CHO BẠN, VUI LÒNG CHỜ TRONG GIÂY LÁT (${elapsed}s)...]</b>`;
     } else {
@@ -759,7 +759,7 @@ async function processTranscript() {
                     currentToolBubbleText = '';
                 }
 
-                currentPhase = 'GENERATING';
+                currentPhase = 'THINKING';
                 startTicker();
                 if (promptMsgId) {
                     await moveCancelButtonTo(activeChatId, promptMsgId, lastStatusText, activeThreadId);
