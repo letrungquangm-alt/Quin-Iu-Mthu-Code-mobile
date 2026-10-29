@@ -1,10 +1,11 @@
 /**
- * QuinloveRin Code - Fast Telegram Bridge v1.2 (.cjs)
- * KIẾN TRÚC 1 BÓNG TRẠNG THÁI DUY NHẤT (Single Living Status Bubble)
- * - Cập nhật trạng thái in-place theo thời gian thực (real-time).
- * - Không gửi dồn dập, không bao giờ kẹt bóng (1s).
- * - Tự động xóa sạch bóng trạng thái khi phản hồi xong.
- * - Hỗ trợ Multi-Bot Failover Pool chống Rate Limit 429.
+ * QuinloveRin Code - Fast Telegram Bridge v1.3 (.cjs)
+ * - Đúng chuẩn wording yêu cầu của bro:
+ *   + Khi nhận: "ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (Xs)..."
+ *   + Khi có hướng giải quyết: "ĐÃ CÓ CÁCH, ĐỢI MÌNH CHÚT - Xs"
+ * - Bộ đếm giây động (Live Stopwatch 2s/lần) mượt mà.
+ * - Cơ chế tự xóa bóng mồ côi qua bridge_state.json (không bao giờ kẹt bóng cũ).
+ * - Multi-Bot Failover Pool (3 bots) chống nghẽn Telegram.
  */
 
 const fs = require('fs');
@@ -13,6 +14,7 @@ const { spawn } = require('child_process');
 
 const rootDir = __dirname;
 const configPath = path.join(rootDir, 'config.json');
+const statePath = path.join(rootDir, 'bridge_state.json');
 
 if (!fs.existsSync(configPath)) {
     console.error('[Bridge Error] Không tìm thấy config.json tại:', configPath);
@@ -47,21 +49,34 @@ const langServer = path.join(
 );
 
 console.log('========================================================');
-console.log(' Fast Telegram Bridge v1.2 (Single Living Bubble) Start');
+console.log(' Fast Telegram Bridge v1.3 (Auto Self-Healing & Custom Wording)');
 console.log(' Bot Pool Size:', botPool.length, 'bots');
 console.log(' Conversation ID:', conversationId);
 console.log(' Transcript:', transcriptPath);
 console.log('========================================================');
 
-// --- TELEGRAM API HELPERS VỚI MULTI-BOT FAILOVER ---
+// --- STATE FILE PERSISTENCE (Chống kẹt bóng mồ côi khi restart) ---
+
+function saveState(data) {
+    try { fs.writeFileSync(statePath, JSON.stringify(data, null, 2)); } catch (e) {}
+}
+
+function loadState() {
+    try {
+        if (fs.existsSync(statePath)) return JSON.parse(fs.readFileSync(statePath, 'utf8'));
+    } catch (e) {}
+    return {};
+}
+
+// --- TELEGRAM API HELPERS ---
 
 let currentBotIndex = 0;
 function getActiveBotToken() {
     return botPool[currentBotIndex % botPool.length];
 }
 
-async function tgApi(method, data, tokenOverride = null) {
-    const token = tokenOverride || getActiveBotToken();
+async function tgApi(method, data) {
+    const token = getActiveBotToken();
     try {
         const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
             method: 'POST',
@@ -71,7 +86,7 @@ async function tgApi(method, data, tokenOverride = null) {
         const json = await res.json();
         if (!json.ok) {
             if (json.error_code === 429 && json.parameters && json.parameters.retry_after) {
-                console.warn(`[429 Rate Limit on Bot ${currentBotIndex}] Chuyển bot tiếp theo trong pool...`);
+                console.warn(`[429 Rate Limit Bot ${currentBotIndex}] Đổi bot trong pool...`);
                 currentBotIndex = (currentBotIndex + 1) % botPool.length;
                 return tgApi(method, data);
             }
@@ -227,7 +242,18 @@ async function sendLongResponse(chatId, answerText, threadId = null) {
     }
 }
 
-// --- KIẾN TRÚC 1 BÓNG TRẠNG THÁI DUY NHẤT (Single Status Bubble) ---
+// --- DỌN DẸP BÓNG CŨ KHI KHỞI ĐỘNG (Self-Healing on Startup) ---
+
+(async () => {
+    const old = loadState();
+    if (old.statusMsgId && old.chatId) {
+        console.log('[Self-Healing] Tìm thấy bóng mồ côi phiên trước:', old.statusMsgId, '-> Tiến hành xóa');
+        await tgApi('deleteMessage', { chat_id: old.chatId, message_id: old.statusMsgId });
+        saveState({});
+    }
+})();
+
+// --- SINGLE LIVING STATUS BUBBLE STATE ---
 
 let activeChatId = allowedChatId || -1004457846636;
 let activeThreadId = null;
@@ -236,7 +262,20 @@ let singleStatusMsgId = null;
 let promptStartTime = null;
 let promptTextSaved = '';
 let toolStartTime = null;
-let stepCount = 0;
+let currentPhase = 'IDLE'; // 'READING' | 'THINKING' | 'WORKING' | 'IDLE'
+
+// Live Stopwatch Timer cho giai đoạn đọc prompt (mỗi 2s)
+setInterval(async () => {
+    if (currentPhase === 'READING' && singleStatusMsgId && promptStartTime) {
+        const sec = Math.max(1, Math.round((Date.now() - promptStartTime) / 1000));
+        const safe = escapeHtml(promptTextSaved);
+        await editMsg(
+            activeChatId,
+            singleStatusMsgId,
+            `📖 <b>[ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (${sec}s)...]</b>\n<blockquote><i>${safe}</i></blockquote>`
+        );
+    }
+}, 2000);
 
 function forwardToAntigravity(text) {
     if (fs.existsSync(langServer)) {
@@ -251,8 +290,6 @@ function forwardToAntigravity(text) {
         } catch (e) {
             console.error('[Bridge Error] Lỗi chuyển prompt tới Antigravity:', e.message);
         }
-    } else {
-        console.warn('[Bridge Warning] Không tìm thấy language_server.exe tại:', langServer);
     }
 }
 
@@ -289,22 +326,23 @@ async function processTranscript() {
         try {
             const entry = JSON.parse(line);
 
-            // Giai đoạn 1: AI đang suy nghĩ (nếu chưa gọi tool)
+            // Giai đoạn: AI bắt đầu suy nghĩ / đã có hướng
             if (entry.thinking && !entry.content && (!entry.tool_calls || entry.tool_calls.length === 0)) {
+                currentPhase = 'THINKING';
                 if (singleStatusMsgId) {
                     const elapsed = promptStartTime ? Math.max(1, Math.round((Date.now() - promptStartTime) / 1000)) : 1;
                     const safe = escapeHtml(promptTextSaved);
                     await editMsg(
                         activeChatId,
                         singleStatusMsgId,
-                        `📖 <b>[ĐÃ ĐỌC PROMPT - ${elapsed}s]</b>\n<blockquote><i>${safe}</i></blockquote>\n🧠 <b>[AI ĐANG SUY NGHĨ...]</b>`
+                        `💡 <b>[ĐÃ CÓ CÁCH, ĐỢI MÌNH CHÚT - ${elapsed}s]</b>\n<blockquote><i>${safe}</i></blockquote>\n🧠 <i>(Đang tính toán các bước hoàn hảo...)</i>`
                     );
                 }
             }
 
-            // Giai đoạn 2: AI thực hiện lệnh / công cụ (Tool Call)
+            // Giai đoạn: Thực thi lệnh / công cụ (Tool Call)
             if (entry.tool_calls && entry.tool_calls.length > 0) {
-                stepCount++;
+                currentPhase = 'WORKING';
                 toolStartTime = Date.now();
                 const tc = entry.tool_calls[0];
                 const toolName = tc.name;
@@ -318,12 +356,12 @@ async function processTranscript() {
                     await editMsg(
                         activeChatId,
                         singleStatusMsgId,
-                        `📖 <b>[PROMPT - ${elapsed}s]</b>: <i>${safePrompt}</i>\n⚡ <b>[MÁY TÍNH ĐANG THỰC HIỆN]</b>\n▶ <code>${safeSummary}</code>`
+                        `💡 <b>[ĐÃ CÓ CÁCH, ĐỢI MÌNH CHÚT - ${elapsed}s]</b>\n<blockquote><i>${safePrompt}</i></blockquote>\n⚡ <b>[MÁY TÍNH ĐANG THỰC HIỆN]</b> ▶ <code>${safeSummary}</code>`
                     );
                 }
             }
 
-            // Giai đoạn 3: Kết quả lệnh hoàn tất (Tool Output)
+            // Giai đoạn: Kết quả lệnh hoàn tất (Tool Output)
             if (entry.type === 'GENERIC' && entry.content) {
                 const wSec = toolStartTime ? Math.max(1, Math.round((Date.now() - toolStartTime) / 1000)) : 1;
                 if (singleStatusMsgId) {
@@ -335,22 +373,23 @@ async function processTranscript() {
                 }
             }
 
-            // Giai đoạn 4: Phản hồi hoàn chỉnh -> Gửi đáp án và XÓA SẠCH BÓNG TRẠNG THÁI DUY NHẤT
+            // Giai đoạn: Phản hồi hoàn chỉnh -> Gửi đáp án & XÓA BÓNG TRẠNG THÁI
             if (entry.type === 'PLANNER_RESPONSE' && entry.content && (!entry.tool_calls || entry.tool_calls.length === 0)) {
                 const answer = entry.content.toString().trim();
                 if (!answer) continue;
 
+                currentPhase = 'IDLE';
                 console.log('[Bridge] Gửi câu trả lời hoàn chỉnh tới Telegram...');
                 await sendLongResponse(activeChatId, answer, activeThreadId);
 
-                // XÓA NGAY BÓNG TRẠNG THÁI (Khung chat sạch bong 100%, chỉ còn tin nhắn trả lời)
+                // Xóa bóng trạng thái và dọn dẹp state
                 if (singleStatusMsgId) {
                     const toDelete = singleStatusMsgId;
                     singleStatusMsgId = null;
                     promptStartTime = null;
                     promptTextSaved = '';
                     toolStartTime = null;
-                    stepCount = 0;
+                    saveState({});
 
                     setTimeout(async () => {
                         await deleteMsgs(activeChatId, [toDelete]);
@@ -364,8 +403,7 @@ async function processTranscript() {
     }
 }
 
-// Quét transcript mỗi 120ms siêu tốc
-setInterval(processTranscript, 120);
+setInterval(processTranscript, 100);
 
 // --- TELEGRAM POLLING LOOP ---
 
@@ -412,25 +450,33 @@ async function pollUpdates() {
 
                     console.log(`[Telegram Nhận Tin] (${chatId}, thread=${threadId}): ${userText.substring(0, 50)}`);
 
-                    // 1. TẠO DUY NHẤT 1 BÓNG TRẠNG THÁI IN-PLACE (< 0.15s)
-                    promptStartTime = Date.now();
-                    promptTextSaved = userText;
-
-                    const previewClean = userText.replace(/[<>]/g, '');
-                    const previewSafe = escapeHtml(previewClean.length > 50 ? previewClean.substring(0, 50) + '...' : previewClean);
-                    const promptLabel = isPhoto
-                        ? '📷 <b>[ĐÃ NHẬN ẢNH - ĐANG PHÂN TÍCH...]</b>'
-                        : '📖 <b>[ĐÃ NHẬN & ĐANG ĐỌC PROMPT...]</b>';
-
-                    // Xóa bóng cũ nếu trước đó còn sót
+                    // Xóa bóng cũ nếu còn tồn đọng trước đó
                     if (singleStatusMsgId) {
                         await deleteMsgs(chatId, [singleStatusMsgId]);
                         singleStatusMsgId = null;
                     }
 
+                    promptStartTime = Date.now();
+                    promptTextSaved = userText;
+                    currentPhase = 'READING';
+
+                    const previewClean = userText.replace(/[<>]/g, '');
+                    const previewSafe = escapeHtml(previewClean.length > 50 ? previewClean.substring(0, 50) + '...' : previewClean);
+                    const promptLabel = isPhoto
+                        ? '📷 <b>[ĐÃ NHẬN ẢNH VÀ ĐANG PHÂN TÍCH, VUI LÒNG ĐỢI (1s)...]</b>'
+                        : '📖 <b>[ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (1s)...]</b>';
+
                     singleStatusMsgId = await sendMsg(chatId, `${promptLabel}\n<blockquote><i>${previewSafe}</i></blockquote>`, threadId);
 
-                    // 2. Chuyển prompt tới máy tính (Antigravity PC)
+                    // Lưu state phòng trường hợp tiến trình bị tắt
+                    saveState({
+                        statusMsgId: singleStatusMsgId,
+                        chatId: chatId,
+                        threadId: threadId,
+                        timestamp: Date.now()
+                    });
+
+                    // Chuyển prompt tới máy tính (Antigravity PC)
                     forwardToAntigravity(userText);
                 }
             }
