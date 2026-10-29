@@ -28,7 +28,10 @@ const { getPinDisplay, getKeypadMarkup } = require('./lib/numpad.cjs');
 const rootDir = __dirname;
 const conversationId = '7f7131ce-dc72-490f-97bd-4a675f9dd0c7';
 const transcriptPath = `C:\\Users\\letru\\.gemini\\antigravity\\brain\\${conversationId}\\.system_generated\\logs\\transcript.jsonl`;
-const langServer = 'C:\\Users\\letru\\.gemini\\antigravity\\language_server_windows_x64.exe';
+let langServer = path.join(process.env.LOCALAPPDATA || 'C:\\Users\\letru\\AppData\\Local', 'Programs', 'antigravity', 'resources', 'bin', 'language_server.exe');
+if (!fs.existsSync(langServer)) {
+    langServer = 'C:\\Users\\letru\\AppData\\Local\\Programs\\antigravity\\resources\\bin\\language_server.exe';
+}
 const notifScript = path.join(rootDir, 'show_notification.ps1');
 const syncBridgePath = path.join(rootDir, 'sync_bridge.json');
 
