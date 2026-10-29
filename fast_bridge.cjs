@@ -831,9 +831,27 @@ async function pollUpdates() {
                         continue;
                     }
 
-                    // Xử lý lệnh nhanh /pc hoặc /local
-                    if (/^(?:\/pc|\/local|kết nối lại máy tính)$/i.test(userText)) {
-                        await sendMsg(chatId, `💻 <b>[MÁY TÍNH ĐANG TIẾP QUẢN TRỰC TIẾP]</b>\n──────────────────────\n🔗 <b>Mã đồng bộ:</b> <code>GM_6585_Mthu</code>\n🖥️ <b>Trạng thái:</b> SẴN SÀNG 100%\n✨ Toàn bộ lệnh gửi từ đây sẽ hiện trực tiếp trên màn hình máy tính!`, activeThreadId);
+                    // Xử lý lệnh cưỡng chế kết nối lại (/ketnoilai, /pc, /local)
+                    if (/^(?:\/ketnoilai|\/reconnect|\/pc|\/local|kết nối lại|kết nối lại máy tính)$/i.test(userText)) {
+                        console.log(`[Bridge Reconnect] Nhận lệnh cưỡng chế kết nối lại từ Telegram...`);
+                        currentPhase = 'IDLE';
+                        stopTicker();
+                        if (typingInterval) {
+                            clearInterval(typingInterval);
+                            typingInterval = null;
+                        }
+                        tempMsgIds = [];
+                        promptMsgId = null;
+                        activeThreadId = threadId || 315;
+
+                        // Đánh thức Antigravity PC
+                        forwardToAntigravity(`[LỆNH CƯỠNG CHẾ KẾT NỐI LẠI]: Người dùng yêu cầu đồng bộ tức thì qua lệnh /ketnoilai. Cửa sổ Antigravity PC đã kết nối sẵn sàng 100%.`);
+
+                        await sendMsg(
+                            chatId,
+                            `⚡ <b>[ĐÃ CƯỠNG CHẾ KẾT NỐI LẠI THÀNH CÔNG!]</b>\n──────────────────────\n🖥️ <b>Cửa sổ Antigravity PC:</b> SẴN SÀNG 100%\n🚀 <b>Kênh làm việc:</b> Topic 315 (Quin-Iu-Mthu)\n🔗 <b>Mã đồng bộ:</b> <code>GM_6585_Mthu</code>\n✨ Cầu nối PC đã thức tỉnh hoàn toàn! Mọi tin nhắn hoặc hình ảnh bro gửi tiếp theo sẽ được xử lý ngay lập tức!`,
+                            activeThreadId
+                        );
                         continue;
                     }
 
