@@ -1,19 +1,16 @@
 /**
- * QuinloveRin Code - Fast Telegram Bridge v2.6 (.cjs)
- * - ĐỒNG BỘ 100% VỚI BOX CHAT ANTIGRAVITY TRÊN MÁY TÍNH (SYNC BRIDGE):
- *   + Mã kết nối: GM_6585_Mthu (Status: CONNECTED)
- *   + Khi người dùng gửi lệnh/chat từ Telegram:
- *     1. Bắn thông báo nổi lên màn hình PC (show_notification.ps1) kèm âm thanh.
- *     2. Chuyển tin nhắn thẳng vào Box Chat Antigravity PC qua language_server.exe agentapi.
- *     3. Máy tính Antigravity nhận tin, bắt đầu suy nghĩ, chạy tool và phản hồi trực tiếp trên màn hình!
- *     4. Bridge phản chiếu (Mirror) trọn vẹn toàn bộ tiến trình đó ngược lại nhóm Telegram:
- *        - 📖 [ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (Xs)...]
- *        - 💡 [ĐÃ CÓ CÁCH, ĐỢI MÌNH CHÚT - Xs]
- *        - ⚡ [MÁY TÍNH ĐANG THỰC HIỆN] ▶ <tên tác vụ> (Không gắn tổng thời gian)
- *        - ✅ [ĐÃ HOÀN TẤT TRONG Xs]: <tên tác vụ>
- *        - Bật Typing trên thanh tiêu đề Telegram khi chuẩn bị đáp án.
- *        - 🤖 [MÁY TÍNH ĐÃ PHẢN HỒI XONG TRONG Xs]: <nội dung> (VĨNH VIỄN, KHÔNG BAO GIỜ XÓA).
- *        - Đếm ngược 10s: 🧹 [ĐANG DỌN DẸP TIẾN TRÌNH TRONG VÒNG 10 GIÂY...] -> ✨ [ĐÃ DỌN DẸP THÀNH CÔNG!] -> tự xóa sau 2s.
+ * QuinloveRin Code - Fast Telegram Bridge v2.7 (.cjs)
+ * - TỰ ĐỘNG GỠ WEBHOOK CLOUD KHI MÁY TÍNH BẬT (CHUYỂN GIAO MƯỢT MÀ VỀ PC).
+ * - MÀU SẮC TRỰC QUAN CHO CÔNG CỤ (Diff Syntax Highlighting):
+ *   + 🟢 [TẠO FILE MỚI] (+ X dòng mã nguồn mới - Xanh lá)
+ *   + 🟠 [SỬA FILE] (+ X dòng thêm, - Y dòng sửa, ! Ghi đè - Cam)
+ *   + 🔴 [XÓA FILE / THƯ MỤC] (- Lệnh xóa - Đỏ)
+ *   + 📄 [ĐỌC FILE] (Kèm phạm vi dòng)
+ *   + ⚡ [MÁY TÍNH ĐANG THỰC HIỆN] (Chạy lệnh terminal)
+ * - PHẢN CHIẾU 100% TIẾN TRÌNH VÀO BOX CHAT ANTIGRAVITY PC:
+ *   + Pop-up nổi Toast trên màn hình máy tính (show_notification.ps1).
+ *   + Nạp tin nhắn vào box chat máy tính qua agentapi send-message.
+ *   + Đếm ngược 10s tự hủy tiến trình tạm thời, giữ câu trả lời vĩnh viễn.
  */
 
 const fs = require('fs');
@@ -56,10 +53,9 @@ const langServer = path.join(
 );
 
 console.log('========================================================');
-console.log(' Fast Telegram Bridge v2.6 (Live PC Antigravity Sync Bridge)');
+console.log(' Fast Telegram Bridge v2.7 (Color-Coded Diff & Auto-PC Reconnect)');
 console.log(' Bot Token:', botToken ? botToken.substring(0, 10) + '...' : 'NONE');
 console.log(' Conversation ID:', conversationId);
-console.log(' Sync Bridge:', syncBridgePath);
 console.log(' Transcript:', transcriptPath);
 console.log('========================================================');
 
@@ -281,7 +277,74 @@ async function runCountdownCleanup(chatId, threadId, msgIdsToDelete) {
     }
 }
 
-// --- SYNC BRIDGE DISPATCHER (CHUYỂN PROMPT TỚI ANTIGRAVITY PC) ---
+// --- COLOR-CODED TOOL CALL FORMATTER ---
+
+function formatToolCall(tc) {
+    const toolName = tc.name;
+    const args = tc.args || {};
+    const rawSummary = args.toolSummary ? args.toolSummary.replace(/^"|"$/g, '') : '';
+
+    let bubbleText = '';
+    let summary = rawSummary || `Thực thi ${toolName}`;
+
+    if (toolName === 'run_command') {
+        const cmd = args.CommandLine ? args.CommandLine.toString().trim() : '';
+        const safeCmd = escapeHtml(cmd.length > 200 ? cmd.substring(0, 200) + '... [dài]' : cmd);
+
+        if (/(Remove-Item|rm\s+|del\s+|rmdir|unlink)/i.test(cmd)) {
+            summary = rawSummary || 'Xóa file / thư mục';
+            bubbleText = `🔴 <b>[XÓA FILE / THƯ MỤC]</b>\n<pre><code class="language-diff">- ${safeCmd}</code></pre>`;
+        } else {
+            summary = rawSummary || 'Chạy lệnh terminal';
+            bubbleText = `⚡ <b>[MÁY TÍNH ĐANG THỰC HIỆN]</b>\n▶ <code>${escapeHtml(summary)}</code>\n<pre><code class="language-powershell">${safeCmd}</code></pre>`;
+        }
+    } else if (toolName === 'write_file') {
+        const rawPath = args.Path ? args.Path.toString().replace(/^"|"$/g, '') : 'file';
+        const fileName = path.basename(rawPath);
+        const isOverwrite = (args.Overwrite === true || args.Overwrite === 'true');
+        const isAppend = (args.Append === true || args.Append === 'true');
+        const contentLines = args.Content ? args.Content.toString().split(/\r?\n/).length : 0;
+        const fileExisted = fs.existsSync(rawPath);
+
+        if (isOverwrite || isAppend || fileExisted) {
+            summary = rawSummary || `Cập nhật file ${fileName}`;
+            bubbleText = `🟠 <b>[SỬA FILE]:</b> <code>${fileName}</code>\n<pre><code class="language-diff">+ ${contentLines} dòng thêm/ghi đè\n! Cập nhật nội dung mã nguồn</code></pre>`;
+        } else {
+            summary = rawSummary || `Tạo mới file ${fileName}`;
+            bubbleText = `🟢 <b>[TẠO FILE MỚI]:</b> <code>${fileName}</code>\n<pre><code class="language-diff">+ ${contentLines} dòng mã nguồn mới</code></pre>`;
+        }
+    } else if (toolName === 'edit_file') {
+        const rawPath = args.Path ? args.Path.toString().replace(/^"|"$/g, '') : 'file';
+        const fileName = path.basename(rawPath);
+        const linesRemoved = args.Target ? args.Target.toString().split(/\r?\n/).length : 1;
+        const linesAdded = args.Replacement ? args.Replacement.toString().split(/\r?\n/).length : 0;
+        summary = rawSummary || `Chỉnh sửa code ${fileName}`;
+        bubbleText = `🟠 <b>[SỬA FILE]:</b> <code>${fileName}</code>\n<pre><code class="language-diff">+ ${linesAdded} dòng thêm\n- ${linesRemoved} dòng sửa</code></pre>`;
+    } else if (toolName === 'read_file') {
+        const rawPath = args.Path ? args.Path.toString().replace(/^"|"$/g, '') : 'file';
+        const fileName = path.basename(rawPath);
+        const sLine = args.StartLine || '';
+        const eLine = args.EndLine || '';
+        let rangeInfo = '(Đọc toàn bộ file)';
+        if (sLine && eLine) rangeInfo = `(Dòng ${sLine} - ${eLine})`;
+        else if (sLine) rangeInfo = `(Từ dòng ${sLine})`;
+        else if (eLine) rangeInfo = `(Đến dòng ${eLine})`;
+        summary = rawSummary || `Đọc nội dung ${fileName}`;
+        bubbleText = `📄 <b>[ĐỌC FILE]:</b> <code>${fileName}</code> <i>${rangeInfo}</i>`;
+    } else if (toolName === 'manage_task') {
+        const action = args.Action || '';
+        const taskId = args.TaskId ? path.basename(args.TaskId) : '';
+        summary = rawSummary || `Quản lý tiến trình (${action})`;
+        bubbleText = `⚙️ <b>[TIẾN TRÌNH NGẦM]:</b> <code>${action} ${taskId}</code>`.trim();
+    } else {
+        summary = rawSummary || `Thực thi ${toolName}`;
+        bubbleText = `⚡ <b>[MÁY TÍNH ĐANG THỰC HIỆN]</b>\n▶ <code>${escapeHtml(summary)}</code>`;
+    }
+
+    return { summary, bubbleText };
+}
+
+// --- SYNC BRIDGE DISPATCHER ---
 
 function showScreenToast(title, msg) {
     if (fs.existsSync(notifScript)) {
@@ -351,7 +414,7 @@ let currentToolSummary = '';
 let typingInterval = null;
 let tempMsgIds = [];
 
-// --- TRANSCRIPT MIRROR WATCHER (THEO DÕI LIVE TỪ ANTIGRAVITY PC) ---
+// --- TRANSCRIPT MIRROR WATCHER ---
 
 let lastOffset = 0;
 if (fs.existsSync(transcriptPath)) {
@@ -381,7 +444,7 @@ async function processTranscript() {
         try {
             const entry = JSON.parse(line);
 
-            // Bắt Prompt nhập từ PC (nếu người dùng gõ trực tiếp trên máy tính)
+            // Bắt Prompt nhập từ PC
             if (entry.type === 'USER_INPUT' && entry.content) {
                 const uText = entry.content.toString().trim();
                 promptStartTime = Date.now();
@@ -413,19 +476,14 @@ async function processTranscript() {
                 }
             }
 
-            // Giai đoạn: Thực thi Tool Call (lệnh terminal, sửa file...)
+            // Giai đoạn: Tool Call (Phân loại màu sắc)
             if (entry.tool_calls && entry.tool_calls.length > 0) {
                 currentToolStartTime = Date.now();
                 const tc = entry.tool_calls[0];
-                const toolName = tc.name;
-                currentToolSummary = tc.args && tc.args.toolSummary ? tc.args.toolSummary.replace(/^"|"$/g, '') : `Thực thi ${toolName}`;
+                const { summary, bubbleText } = formatToolCall(tc);
+                currentToolSummary = summary;
 
-                const safeSummary = escapeHtml(currentToolSummary);
-                currentWorkingMsgId = await sendMsg(
-                    activeChatId,
-                    `⚡ <b>[MÁY TÍNH ĐANG THỰC HIỆN]</b>\n▶ <code>${safeSummary}</code>`,
-                    activeThreadId
-                );
+                currentWorkingMsgId = await sendMsg(activeChatId, bubbleText, activeThreadId);
                 if (currentWorkingMsgId) tempMsgIds.push(currentWorkingMsgId);
             }
 
@@ -489,7 +547,16 @@ setInterval(processTranscript, 100);
 let pollOffset = 0;
 
 async function pollUpdates() {
-    console.log('[Bridge Polling] Bắt đầu lắng nghe tin nhắn Telegram...');
+    console.log('[Bridge Polling] Khởi động vòng lặp lắng nghe Telegram...');
+
+    // 1. TỰ ĐỘNG GỠ WEBHOOK CLOUD ĐỂ MÁY TÍNH TIẾP QUẢN
+    try {
+        const delRes = await tgApi('deleteWebhook', { drop_pending_updates: false });
+        if (delRes.ok) {
+            console.log('[Bridge Polling] Đã gỡ Webhook Cloud, máy tính tiếp quản Long Polling thành công!');
+        }
+    } catch (e) {}
+
     const allowedList = [2029333412, -1004457846636];
     if (allowedChatId) allowedList.push(Number(allowedChatId));
 
@@ -514,7 +581,7 @@ async function pollUpdates() {
                     const threadId = msg.message_thread_id || null;
                     const fromId = msg.from ? msg.from.id : 0;
 
-                    // Bỏ qua tin nhắn từ Bot để chống lặp
+                    // Bỏ qua tin nhắn từ Bot
                     if (msg.from && msg.from.is_bot) continue;
 
                     const isAllowed = allowedList.includes(Number(chatId)) || allowedList.includes(Number(fromId));
@@ -540,7 +607,12 @@ async function pollUpdates() {
 
                     console.log(`[Telegram Nhận Tin] (${chatId}, thread=${threadId}): ${userText.substring(0, 50)}`);
 
-                    // Khởi tạo lượt xử lý
+                    // Xử lý lệnh nhanh /pc hoặc /local
+                    if (/^(?:\/pc|\/local|kết nối lại máy tính)$/i.test(userText)) {
+                        await sendMsg(chatId, `💻 <b>[MÁY TÍNH ĐANG TIẾP QUẢN TRỰC TIẾP]</b>\n──────────────────────\n🔗 <b>Mã đồng bộ:</b> <code>GM_6585_Mthu</code>\n🖥️ <b>Trạng thái:</b> SẴN SÀNG 100%\n✨ Toàn bộ lệnh gửi từ đây sẽ hiện trực tiếp trên màn hình máy tính!`, threadId);
+                        continue;
+                    }
+
                     promptStartTime = Date.now();
                     promptTextSaved = userText;
                     thinkingSent = false;
@@ -548,7 +620,7 @@ async function pollUpdates() {
                     const previewClean = userText.replace(/[<>]/g, '');
                     const previewSafe = escapeHtml(previewClean.length > 55 ? previewClean.substring(0, 55) + '...' : previewClean);
 
-                    // 1. Phản hồi tức thì bằng bóng đọc prompt (< 0.2s)
+                    // 1. Phản hồi tức thì bằng bóng đọc prompt
                     const promptLabel = isPhoto
                         ? '📷 <b>[ĐÃ NHẬN ẢNH VÀ ĐANG PHÂN TÍCH, VUI LÒNG ĐỢI (1s)...]</b>'
                         : '📖 <b>[ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (1s)...]</b>';
@@ -556,10 +628,10 @@ async function pollUpdates() {
                     const promptMid = await sendMsg(chatId, `${promptLabel}\n<blockquote><i>${previewSafe}</i></blockquote>`, threadId);
                     if (promptMid) tempMsgIds.push(promptMid);
 
-                    // 2. Bật Popup Toast trên màn hình PC của bro
+                    // 2. Bật Popup Toast trên màn hình PC
                     showScreenToast('📱 Telegram -> PC Sync', previewClean);
 
-                    // 3. Ghi vào file lịch sử sync_bridge.json
+                    // 3. Ghi vào sync_bridge.json
                     recordSyncMessage(userText);
 
                     // 4. Đẩy thẳng Prompt vào Box Chat Antigravity PC
