@@ -371,6 +371,12 @@ async function executePromptImmediately(chatId, threadId, promptText, previewTex
     isEditedPrompt = isEdit;
 
     forwardToAntigravity(promptText);
+    sendTyping(chatId, threadId);
+    if (!typingInterval) {
+        typingInterval = setInterval(() => {
+            sendTyping(chatId, threadId);
+        }, 3500);
+    }
 
     const promptLabel = isEdit
         ? '✏️ <b>[ĐÃ CẬP NHẬT PROMPT MỚI, KHỞI ĐỘNG LẠI (1s)...]</b>'
