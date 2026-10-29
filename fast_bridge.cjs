@@ -476,7 +476,8 @@ async function pollUpdates() {
                                 continue;
                             }
 
-                            if (currentPin === '6585') {
+                            if (lobby.verifyProjectPin(currentPin, cbThreadId || activeThreadId)) {
+                                const verifiedCode = currentPin;
                                 pinFailedCount = 0;
                                 currentPin = '';
                                 currentPhase = 'IDLE';
@@ -486,9 +487,9 @@ async function pollUpdates() {
                                 promptMsgId = null;
                                 activeThreadId = (cb.message && cb.message.message_thread_id) || activeThreadId || 1160;
                                 await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: '✅ Mã chính xác! Đang kết nối...' });
-                                const successText = `⚡ <b>[ĐÃ KẾT NỐI QUA MÃ 6585 THÀNH CÔNG!]</b>\n──────────────────────\n🖥️ <b>Cửa sổ Antigravity PC:</b> SẴN SÀNG 100%\n🚀 <b>Kênh làm việc:</b> Topic ${activeThreadId}\n🔗 <b>Mã định danh:</b> <code>GM_6585_Mthu</code>\n✨ Đã cưỡng chế kết nối máy tính thành công! Bro gửi yêu cầu code hoặc ảnh ngay bây giờ nhé!`;
+                                const successText = `⚡ <b>[ĐÃ KẾT NỐI QUA MÃ PIN ${verifiedCode} THÀNH CÔNG!]</b>\n──────────────────────\n🖥️ <b>Cửa sổ Antigravity PC:</b> SẴN SÀNG 100%\n🚀 <b>Kênh làm việc:</b> Topic ${activeThreadId}\n🔗 <b>Mã định danh:</b> <code>GM_${verifiedCode}_Mthu</code>\n✨ Đã cưỡng chế kết nối máy tính thành công! Bro gửi yêu cầu code hoặc ảnh ngay bây giờ nhé!`;
                                 await editMsg(chatId, cb.message.message_id, successText, 'HTML', { inline_keyboard: [] }, true);
-                                forwardToAntigravity(conversationId, `[LỆNH CƯỠNG CHẾ KẾT NỐI LẠI]: Người dùng đã nhập đúng mã 6585 qua bàn phím PIN. Đồng bộ tức thì với cửa sổ Antigravity PC.`);
+                                forwardToAntigravity(conversationId, `[LỆNH CƯỠNG CHẾ KẾT NỐI LẠI]: Người dùng đã nhập đúng mã PIN ${verifiedCode} qua bàn phím PIN. Đồng bộ tức thì với cửa sổ Antigravity PC.`);
                                 continue;
                             } else {
                                 pinFailedCount++;
@@ -676,22 +677,23 @@ async function pollUpdates() {
                     }
 
                     // Kiểm tra nếu đang chờ mã 4 số kết nối lại
-                    if ((waitingForPairCode && /^\d{4}$/.test(userText.trim())) || userText.trim() === '6585') {
+                    if ((waitingForPairCode && /^\d{4}$/.test(userText.trim())) || /^(?:2726|6585)$/.test(userText.trim())) {
                         const code = userText.trim();
-                        if (code === '6585') {
+                        if (lobby.verifyProjectPin(code, threadId)) {
                             waitingForPairCode = false;
                             isCloudStandby = false;
-                            forwardToAntigravity(conversationId, `[LỆNH CƯỠNG CHẾ KẾT NỐI LẠI]: Người dùng đã nhập đúng mã 6585 từ Telegram. Đồng bộ tức thì với cửa sổ Antigravity PC.`);
+                            forwardToAntigravity(conversationId, `[LỆNH CƯỠNG CHẾ KẾT NỐI LẠI]: Người dùng đã nhập đúng mã PIN ${code} từ Telegram. Đồng bộ tức thì với cửa sổ Antigravity PC.`);
                             await sendMsg(
                                 chatId,
-                                `⚡ <b>[ĐÃ KẾT NỐI QUA MÃ 6585 THÀNH CÔNG!]</b>\n──────────────────────\n🖥️ <b>Cửa sổ Antigravity PC:</b> SẴN SÀNG 100%\n🚀 <b>Kênh làm việc:</b> Topic ${threadId}\n✨ Cầu nối PC đã thức tỉnh hoàn toàn! Bro gửi yêu cầu code hoặc ảnh ngay bây giờ nhé!`,
+                                `⚡ <b>[ĐÃ KẾT NỐI QUA MÃ PIN ${code} THÀNH CÔNG!]</b>\n──────────────────────\n🖥️ <b>Cửa sổ Antigravity PC:</b> SẴN SÀNG 100%\n🚀 <b>Kênh làm việc:</b> Topic ${threadId || 'Lobby'}\n✨ Cầu nối PC đã thức tỉnh hoàn toàn! Bro gửi yêu cầu code hoặc ảnh ngay bây giờ nhé!`,
                                 threadId
                             );
                             continue;
                         } else {
+                            const expectedPin = lobby.getProjectPin(threadId);
                             await sendMsg(
                                 chatId,
-                                `❌ <b>[SAI MÃ ĐỒNG BỘ]</b>\nMã <code>${code}</code> không chính xác! Vui lòng nhập lại mã 4 số (Ví dụ: <code>6585</code>):`,
+                                `❌ <b>[SAI MÃ ĐỒNG BỘ]</b>\nMã <code>${code}</code> không chính xác! Vui lòng nhập lại mã 4 số (Mã dự án này: <code>${expectedPin}</code>):`,
                                 threadId
                             );
                             continue;
@@ -706,12 +708,12 @@ async function pollUpdates() {
                         if (!providedCode) {
                             currentPin = '';
                             pinFailedCount = 0;
-                            const initialScreen = `📟 <b>[BÀN PHÍM XÁC THỰC KẾT NỐI]</b>\n──────────────────────\nMàn hình: <code>${getPinDisplay('')}</code>\n<i>(Nhập mã 4 số rồi bấm ↵ Enter để kết nối với PC)</i>`;
+                            const initialScreen = `📟 <b>[BÀN PHÍM XÁC THỰC KẾT NỐI]</b>\n──────────────────────\nMàn hình: <code>${getPinDisplay('')}</code>\n<i>(Nhập mã PIN 4 số của dự án rồi bấm ↵ Enter để kết nối với PC)</i>`;
                             await sendMsg(chatId, initialScreen, threadId, 'HTML', getKeypadMarkup());
                             continue;
                         }
 
-                        if (providedCode === '6585' || /6585/i.test(providedCode)) {
+                        if (lobby.verifyProjectPin(providedCode, threadId)) {
                             waitingForPairCode = false;
                             currentPhase = 'IDLE';
                             isCloudStandby = false;
@@ -719,19 +721,20 @@ async function pollUpdates() {
                             tempMsgIds = [];
                             promptMsgId = null;
 
-                            forwardToAntigravity(conversationId, `[LỆNH CƯỠNG CHẾ KẾT NỐI LẠI]: Người dùng yêu cầu đồng bộ tức thì qua mã 6585. Cửa sổ Antigravity PC đã kết nối sẵn sàng 100%.`);
+                            forwardToAntigravity(conversationId, `[LỆNH CƯỠNG CHẾ KẾT NỐI LẠI]: Người dùng yêu cầu đồng bộ tức thì qua mã PIN ${providedCode}. Cửa sổ Antigravity PC đã kết nối sẵn sàng 100%.`);
 
                             await sendMsg(
                                 chatId,
-                                `⚡ <b>[ĐÃ CƯỠNG CHẾ KẾT NỐI LẠI THÀNH CÔNG!]</b>\n──────────────────────\n🖥️ <b>Cửa sổ Antigravity PC:</b> SẴN SÀNG 100%\n🚀 <b>Kênh làm việc:</b> Topic ${threadId}\n✨ Cầu nối PC đã thức tỉnh hoàn toàn! Mọi tin nhắn bro gửi tiếp theo sẽ được xử lý ngay lập tức!`,
+                                `⚡ <b>[ĐÃ CƯỠNG CHẾ KẾT NỐI LẠI THÀNH CÔNG!]</b>\n──────────────────────\n🖥️ <b>Cửa sổ Antigravity PC:</b> SẴN SÀNG 100%\n🚀 <b>Kênh làm việc:</b> Topic ${threadId || 'Lobby'}\n✨ Cầu nối PC đã thức tỉnh hoàn toàn! Mọi tin nhắn bro gửi tiếp theo sẽ được xử lý ngay lập tức!`,
                                 threadId
                             );
                             continue;
                         } else {
                             waitingForPairCode = true;
+                            const expectedPin = lobby.getProjectPin(threadId);
                             await sendMsg(
                                 chatId,
-                                `❌ <b>[MÃ 4 SỐ KHÔNG ĐÚNG]</b>\nMã <code>${providedCode}</code> không khớp. Bro hãy nhập lại mã 4 số chính xác (<code>6585</code>):`,
+                                `❌ <b>[MÃ 4 SỐ KHÔNG ĐÚNG]</b>\nMã <code>${providedCode}</code> không khớp. Bro hãy nhập lại mã 4 số chính xác (<code>${expectedPin}</code>):`,
                                 threadId
                             );
                             continue;
