@@ -800,4 +800,22 @@ async function pollUpdates() {
     }
 }
 
+// --- TỰ ĐỘNG BÀN GIAO CHO CLOUD 24/7 KHI TẮT MÁY / TẮT TIẾN TRÌNH ---
+let isShuttingDown = false;
+async function restoreCloudOnExit(reason) {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    console.log(`[Bridge Exit] Tiến trình kết thúc (${reason}), tự động chuyển giao Webhook cho Vercel Cloud 24/7...`);
+    try {
+        await tgApiRaw('setWebhook', { url: 'https://quiniumthucode.vercel.app/api/webhook' });
+        console.log('[Bridge Exit] Đã bàn giao Vercel Cloud thành công!');
+    } catch (e) {
+        console.error('[Bridge Exit Error]:', e.message);
+    }
+}
+
+process.on('SIGINT', async () => { await restoreCloudOnExit('SIGINT'); process.exit(0); });
+process.on('SIGTERM', async () => { await restoreCloudOnExit('SIGTERM'); process.exit(0); });
+process.on('beforeExit', async () => { await restoreCloudOnExit('beforeExit'); });
+
 pollUpdates();
