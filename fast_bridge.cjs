@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { execFile } = require('child_process');
+const { execFile, spawn } = require('child_process');
 
 const {
     botToken,
@@ -110,43 +110,42 @@ let pinFailedCount = 0;
 let waitingForPairCode = false;
 let waitingForEditQueueId = null;
 
-// --- LONG RESPONSE SENDER (OFFLOADED TO STANDALONE .BAT WORKER) ---
+// --- UNIVERSAL OUTBOX SENDER (OFFLOADED TO STANDALONE .BAT WORKER) ---
 
-async function sendLongResponse(chatId, answerText, totalSec, threadId = 1160) {
-    if (!answerText) return;
-    const targetThreadId = Number(threadId) || activeThreadId || 1160;
-
+function sendViaBat(payloadData) {
     const outboxDir = path.join(rootDir, 'outbox');
     if (!fs.existsSync(outboxDir)) {
         try { fs.mkdirSync(outboxDir, { recursive: true }); } catch (e) {}
     }
 
     const payloadFile = path.join(outboxDir, `send_${Date.now()}_${Math.random().toString(36).substring(7)}.json`);
-    const payloadData = {
+    try {
+        fs.writeFileSync(payloadFile, JSON.stringify(payloadData), 'utf8');
+        const batPath = path.join(rootDir, 'scripts', 'send_message.bat');
+        spawn(process.env.ComSpec || 'cmd.exe', ['/c', `call "${batPath}" "${payloadFile}"`], {
+            windowsHide: true,
+            windowsVerbatimArguments: true,
+            detached: true
+        }).unref();
+        return payloadFile;
+    } catch (e) {
+        console.error('[SendViaBat Error]:', e.message);
+        return null;
+    }
+}
+
+async function sendLongResponse(chatId, answerText, totalSec, threadId = 1160) {
+    if (!answerText) return;
+    const targetThreadId = Number(threadId) || activeThreadId || 1160;
+
+    sendViaBat({
+        action: 'response',
         chat_id: chatId,
         message_thread_id: targetThreadId,
         text: answerText,
         totalSec: totalSec
-    };
-
-    try {
-        fs.writeFileSync(payloadFile, JSON.stringify(payloadData), 'utf8');
-        const batPath = path.join(rootDir, 'scripts', 'send_message.bat');
-        if (fs.existsSync(batPath)) {
-            execFile(batPath, [payloadFile], { windowsHide: true }, (err) => {
-                if (err) console.error('[Send BAT Error]:', err.message);
-            });
-            console.log(`[Bridge] Đã bàn giao tin nhắn (${answerText.length} ký tự) cho send_message.bat xử lý ngầm!`);
-            return;
-        }
-    } catch (e) {
-        console.error('[Outbox Write Error]:', e.message);
-    }
-
-    // Fallback nếu không tìm thấy bat
-    const html = mdToTgHtml(answerText);
-    const headerTitle = `🤖 <b>[MÁY TÍNH ĐÃ PHẢN HỒI (Hoàn tất trong ${totalSec}s)]:</b>\n\n`;
-    await sendMsg(chatId, `${headerTitle}${html}`, targetThreadId);
+    });
+    console.log(`[Bridge] Đã bàn giao phản hồi (${answerText.length} ký tự) cho send_message.bat xử lý ngầm!`);
 }
 
 // --- SILENT CLEANUP (1 FAST API CALL) ---
@@ -329,14 +328,32 @@ async function executePromptImmediately(chatId, threadId, promptText, previewTex
     const initialText = `${promptLabel}\n<blockquote><i>${previewSafe}</i></blockquote>\n⏱️ <i>Đang đếm giây xử lý: 1s...</i>`;
 
     await clearAllCancelButtons(chatId);
-    promptMsgId = await sendMsg(chatId, initialText, threadId, 'HTML', cancelKeyboard);
-    if (promptMsgId) {
-        tempMsgIds.push(promptMsgId);
-        lastStatusText = initialText;
-        recordBubbleText(promptMsgId, initialText);
-        setActiveCancelMsgId(promptMsgId);
-        startTicker();
-    }
+
+    // Gửi bong bóng bắt thấy prompt qua file BAT độc lập theo đúng chỉ đạo của bro!
+    sendViaBat({
+        action: 'prompt_ack',
+        chat_id: chatId,
+        message_thread_id: threadId,
+        preview: previewText,
+        isEdit: isEdit,
+        isPhoto: isPhoto
+    });
+
+    // Sau khi BAT gửi xong (trong ~350ms), đồng bộ promptMsgId để ticker tiếp tục đếm giây
+    setTimeout(() => {
+        try {
+            const stateFile = path.join(rootDir, 'bridge_state.json');
+            if (fs.existsSync(stateFile)) {
+                const st = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+                if (st.lastPromptAckMsgId && (Date.now() - (st.lastPromptAckTime || 0) < 6000)) {
+                    promptMsgId = st.lastPromptAckMsgId;
+                    tempMsgIds.push(promptMsgId);
+                    setActiveCancelMsgId(promptMsgId);
+                    startTicker();
+                }
+            }
+        } catch (e) {}
+    }, 450);
 }
 
 // --- TRANSCRIPT WATCHER SETUP ---

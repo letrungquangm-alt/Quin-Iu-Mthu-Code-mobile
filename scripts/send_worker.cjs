@@ -30,6 +30,12 @@ if (fs.existsSync(syncBridgePath)) {
     } catch (e) {}
 }
 
+const cancelKeyboard = {
+    inline_keyboard: [
+        [{ text: '🛑 Dừng tác vụ (Cancel)', callback_data: 'cancel_task' }]
+    ]
+};
+
 function escapeHtml(str) {
     return (str || '')
         .replace(/&/g, '&amp;')
@@ -145,74 +151,163 @@ function chunkText(text, maxLen = 3500) {
     return chunks;
 }
 
+function updateBridgeState(stateUpdates) {
+    const stateFile = path.join(rootDir, 'bridge_state.json');
+    let currentState = {};
+    if (fs.existsSync(stateFile)) {
+        try {
+            currentState = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+        } catch (e) {}
+    }
+    Object.assign(currentState, stateUpdates);
+    try {
+        fs.writeFileSync(stateFile, JSON.stringify(currentState, null, 2), 'utf8');
+    } catch (e) {}
+}
+
 async function run() {
-    const inputArg = process.argv[2];
-    if (!inputArg) {
-        console.log('Usage: node send_worker.cjs <payload.json | message_text>');
+    const args = process.argv.slice(2);
+    if (args.length === 0) {
+        console.log('Usage: node send_worker.cjs <payload.json | --ack <preview> | --cancel | text>');
         process.exit(0);
     }
 
     let payload = null;
     let isFile = false;
+    const firstArg = args[0];
 
-    if (fs.existsSync(inputArg)) {
+    // Case 1: Đọc từ file JSON Outbox
+    if (fs.existsSync(firstArg) && firstArg.endsWith('.json')) {
         isFile = true;
         try {
-            const raw = fs.readFileSync(inputArg, 'utf8').replace(/^\uFEFF/, '');
+            const raw = fs.readFileSync(firstArg, 'utf8').replace(/^\uFEFF/, '');
             payload = JSON.parse(raw);
         } catch (e) {
             console.error('[SendWorker] Khong the doc file payload:', e.message);
             process.exit(1);
         }
-    } else {
+    }
+    // Case 2: Cờ --ack: Gửi bong bóng bắt thấy prompt ("Đã đọc prompt & đang xử lý")
+    else if (firstArg === '--ack') {
+        const preview = args[1] || 'Yêu cầu của bro';
+        const thread = args[2] ? Number(args[2]) : defaultThreadId;
         payload = {
+            action: 'prompt_ack',
+            chat_id: supergroupId,
+            message_thread_id: thread,
+            preview: preview,
+            isEdit: false,
+            isPhoto: false
+        };
+    }
+    // Case 3: Cờ --cancel: Gửi thông báo hủy tác vụ
+    else if (firstArg === '--cancel') {
+        const thread = args[1] ? Number(args[1]) : defaultThreadId;
+        payload = {
+            action: 'cancel',
+            chat_id: supergroupId,
+            message_thread_id: thread
+        };
+    }
+    // Case 4: Tin nhắn văn bản thuần
+    else {
+        payload = {
+            action: 'text',
             chat_id: supergroupId,
             message_thread_id: defaultThreadId,
-            text: inputArg,
-            totalSec: null
+            text: args.join(' ')
         };
     }
 
+    const action = payload.action || (payload.text ? 'response' : 'text');
     const chatId = payload.chat_id || supergroupId;
     const threadId = payload.message_thread_id || defaultThreadId;
-    const rawText = payload.text || '';
-    const totalSec = payload.totalSec;
 
-    if (!rawText.trim()) {
-        if (isFile) try { fs.unlinkSync(inputArg); } catch(e){}
-        process.exit(0);
+    // --- XỬ LÝ ACTION: PROMPT_ACK (BẮT THẤY PROMPT) ---
+    if (action === 'prompt_ack') {
+        const preview = payload.preview || '';
+        const isEdit = !!payload.isEdit;
+        const isPhoto = !!payload.isPhoto;
+
+        const promptLabel = isEdit
+            ? '✏️ <b>[ĐÃ CẬP NHẬT PROMPT MỚI]</b> • ⏱️ <code>1s</code>'
+            : (isPhoto
+                ? '📷 <b>[ĐÃ NHẬN ẢNH VÀ ĐANG PHÂN TÍCH]</b> • ⏱️ <code>1s</code>'
+                : '📖 <b>[ĐÃ ĐỌC PROMPT &amp; ĐANG XỬ LÝ]</b> • ⏱️ <code>1s</code>');
+
+        const previewClean = preview.replace(/[<>]/g, '');
+        const previewSafe = escapeHtml(previewClean.length > 55 ? previewClean.substring(0, 55) + '...' : previewClean);
+        const text = `${promptLabel}\n<blockquote><i>${previewSafe}</i></blockquote>\n⏱️ <i>Đang đếm giây xử lý: 1s...</i>`;
+
+        const res = await tgApi('sendMessage', {
+            chat_id: chatId,
+            message_thread_id: threadId,
+            text: text,
+            parse_mode: 'HTML',
+            disable_web_page_preview: true,
+            reply_markup: cancelKeyboard
+        });
+
+        if (res && res.ok && res.result) {
+            const msgId = res.result.message_id;
+            console.log(`[SendWorker PromptAck OK] Msg ID: ${msgId} tai Topic #${threadId}`);
+            updateBridgeState({
+                lastPromptAckMsgId: msgId,
+                lastPromptAckThreadId: threadId,
+                lastPromptAckTime: Date.now(),
+                previewText: preview
+            });
+        }
     }
-
-    const header = totalSec
-        ? `🤖 <b>[MÁY TÍNH ĐÃ PHẢN HỒI (Hoàn tất trong ${totalSec}s)]:</b>\n\n`
-        : '';
-
-    const chunks = chunkText(rawText, 3500);
-
-    for (let i = 0; i < chunks.length; i++) {
-        const html = mdToTgHtml(chunks[i]);
-        const chunkHeader = (i === 0)
-            ? header
-            : `<i>(Phần ${i + 1}/${chunks.length})</i>\n\n`;
-
+    // --- XỬ LÝ ACTION: CANCEL (HỦY TÁC VỤ) ---
+    else if (action === 'cancel') {
+        const cancelMsg = `🛑 <b>[ĐÃ HỦY TÁC VỤ THEO YÊU CẦU CỦA BRO!]</b>\n<i>Đã dừng tiến trình và dọn dẹp sạch sẽ.</i>`;
         await tgApi('sendMessage', {
             chat_id: chatId,
             message_thread_id: threadId,
-            text: `${chunkHeader}${html}`,
+            text: cancelMsg,
             parse_mode: 'HTML',
             disable_web_page_preview: true
         });
+        console.log(`[SendWorker Cancel OK] Tai Topic #${threadId}`);
+    }
+    // --- XỬ LÝ ACTION: RESPONSE HOẶC TEXT (PHẢN HỒI HOÀN TẤT / TIN NHẮN DÀI) ---
+    else {
+        const rawText = payload.text || '';
+        const totalSec = payload.totalSec;
 
-        if (i < chunks.length - 1) {
-            await new Promise(r => setTimeout(r, 200));
+        if (rawText.trim()) {
+            const header = totalSec
+                ? `🤖 <b>[MÁY TÍNH ĐÃ PHẢN HỒI (Hoàn tất trong ${totalSec}s)]:</b>\n\n`
+                : '';
+
+            const chunks = chunkText(rawText, 3500);
+
+            for (let i = 0; i < chunks.length; i++) {
+                const html = mdToTgHtml(chunks[i]);
+                const chunkHeader = (i === 0)
+                    ? header
+                    : `<i>(Phần ${i + 1}/${chunks.length})</i>\n\n`;
+
+                await tgApi('sendMessage', {
+                    chat_id: chatId,
+                    message_thread_id: threadId,
+                    text: `${chunkHeader}${html}`,
+                    parse_mode: 'HTML',
+                    disable_web_page_preview: true
+                });
+
+                if (i < chunks.length - 1) {
+                    await new Promise(r => setTimeout(r, 200));
+                }
+            }
+            console.log(`[SendWorker Response OK] Da gui ${chunks.length} phan toi Topic #${threadId}!`);
         }
     }
 
-    console.log(`[SendWorker OK] Da gui thanh cong ${chunks.length} phan toi Telegram #${threadId}!`);
-
     if (isFile) {
         try {
-            fs.unlinkSync(inputArg);
+            fs.unlinkSync(firstArg);
         } catch (e) {}
     }
 }
