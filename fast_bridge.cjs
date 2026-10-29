@@ -24,6 +24,16 @@ const {
 
 const { formatToolCall } = require('./lib/formatter.cjs');
 const { getPinDisplay, getKeypadMarkup } = require('./lib/numpad.cjs');
+const {
+    promptQueue,
+    getQueueButtons,
+    addPrompt,
+    removePrompt,
+    getPrompt,
+    getNextPrompt,
+    updatePrompt,
+    getQueueListMarkup
+} = require('./lib/queue.cjs');
 
 const rootDir = __dirname;
 const conversationId = '7f7131ce-dc72-490f-97bd-4a675f9dd0c7';
@@ -36,10 +46,11 @@ const notifScript = path.join(rootDir, 'show_notification.ps1');
 const syncBridgePath = path.join(rootDir, 'sync_bridge.json');
 
 console.log('========================================================');
-console.log(' Fast Modular Telegram Bridge v3.0 (Zero Lag & Strict 1-Cancel)');
+console.log(' Fast Modular Telegram Bridge v3.1 (Queue Engine & Reply Scan)');
+console.log(` Working Dir: ${rootDir}`);
 console.log(` Bot Token: ${botToken.substring(0, 10)}...`);
 console.log(` Conversation ID: ${conversationId}`);
-console.log(` Transcript: ${transcriptPath}`);
+console.log(` Language Server: ${langServer}`);
 console.log('========================================================');
 
 // --- DISPATCHERS ---
@@ -75,7 +86,7 @@ function recordSyncMessage(text) {
                 timestamp: new Date().toISOString(),
                 text: text
             });
-            if (br.messages.length > 20) br.messages = br.messages.slice(-20);
+            if (br.messages.length > 25) br.messages = br.messages.slice(-25);
             br.active = true;
             br.status = 'CONNECTED';
             br.conversationId = conversationId;
@@ -90,7 +101,7 @@ function forwardToAntigravity(text) {
             if (err) {
                 console.error('[Bridge IPC Error] Không thể chuyển tin nhắn tới Antigravity:', err.message);
             } else {
-                console.log('[Bridge IPC OK] Đã nạp tin nhắn vào Box Chat Antigravity PC:', text.substring(0, 50));
+                console.log('[Bridge IPC OK] Đã nạp tin nhắn vào Box Chat Antigravity PC:', text.substring(0, 60));
             }
         });
     } else {
@@ -133,6 +144,7 @@ let tempMsgIds = [];
 let currentPin = '';
 let pinFailedCount = 0;
 let waitingForPairCode = false;
+let waitingForEditQueueId = null;
 
 // --- LONG RESPONSE SENDER ---
 
@@ -346,6 +358,42 @@ async function handleCancelAction(source = 'button') {
     }
 }
 
+// --- START PROMPT EXECUTION HELPER ---
+
+async function executePromptImmediately(chatId, threadId, promptText, previewText, isEdit = false, isPhoto = false) {
+    isCanceled = false;
+    currentPhase = 'READING';
+    stopTicker();
+    promptStartTime = Date.now();
+    promptTextSaved = previewText;
+    isPhotoSaved = isPhoto;
+    isEditedPrompt = isEdit;
+
+    // Bắn sang Antigravity PC
+    forwardToAntigravity(promptText);
+
+    const promptLabel = isEdit
+        ? '✏️ <b>[ĐÃ CẬP NHẬT PROMPT MỚI, KHỞI ĐỘNG LẠI (1s)...]</b>'
+        : (isPhoto
+            ? '📷 <b>[ĐÃ NHẬN ẢNH VÀ ĐANG PHÂN TÍCH, VUI LÒNG ĐỢI (1s)...]</b>'
+            : '📖 <b>[ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (1s)...]</b>');
+
+    const previewClean = previewText.replace(/[<>]/g, '');
+    const previewSafe = escapeHtml(previewClean.length > 55 ? previewClean.substring(0, 55) + '...' : previewClean);
+    const initialText = `${promptLabel}\n<blockquote><i>${previewSafe}</i></blockquote>`;
+
+    // Gỡ sạch nút cancel cũ
+    await clearAllCancelButtons(chatId);
+    promptMsgId = await sendMsg(chatId, initialText, threadId, 'HTML', cancelKeyboard);
+    if (promptMsgId) {
+        tempMsgIds.push(promptMsgId);
+        lastStatusText = initialText;
+        recordBubbleText(promptMsgId, initialText);
+        setActiveCancelMsgId(promptMsgId);
+        startTicker();
+    }
+}
+
 // --- TRANSCRIPT MIRROR WATCHER ---
 
 let lastOffset = 0;
@@ -503,6 +551,21 @@ async function processTranscript() {
                 if (toClean.length > 0) {
                     runCountdownCleanup(activeChatId, activeThreadId, toClean);
                 }
+
+                // 🚀 KIỂM TRA VÀ CHẠY TIẾP PROMPT TRONG HÀNG ĐỢI (NẾU CÓ)
+                if (promptQueue.length > 0) {
+                    const nextItem = getNextPrompt();
+                    if (nextItem) {
+                        const remCount = promptQueue.length;
+                        const remNotice = remCount > 0 ? `\n<i>(Còn lại trong hàng chờ: ${remCount} prompt)</i>` : '';
+                        await sendMsg(
+                            activeChatId,
+                            `🚀 <b>[ĐANG THỰC THI PROMPT TIẾP THEO TỪ HÀNG ĐỢI]:</b>\n<blockquote><i>${escapeHtml(nextItem.preview)}</i></blockquote>${remNotice}`,
+                            activeThreadId
+                        );
+                        await executePromptImmediately(nextItem.chatId, nextItem.threadId, nextItem.text, nextItem.preview);
+                    }
+                }
             }
         } catch (e) {
             console.error('[Bridge Error] Lỗi parse dòng transcript:', e.message);
@@ -590,7 +653,7 @@ async function pollUpdates() {
                             continue;
                         }
 
-                        // D. XỬ LÝ NÚT ENTER (XÁC NHẬN MÃ)
+                        // D. XỬ LÝ NÚT ENTER (XÁC NHẬN MÃ PIN 6585)
                         if (cbData === 'pin_action_enter') {
                             if (currentPin.length < 4) {
                                 await tgApi('answerCallbackQuery', { callback_query_id: cb.id, text: 'Vui lòng nhập đủ 4 số trước khi Enter!' });
@@ -640,7 +703,6 @@ async function pollUpdates() {
                                 callback_query_id: cb.id,
                                 text: '🛑 Đang dừng tác vụ...'
                             });
-                            // Ngay lập tức gỡ bỏ nút trên chính tin nhắn vừa được bấm
                             if (cb.message && cb.message.message_id) {
                                 const msgText = cb.message.text ? escapeHtml(cb.message.text) : '🛑 Đang dừng tác vụ...';
                                 await editMsg(chatId, cb.message.message_id, msgText, 'HTML', { inline_keyboard: [] });
@@ -648,6 +710,77 @@ async function pollUpdates() {
                             await handleCancelAction('Inline Button');
                             continue;
                         }
+
+                        // F. XỬ LÝ HÀNG ĐỢI PROMPT: ƯU TIÊN CHẠY NGAY (SEND NOW)
+                        if (cbData.startsWith('q_now:')) {
+                            const qId = cbData.replace('q_now:', '');
+                            const qItem = removePrompt(qId);
+                            if (qItem) {
+                                await tgApi('answerCallbackQuery', { callback_query_id: cb.id, text: '⚡ Ưu tiên chạy prompt này!' });
+                                await handleCancelAction('Priority Send Now');
+                                await new Promise(r => setTimeout(r, 600));
+                                await sendMsg(chatId, `⚡ <b>[ĐÃ ƯU TIÊN THỰC THI NGAY TỪ HÀNG ĐỢI]:</b>\n<blockquote><i>${escapeHtml(qItem.preview)}</i></blockquote>`, activeThreadId);
+                                await executePromptImmediately(qItem.chatId, qItem.threadId, qItem.text, qItem.preview);
+                            } else {
+                                await tgApi('answerCallbackQuery', { callback_query_id: cb.id, text: 'Không tìm thấy prompt này trong hàng đợi!' });
+                            }
+                            continue;
+                        }
+
+                        // G. XỬ LÝ HÀNG ĐỢI PROMPT: SỬA PROMPT ĐANG CHỜ
+                        if (cbData.startsWith('q_edit:')) {
+                            const qId = cbData.replace('q_edit:', '');
+                            const qItem = getPrompt(qId);
+                            if (qItem) {
+                                waitingForEditQueueId = qId;
+                                await tgApi('answerCallbackQuery', { callback_query_id: cb.id, text: 'Vui lòng gửi tin nhắn mới!' });
+                                await sendMsg(
+                                    chatId,
+                                    `✏️ <b>[CHẾ ĐỘ SỬA PROMPT TRONG HÀNG ĐỢI]</b>\nPrompt hiện tại: <blockquote><i>${escapeHtml(qItem.preview)}</i></blockquote>\n<i>Bro hãy gửi tin nhắn tiếp theo, hệ thống sẽ tự động cập nhật nội dung mới cho prompt này!</i>`,
+                                    activeThreadId
+                                );
+                            } else {
+                                await tgApi('answerCallbackQuery', { callback_query_id: cb.id, text: 'Prompt không còn trong hàng đợi!' });
+                            }
+                            continue;
+                        }
+
+                        // H. XỬ LÝ HÀNG ĐỢI PROMPT: XÓA PROMPT NÀY
+                        if (cbData.startsWith('q_del:')) {
+                            const qId = cbData.replace('q_del:', '');
+                            const deleted = removePrompt(qId);
+                            await tgApi('answerCallbackQuery', { callback_query_id: cb.id, text: '🗑️ Đã xóa prompt khỏi hàng đợi!' });
+                            if (deleted) {
+                                await editMsg(
+                                    chatId,
+                                    cb.message.message_id,
+                                    `🗑️ <b>[ĐÃ XÓA PROMPT KHỎI HÀNG ĐỢI]</b>\n<blockquote><i>${escapeHtml(deleted.preview)}</i></blockquote>\n<i>(Còn lại trong hàng chờ: ${promptQueue.length} prompt)</i>`,
+                                    'HTML',
+                                    { inline_keyboard: [] }
+                                );
+                            }
+                            continue;
+                        }
+
+                        // I. XỬ LÝ HÀNG ĐỢI PROMPT: GỬI THÊM VÀO HÀNG CHỜ
+                        if (cbData === 'q_add') {
+                            await tgApi('answerCallbackQuery', { callback_query_id: cb.id, text: 'Bro cứ gửi tiếp prompt vào chat nhé!' });
+                            continue;
+                        }
+
+                        // J. XỬ LÝ HÀNG ĐỢI PROMPT: DANH SÁCH PROMPT TRONG HÀNG CHỜ
+                        if (cbData === 'q_list') {
+                            await tgApi('answerCallbackQuery', { callback_query_id: cb.id, text: `Hàng đợi có ${promptQueue.length} prompt` });
+                            await sendMsg(
+                                chatId,
+                                `📋 <b>[DANH SÁCH PROMPT TRONG HÀNG CHỜ (${promptQueue.length})]:</b>\n<i>Bro có thể bấm chạy ngay hoặc xóa bất kỳ prompt nào:</i>`,
+                                activeThreadId,
+                                'HTML',
+                                getQueueListMarkup()
+                            );
+                            continue;
+                        }
+
                         continue;
                     }
 
@@ -690,9 +823,52 @@ async function pollUpdates() {
 
                     if (!userText && !isPhoto) continue;
 
+                    // 👉 XỬ LÝ NẾU ĐANG CHỜ SỬA PROMPT TRONG HÀNG ĐỢI
+                    if (waitingForEditQueueId) {
+                        const updated = updatePrompt(waitingForEditQueueId, userText);
+                        const editedId = waitingForEditQueueId;
+                        waitingForEditQueueId = null;
+                        if (updated) {
+                            await sendMsg(
+                                chatId,
+                                `✅ <b>[ĐÃ CẬP NHẬT PROMPT MỚI CHO HÀNG ĐỢI]</b>\nNội dung mới: <blockquote><i>${escapeHtml(updated.preview)}</i></blockquote>`,
+                                activeThreadId,
+                                'HTML',
+                                getQueueButtons(editedId)
+                            );
+                        }
+                        continue;
+                    }
+
                     // Xử lý lệnh hủy nhanh
                     if (/^(?:\/cancel|stop|hủy|dừng|dừng lại)$/i.test(userText)) {
                         await handleCancelAction(isEdit ? 'Edit message to STOP' : 'Text STOP');
+                        continue;
+                    }
+
+                    // 👉 LỆNH QUÉT LỊCH SỬ TIN NHẮN TRONG BOX CHAT (/quet, /scan, /history)
+                    if (/^(?:\/quet|\/scan|\/history|\/tinnhan)$/i.test(userText.trim())) {
+                        let historyText = `📋 <b>[LỊCH SỬ TIN NHẮN GẦN ĐÂY TRONG BOX CHAT]:</b>\n──────────────────────\n`;
+                        if (fs.existsSync(syncBridgePath)) {
+                            try {
+                                const raw = fs.readFileSync(syncBridgePath, 'utf8').replace(/^\uFEFF/, '');
+                                const br = JSON.parse(raw);
+                                const msgs = (br.messages || []).slice(-8);
+                                if (msgs.length === 0) {
+                                    historyText += `<i>Chưa có tin nhắn nào được ghi nhận.</i>`;
+                                } else {
+                                    msgs.forEach((m, idx) => {
+                                        const time = m.timestamp ? new Date(m.timestamp).toLocaleTimeString('vi-VN') : '';
+                                        const sender = m.sender === 'phone' ? '📱 Bro' : '🖥️ PC';
+                                        historyText += `<b>${idx + 1}. [${time}] ${sender}:</b> <code>${escapeHtml(m.text.substring(0, 100))}</code>\n`;
+                                    });
+                                }
+                            } catch (e) {
+                                historyText += `<i>Không thể đọc sync_bridge.json</i>`;
+                            }
+                        }
+                        historyText += `\n<i>👉 Bro có thể reply bất kỳ tin nhắn nào và gửi chỉ thị, tôi sẽ tự kiểm tra đúng vị trí đó!</i>`;
+                        await sendMsg(chatId, historyText, activeThreadId, 'HTML');
                         continue;
                     }
 
@@ -777,61 +953,45 @@ async function pollUpdates() {
                         localPhotoPath = await downloadTelegramPhoto(photoFileId, targetPhoto);
                     }
 
-                    const forwardPrompt = localPhotoPath
-                        ? `[Điện thoại gửi ảnh]: ${userText} (Đã tải ảnh về máy tại: ${localPhotoPath})`
-                        : (isEdit ? `[Điện thoại sửa prompt thành]: ${userText}` : `[Điện thoại gửi]: ${userText}`);
+                    // 👉 TRÍCH XUẤT NGỮ CẢNH TIN NHẮN REPLY (NẾU BRO ĐANG REPLY TIN NHẮN NÀO ĐÓ)
+                    let replyContext = '';
+                    if (msg.reply_to_message) {
+                        const rm = msg.reply_to_message;
+                        const rSender = rm.from ? (rm.from.first_name || 'Bot') : 'Bot';
+                        const rText = rm.text || rm.caption || '[Đoạn mã / Hình ảnh / Tin nhắn hệ thống]';
+                        replyContext = `[NGƯỜI DÙNG REPLY TIN NHẮN CỦA ${rSender} (#${rm.message_id})]:\n"""\n${rText.substring(0, 500)}\n"""\n↳ `;
+                        console.log(`[Bridge Reply Detection] Trích xuất tin nhắn reply (#${rm.message_id}): ${rText.substring(0, 50)}`);
+                    }
 
-                    // 👉 1. BẮN PROMPT SANG ANTIGRAVITY PC NGAY LẬP TỨC (SIÊU TỐC 1MS)
-                    forwardToAntigravity(forwardPrompt);
-                    console.log(`[Bridge Dispatch OK] Đã nạp prompt sang PC: ${userText.substring(0, 50)}`);
+                    const forwardPrompt = localPhotoPath
+                        ? `${replyContext}[Điện thoại gửi ảnh]: ${userText} (Đã tải ảnh về máy tại: ${localPhotoPath})`
+                        : (isEdit ? `${replyContext}[Điện thoại sửa prompt thành]: ${userText}` : `${replyContext}[Điện thoại gửi]: ${userText}`);
 
                     const previewClean = userText.replace(/[<>]/g, '');
                     const previewSafe = escapeHtml(previewClean.length > 55 ? previewClean.substring(0, 55) + '...' : previewClean);
                     showScreenToast(isEdit ? '✏️ Telegram -> Prompt Sửa' : '📱 Telegram -> PC Sync', previewClean);
                     recordSyncMessage(isEdit ? `[Sửa tin]: ${userText}` : userText);
 
-                    // 👉 2. NẾU MÁY TÍNH ĐANG BẬN CHẠY TÁC VỤ KHÁC: BÁO RÕ RÀNG VÀO HÀNG ĐỢI
+                    // 👉 NẾU MÁY TÍNH ĐANG BẬN: ĐƯA VÀO HÀNG ĐỢI PROMPT KÈM BỘ NÚT ĐIỀU KHIỂN (4 HOẶC 5 NÚT)
                     if (currentPhase !== 'IDLE' && currentPhase !== 'CANCELED') {
-                        const queueNotice = `📥 <b>[ĐÃ NẠP VÀO HÀNG ĐỢI PC]</b>\n<blockquote><i>${previewSafe}</i></blockquote>\n<i>Máy tính đang xử lý tác vụ trước đó. Prompt mới của bro đã được nạp vào hàng đợi và PC sẽ thực thi tiếp nối ngay!</i>`;
-                        await sendMsg(chatId, queueNotice, activeThreadId, 'HTML');
+                        const qId = 'q_' + Date.now();
+                        addPrompt({
+                            id: qId,
+                            text: forwardPrompt,
+                            preview: userText,
+                            chatId: chatId,
+                            threadId: activeThreadId,
+                            timestamp: Date.now()
+                        });
+
+                        const qNotice = `📥 <b>[ĐÃ NẠP VÀO HÀNG ĐỢI PC]</b>\n<blockquote><i>${previewSafe}</i></blockquote>\n<i>Máy tính đang xử lý tác vụ trước đó. Prompt này đã được xếp vị trí <b>#${promptQueue.length}</b> trong hàng chờ!</i>`;
+                        await sendMsg(chatId, qNotice, activeThreadId, 'HTML', getQueueButtons(qId));
+                        console.log(`[Bridge Queue] Đã nạp prompt vào hàng đợi (#${promptQueue.length}): ${userText.substring(0, 40)}`);
                         continue;
                     }
 
-                    // 👉 3. NẾU MÁY TÍNH ĐANG IDLE: BẬT TIẾN TRÌNH MỚI
-                    isCanceled = false;
-                    currentPhase = 'READING';
-                    stopTicker();
-                    promptStartTime = Date.now();
-                    promptTextSaved = userText;
-                    isPhotoSaved = isPhoto;
-                    isEditedPrompt = isEdit;
-
-                    const promptLabel = isEdit
-                        ? '✏️ <b>[ĐÃ CẬP NHẬT PROMPT MỚI, KHỞI ĐỘNG LẠI (1s)...]</b>'
-                        : (isPhoto
-                            ? '📷 <b>[ĐÃ NHẬN ẢNH VÀ ĐANG PHÂN TÍCH, VUI LÒNG ĐỢI (1s)...]</b>'
-                            : '📖 <b>[ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (1s)...]</b>');
-
-                    const initialText = `${promptLabel}\n<blockquote><i>${previewSafe}</i></blockquote>`;
-
-                    if (isEdit && promptMsgId) {
-                        await editMsg(chatId, promptMsgId, initialText, 'HTML', cancelKeyboard);
-                        lastStatusText = initialText;
-                        recordBubbleText(promptMsgId, initialText);
-                        setActiveCancelMsgId(promptMsgId);
-                        startTicker();
-                    } else {
-                        // Gỡ sạch mọi nút cancel cũ trước khi tạo tin nhắn mới
-                        await clearAllCancelButtons(chatId);
-                        promptMsgId = await sendMsg(chatId, initialText, activeThreadId, 'HTML', cancelKeyboard);
-                        if (promptMsgId) {
-                            tempMsgIds.push(promptMsgId);
-                            lastStatusText = initialText;
-                            recordBubbleText(promptMsgId, initialText);
-                            setActiveCancelMsgId(promptMsgId);
-                            startTicker();
-                        }
-                    }
+                    // 👉 NẾU MÁY TÍNH ĐANG IDLE: THỰC THI NGAY LẬP TỨC
+                    await executePromptImmediately(chatId, activeThreadId, forwardPrompt, userText, isEdit, isPhoto);
                 }
             }
         } catch (e) {
