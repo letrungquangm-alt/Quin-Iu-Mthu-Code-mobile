@@ -163,7 +163,13 @@ function Edit-TgMessage {
     try {
         Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($jsonBody)) -TimeoutSec 5 | Out-Null
     } catch {
-        if ($parseMode) {
+        $err = $_.Exception.Message
+        if ($err -match "429" -or $err -match "Too Many Requests") {
+            Start-Sleep -Seconds 3
+            try {
+                Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($jsonBody)) -TimeoutSec 10 | Out-Null
+            } catch {}
+        } elseif ($parseMode) {
             try {
                 $bodyObj.Remove("parse_mode")
                 $plainBody = $bodyObj | ConvertTo-Json -Compress
@@ -200,8 +206,13 @@ function Finish-PromptReadingStatus {
     if (Test-Path $syncBridgePath) {
         try {
             $br = Get-Content $syncBridgePath -Raw -Encoding UTF8 | ConvertFrom-Json
-            if ($br.promptReadingMsgId) {
-                Delete-TgMessage -messageId ([int]$br.promptReadingMsgId)
+            if ($br.promptReadingMsgId -and $br.promptReadingStart) {
+                $pStart = [DateTime]::Parse($br.promptReadingStart)
+                $readSec = [math]::Max(1, [int]([DateTime]::Now - $pStart).TotalSeconds)
+                $pPrev = if ($br.promptReadingPreview) { [System.Net.WebUtility]::HtmlEncode($br.promptReadingPreview) } else { "" }
+                $finishLabel = if ($pPrev -like "*[Ảnh]*") { "📷 <b>[ĐÃ PHÂN TÍCH XONG ẢNH - ${readSec}s]</b>" } else { "📖 <b>[ĐÃ ĐỌC XONG PROMPT - ${readSec}s]</b>" }
+                Edit-TgMessage -messageId ([int]$br.promptReadingMsgId) -text "$finishLabel`n<blockquote expandable><i>`"$pPrev`"</i></blockquote>"
+                
                 $br.promptReadingMsgId = $null
                 $br.promptReadingStart = $null
                 $br.promptReadingPreview = $null
@@ -527,6 +538,12 @@ while ($true) {
                                     Write-Host "[MIRROR] Output captured" -ForegroundColor DarkGreen
                                     $mid = Send-TgLiveStatus -text $outMsg
                                     if ($mid) { $tempWorkingMsgIds.Add($mid) }
+
+                                    # Bắt đầu đếm giây cho khoảng lặng tiếp theo
+                                    $global:planningTrackerStart = [DateTime]::Now
+                                    $global:lastPlanningSec = 1
+                                    $global:planningTrackerMsgId = Send-TgLiveStatus -text "🧠 <b>[AI ĐANG XỬ LÝ BƯỚC TIẾP THEO (1s)...]</b>"
+                                    if ($global:planningTrackerMsgId) { $tempWorkingMsgIds.Add($global:planningTrackerMsgId) }
                                 }
                             }
                         }

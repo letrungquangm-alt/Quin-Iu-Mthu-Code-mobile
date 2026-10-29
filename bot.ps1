@@ -1946,7 +1946,7 @@ while ($true) {
                     $global:promptReadingPreview = if ($hasCaption) { "[Ảnh] $userCaption" } else { "[Ảnh] Phân tích hình ảnh" }
                     $global:lastReadingSec = 1
                     $safeCaption = [System.Net.WebUtility]::HtmlEncode($userCaption)
-                    $global:promptReadingMsgId = Send-TelegramMessage -chatId $chatId -text "📷 <b>[ĐÃ NHẬN ẢNH - ĐANG TẢI & PHÂN TÍCH (1s)...]</b>`n<blockquote expandable><i>`"$safeCaption`"</i></blockquote>"
+                    $global:promptReadingMsgId = Send-TelegramMessage -chatId $chatId -text "📷 <b>[ĐÃ NHẬN ẢNH - ĐANG TẢI & PHÂN TÍCH (1s)...]</b>`n<blockquote expandable><i>`"$safeCaption`"</i></blockquote>" -messageThreadId $threadId
 
                     # 2. Tải ảnh từ Telegram API về máy tính trong nền
                     $uploadDir = Join-Path $currentProjectPath "uploads"
@@ -1984,6 +1984,9 @@ while ($true) {
                                 $br | Add-Member -NotePropertyName "promptReadingMsgId" -NotePropertyValue $global:promptReadingMsgId -Force
                                 $br | Add-Member -NotePropertyName "promptReadingStart" -NotePropertyValue ([DateTime]::Now.ToString("o")) -Force
                                 $br | Add-Member -NotePropertyName "promptReadingPreview" -NotePropertyValue "[Ảnh] $userCaption" -Force
+                                $br | Add-Member -NotePropertyName "activeChatId" -NotePropertyValue $chatId -Force
+                                $br | Add-Member -NotePropertyName "activeThreadId" -NotePropertyValue $threadId -Force
+                                $br | Add-Member -NotePropertyName "isWorking" -NotePropertyValue $true -Force
                                 $br | ConvertTo-Json -Depth 5 | Set-Content $syncBridgePath -Encoding UTF8
                             } catch {}
                         }
