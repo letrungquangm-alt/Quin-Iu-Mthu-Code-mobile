@@ -309,7 +309,7 @@ export default async function handler(req, res) {
         }
 
         // 1. Chuyển quyền về máy tính (/pc hoặc /local)
-        if (msg.text === '/pc' || msg.text === '/local' || msg.text === '/ketnoilai' || msg.text === '/reconnect') {
+        if (msg.text === '/pc' || msg.text === '/local' || msg.text === '/ketnoilai' || msg.text === '/reconnect' || msg.text === '6585' || /^\/ketnoilai\s+6585$/i.test(msg.text)) {
             await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/deleteWebhook`);
             await sendTelegramMessage(chatId, '💻 <b>[ĐÃ BÀN GIAO CHO MÁY TÍNH]</b>\nĐã gỡ Webhook Cloud! Máy tính của bro (nếu đang bật) sẽ tiếp nhận tin nhắn trực tiếp qua Long Polling.');
             return res.status(200).json({ ok: true });

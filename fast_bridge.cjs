@@ -348,10 +348,10 @@ function formatToolCall(tc) {
 
         if (isOverwrite || isAppend || fileExisted) {
             summary = rawSummary || `Cập nhật file ${fileName}`;
-            bubbleText = `🟠 <b>[SỬA FILE]:</b> <code>${fileName}</code>\n<pre><code class="language-diff">+ ${contentLines} dòng thêm mới\n- Ghi đè thay thế nội dung cũ</code></pre>`;
+            bubbleText = `🟠 <b>[SỬA FILE]:</b> <code>${fileName}</code>\n<pre><code class="language-diff">--- a/${fileName}\n- Ghi đè thay thế nội dung cũ\n+++ b/${fileName}\n+ ${contentLines} dòng thêm mới</code></pre>`;
         } else {
             summary = rawSummary || `Tạo mới file ${fileName}`;
-            bubbleText = `🟢 <b>[TẠO FILE MỚI]:</b> <code>${fileName}</code>\n<pre><code class="language-diff">+ ${contentLines} dòng mã nguồn mới</code></pre>`;
+            bubbleText = `🟢 <b>[TẠO FILE MỚI]:</b> <code>${fileName}</code>\n<pre><code class="language-diff">+++ b/${fileName}\n+ ${contentLines} dòng mã nguồn mới</code></pre>`;
         }
     } else if (toolName === 'edit_file') {
         const rawPath = args.Path ? args.Path.toString().replace(/^"|"$/g, '') : 'file';
@@ -359,7 +359,7 @@ function formatToolCall(tc) {
         const linesRemoved = args.Target ? args.Target.toString().split(/\r?\n/).length : 1;
         const linesAdded = args.Replacement ? args.Replacement.toString().split(/\r?\n/).length : 0;
         summary = rawSummary || `Chỉnh sửa code ${fileName}`;
-        bubbleText = `🟠 <b>[SỬA FILE]:</b> <code>${fileName}</code>\n<pre><code class="language-diff">+ ${linesAdded} dòng thêm\n- ${linesRemoved} dòng đã xóa</code></pre>`;
+        bubbleText = `🟠 <b>[SỬA FILE]:</b> <code>${fileName}</code>\n<pre><code class="language-diff">--- a/${fileName}\n- ${linesRemoved} dòng đã xóa\n+++ b/${fileName}\n+ ${linesAdded} dòng thêm</code></pre>`;
     } else if (toolName === 'read_file') {
         const rawPath = args.Path ? args.Path.toString().replace(/^"|"$/g, '') : 'file';
         const fileName = path.basename(rawPath);
@@ -478,6 +478,32 @@ let currentToolSummary = '';
 let currentToolBubbleText = '';
 let typingInterval = null;
 let tempMsgIds = [];
+let currentCancelMsgId = null;
+let lastBubbleTexts = {};
+let waitingForPairCode = false;
+
+async function moveCancelButtonTo(chatId, newMsgId, newText, threadId = 315) {
+    if (currentCancelMsgId && currentCancelMsgId !== newMsgId) {
+        const prevText = lastBubbleTexts[currentCancelMsgId];
+        if (prevText) {
+            await editMsg(chatId, currentCancelMsgId, prevText, 'HTML', { inline_keyboard: [] });
+        }
+    }
+    currentCancelMsgId = newMsgId;
+    if (newMsgId && newText) {
+        lastBubbleTexts[newMsgId] = newText;
+    }
+}
+
+async function removeAllCancelButtons(chatId) {
+    if (currentCancelMsgId) {
+        const prevText = lastBubbleTexts[currentCancelMsgId];
+        if (prevText) {
+            await editMsg(chatId, currentCancelMsgId, prevText, 'HTML', { inline_keyboard: [] });
+        }
+        currentCancelMsgId = null;
+    }
+}
 
 // --- LIVE TICKING STOPWATCH (EVERY 2.0 SECONDS - CHỐNG NGHẼN 429) ---
 
@@ -509,8 +535,10 @@ async function updateStatusBubble() {
 
     isUpdatingStatus = true;
     try {
-        await editMsg(activeChatId, promptMsgId, text, 'HTML', cancelKeyboard);
+        const kb = (currentCancelMsgId === promptMsgId ? cancelKeyboard : { inline_keyboard: [] });
+        await editMsg(activeChatId, promptMsgId, text, 'HTML', kb);
         lastStatusText = text;
+        lastBubbleTexts[promptMsgId] = text;
     } catch (e) {
         // Ignored
     } finally {
@@ -620,6 +648,7 @@ async function processTranscript() {
                     if (promptMsgId) {
                         tempMsgIds.push(promptMsgId);
                         lastStatusText = initialText;
+                        await moveCancelButtonTo(activeChatId, promptMsgId, initialText, activeThreadId);
                         startTicker();
                     }
                 }
@@ -639,6 +668,7 @@ async function processTranscript() {
                         if (promptMsgId) {
                             tempMsgIds.push(promptMsgId);
                             lastStatusText = text;
+                            await moveCancelButtonTo(activeChatId, promptMsgId, text, activeThreadId);
                         }
                     } else {
                         await updateStatusBubble();
@@ -658,8 +688,11 @@ async function processTranscript() {
                     console.log(`[Bridge Tool Call] ${summary}`);
 
                     if (bubbleText) {
-                        currentWorkingMsgId = await sendMsg(activeChatId, bubbleText, activeThreadId);
-                        if (currentWorkingMsgId) tempMsgIds.push(currentWorkingMsgId);
+                        currentWorkingMsgId = await sendMsg(activeChatId, bubbleText, activeThreadId, 'HTML', cancelKeyboard);
+                        if (currentWorkingMsgId) {
+                            tempMsgIds.push(currentWorkingMsgId);
+                            await moveCancelButtonTo(activeChatId, currentWorkingMsgId, bubbleText, activeThreadId);
+                        }
                     }
                 }
             }
@@ -674,10 +707,13 @@ async function processTranscript() {
                     const finishedBubble = currentToolBubbleText
                         ? `${currentToolBubbleText}\n<i>↳ ✅ Hoàn tất trong ${wSec}s</i>`
                         : `✅ <b>[ĐÃ HOÀN TẤT TRONG ${wSec}s]</b>: <code>${safeTask}</code>`;
+                    lastBubbleTexts[currentWorkingMsgId] = finishedBubble;
                     await editMsg(
                         activeChatId,
                         currentWorkingMsgId,
-                        finishedBubble
+                        finishedBubble,
+                        'HTML',
+                        { inline_keyboard: [] }
                     );
                     currentWorkingMsgId = null;
                     currentToolBubbleText = '';
@@ -685,7 +721,10 @@ async function processTranscript() {
 
                 currentPhase = 'GENERATING';
                 startTicker();
-                await updateStatusBubble();
+                if (promptMsgId) {
+                    await moveCancelButtonTo(activeChatId, promptMsgId, lastStatusText, activeThreadId);
+                    await updateStatusBubble();
+                }
 
                 sendTyping(activeChatId, activeThreadId);
                 if (!typingInterval) {
@@ -710,6 +749,7 @@ async function processTranscript() {
 
                 const totalSec = promptStartTime ? Math.max(1, Math.round((Date.now() - promptStartTime) / 1000)) : 1;
                 console.log('[Bridge] Gửi câu trả lời hoàn chỉnh từ PC tới Telegram...');
+                await removeAllCancelButtons(activeChatId);
                 await sendLongResponse(activeChatId, answer, totalSec, activeThreadId);
 
                 const toClean = [...tempMsgIds];
@@ -831,28 +871,74 @@ async function pollUpdates() {
                         continue;
                     }
 
-                    // Xử lý lệnh cưỡng chế kết nối lại (/ketnoilai, /pc, /local)
-                    if (/^(?:\/ketnoilai|\/reconnect|\/pc|\/local|kết nối lại|kết nối lại máy tính)$/i.test(userText)) {
-                        console.log(`[Bridge Reconnect] Nhận lệnh cưỡng chế kết nối lại từ Telegram...`);
-                        currentPhase = 'IDLE';
-                        stopTicker();
-                        if (typingInterval) {
-                            clearInterval(typingInterval);
-                            typingInterval = null;
+                    // 1. Kiểm tra nếu đang chờ mã 4 số kết nối lại
+                    if (waitingForPairCode && (/^\d{4}$/.test(userText.trim()) || /6585/i.test(userText))) {
+                        const code = userText.trim();
+                        if (code === '6585' || /6585/i.test(code)) {
+                            waitingForPairCode = false;
+                            console.log(`[Bridge Pair] Đã xác thực thành công mã 4 số: 6585`);
+                            forwardToAntigravity(`[LỆNH CƯỠNG CHẾ KẾT NỐI LẠI]: Người dùng đã nhập đúng mã 6585 từ Telegram. Đồng bộ tức thì với cửa sổ Antigravity PC.`);
+                            await sendMsg(
+                                chatId,
+                                `⚡ <b>[ĐÃ KẾT NỐI QUA MÃ 6585 THÀNH CÔNG!]</b>\n──────────────────────\n🖥️ <b>Cửa sổ Antigravity PC:</b> SẴN SÀNG 100%\n🚀 <b>Kênh làm việc:</b> Topic 315 (Quin-Iu-Mthu)\n🔗 <b>Mã định danh:</b> <code>GM_6585_Mthu</code>\n✨ Cầu nối PC đã thức tỉnh hoàn toàn! Bro gửi yêu cầu code hoặc ảnh ngay bây giờ nhé!`,
+                                activeThreadId
+                            );
+                            continue;
+                        } else {
+                            await sendMsg(
+                                chatId,
+                                `❌ <b>[SAI MÃ ĐỒNG BỘ]</b>\nMã <code>${code}</code> không chính xác! Vui lòng nhập lại mã 4 số (Ví dụ: <code>6585</code>):`,
+                                activeThreadId
+                            );
+                            continue;
                         }
-                        tempMsgIds = [];
-                        promptMsgId = null;
-                        activeThreadId = threadId || 315;
+                    }
 
-                        // Đánh thức Antigravity PC
-                        forwardToAntigravity(`[LỆNH CƯỠNG CHẾ KẾT NỐI LẠI]: Người dùng yêu cầu đồng bộ tức thì qua lệnh /ketnoilai. Cửa sổ Antigravity PC đã kết nối sẵn sàng 100%.`);
+                    // 2. Xử lý lệnh cưỡng chế kết nối lại (/ketnoilai, /reconnect, /pc, /local)
+                    if (/^(?:\/ketnoilai|\/reconnect|\/pc|\/local|kết nối lại)(?:\s+(\w+))?$/i.test(userText)) {
+                        const match = userText.match(/^(?:\/ketnoilai|\/reconnect|\/pc|\/local|kết nối lại)(?:\s+(\w+))?$/i);
+                        const providedCode = match ? match[1] : null;
 
-                        await sendMsg(
-                            chatId,
-                            `⚡ <b>[ĐÃ CƯỠNG CHẾ KẾT NỐI LẠI THÀNH CÔNG!]</b>\n──────────────────────\n🖥️ <b>Cửa sổ Antigravity PC:</b> SẴN SÀNG 100%\n🚀 <b>Kênh làm việc:</b> Topic 315 (Quin-Iu-Mthu)\n🔗 <b>Mã đồng bộ:</b> <code>GM_6585_Mthu</code>\n✨ Cầu nối PC đã thức tỉnh hoàn toàn! Mọi tin nhắn hoặc hình ảnh bro gửi tiếp theo sẽ được xử lý ngay lập tức!`,
-                            activeThreadId
-                        );
-                        continue;
+                        if (!providedCode) {
+                            waitingForPairCode = true;
+                            await sendMsg(
+                                chatId,
+                                `🔑 <b>[XÁC THỰC KẾT NỐI]</b>\n──────────────────────\nBro vui lòng nhập <b>mã 4 số</b> (Ví dụ: <code>6585</code>) để cưỡng chế đồng bộ với máy tính:`,
+                                activeThreadId
+                            );
+                            continue;
+                        }
+
+                        if (providedCode === '6585' || /6585/i.test(providedCode)) {
+                            waitingForPairCode = false;
+                            console.log(`[Bridge Reconnect] Nhận lệnh cưỡng chế kết nối lại với mã 6585 từ Telegram...`);
+                            currentPhase = 'IDLE';
+                            stopTicker();
+                            if (typingInterval) {
+                                clearInterval(typingInterval);
+                                typingInterval = null;
+                            }
+                            tempMsgIds = [];
+                            promptMsgId = null;
+                            activeThreadId = threadId || 315;
+
+                            forwardToAntigravity(`[LỆNH CƯỠNG CHẾ KẾT NỐI LẠI]: Người dùng yêu cầu đồng bộ tức thì qua mã 6585. Cửa sổ Antigravity PC đã kết nối sẵn sàng 100%.`);
+
+                            await sendMsg(
+                                chatId,
+                                `⚡ <b>[ĐÃ CƯỠNG CHẾ KẾT NỐI LẠI THÀNH CÔNG!]</b>\n──────────────────────\n🖥️ <b>Cửa sổ Antigravity PC:</b> SẴN SÀNG 100%\n🚀 <b>Kênh làm việc:</b> Topic 315 (Quin-Iu-Mthu)\n🔗 <b>Mã đồng bộ:</b> <code>GM_6585_Mthu</code>\n✨ Cầu nối PC đã thức tỉnh hoàn toàn! Mọi tin nhắn hoặc hình ảnh bro gửi tiếp theo sẽ được xử lý ngay lập tức!`,
+                                activeThreadId
+                            );
+                            continue;
+                        } else {
+                            waitingForPairCode = true;
+                            await sendMsg(
+                                chatId,
+                                `❌ <b>[MÃ 4 SỐ KHÔNG ĐÚNG]</b>\nMã <code>${providedCode}</code> không khớp. Bro hãy nhập lại mã 4 số chính xác (<code>6585</code>):`,
+                                activeThreadId
+                            );
+                            continue;
+                        }
                     }
 
                     if (isEdit) {
@@ -884,12 +970,14 @@ async function pollUpdates() {
                     if (isEdit && promptMsgId) {
                         await editMsg(chatId, promptMsgId, initialText, 'HTML', cancelKeyboard);
                         lastStatusText = initialText;
+                        await moveCancelButtonTo(chatId, promptMsgId, initialText, activeThreadId);
                         startTicker();
                     } else {
                         promptMsgId = await sendMsg(chatId, initialText, activeThreadId, 'HTML', cancelKeyboard);
                         if (promptMsgId) {
                             tempMsgIds.push(promptMsgId);
                             lastStatusText = initialText;
+                            await moveCancelButtonTo(chatId, promptMsgId, initialText, activeThreadId);
                             startTicker();
                         }
                     }

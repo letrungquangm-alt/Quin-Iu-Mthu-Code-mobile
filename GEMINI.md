@@ -12,6 +12,9 @@
 - Cloud Fallback: Vercel serverless webhook automatically dropped when PC runs (`deleteWebhook`).
 
 ## 3. UI/UX & Interaction Standards
+- **Quick 4-Digit Sync Code (`6585`)**:
+  - To reconnect quickly, user can type `/ketnoilai` (bot asks for 4 digits) or just `/ketnoilai 6585` or simply `6585`.
+  - Pairs instantly with PC and releases Cloud Webhook without typing lengthy codes.
 - **In-Place Live Stopwatch Across All Stages**:
   - Live ticker running every 2.0s on the single status bubble (`promptMsgId`).
   - Seamlessly transitions with live seconds counting:
@@ -19,17 +22,19 @@
     - ✏️ `[ĐÃ CẬP NHẬT PROMPT MỚI, KHỞI ĐỘNG LẠI (Xs)...]` (ticking)
     - 💡 `[ĐANG SUY NGHĨ, ĐỢI MÌNH CHÚT (Xs)...]` (ticking)
     - ⏳ `[ĐANG KHỞI TẠO PHẢN HỒI CHO BẠN, VUI LÒNG CHỜ TRONG GIÂY LÁT (Xs)...]` (ticking liên tục trong lúc PC đang sinh câu trả lời)
-- **1-Touch Cancel Button**:
-  - Inline keyboard `[🛑 Dừng tác vụ (Cancel)]` attached directly under active status bubbles.
-  - User tap triggers `callback_query` to immediately abort ongoing commands, clean up, and notify.
+- **Dynamic 1-Touch Cancel Button**:
+  - Inline keyboard `[🛑 Dừng tác vụ (Cancel)]` always hops to the NEWEST active bubble at the bottom.
+  - Previous bubble's keyboard is automatically cleared so the cancel button is always right at the user's thumb.
+  - Disappears completely when final answer appears.
 - **Message Edit Support (`edited_message`)**:
   - When the user edits an existing prompt on Telegram, cancel the previous task and restart immediately with the revised prompt.
   - If edited to `stop`, `hủy`, or `/cancel`, abort immediately.
 - **Color-Coded Tool Call Bubbles**:
-  - 🟢 `[TẠO FILE MỚI]` (+ X dòng mã nguồn mới)
-  - 🟠 `[SỬA FILE]` (+ X dòng thêm [màu xanh], - Y dòng đã xóa [màu đỏ])
-  - 🔴 `[XÓA FILE / THƯ MỤC]` (- Lệnh xóa [màu đỏ])
+  - 🟢 `[TẠO FILE MỚI]` (+++ b/file\n+ X dòng mã nguồn mới)
+  - 🟠 `[SỬA FILE]` (--- a/file\n- Y dòng đã xóa [MÀU ĐỎ], +++ b/file\n+ X dòng thêm [MÀU XANH])
+  - 🔴 `[XÓA FILE / THƯ MỤC]` (- Lệnh xóa [MÀU ĐỎ])
   - 📄 `[ĐỌC FILE]` (Kèm phạm vi dòng)
+  - 🖼️ `[PHÂN TÍCH HÌNH ẢNH]` (Tự động tải ảnh chất lượng cao về máy tính)
   - ⚡ `[ĐANG XỬ LÝ]` (Chạy lệnh terminal - Tuyệt đối không dùng chữ 'tiến trình ngầm')
   - Tự động ẩn các lệnh kiểm tra nội bộ (như manage_task status/list) để không làm loãng khung chat.
 - **Response Preservation & Countdown Cleanup**:
