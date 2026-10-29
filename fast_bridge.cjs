@@ -1,15 +1,18 @@
 /**
- * QuinloveRin Code - Fast Telegram Bridge v2.0 (.cjs)
- * - CHUỖI TIẾN TRÌNH TRÀN DÀI (Stream Log): Không vừa làm vừa xóa!
+ * QuinloveRin Code - Fast Telegram Bridge v2.1 (.cjs)
+ * - CHUỖI TIẾN TRÌNH TRÀN DÀI (Stream Log): Không vừa làm vừa xóa.
  * - HIỆN ĐỦ: Đọc prompt -> Đã có cách -> Đang chạy lệnh -> Hoàn tất lệnh.
- * - KHI HOÀN TẤT:
- *   1. Phát câu trả lời hoàn chỉnh của Máy tính (VĨNH VIỄN, KHÔNG BAO GIỜ XÓA).
- *   2. Phát thông báo: "🧹 [ĐANG DỌN DẸP TIẾN TRÌNH TRONG VÒNG 10 GIÂY...]" và ĐẾM NGƯỢC 10s.
- *   3. Xóa sạch toàn bộ các tin nhắn tiến trình tạm thời ở trên.
- *   4. Đổi thành: "✨ [ĐÃ DỌN DẸP THÀNH CÔNG!]".
- *   5. Sau 2 giây xóa luôn chính nó!
- * - Hỗ trợ Cụm 3 Bot (Multi-Bot Failover Pool).
- * - Khởi động thông minh: Khóa ngay update offset để không bao giờ bị lặp tin cũ.
+ * - KHI LÀM XONG VIỆC & CHỜ TRẢ LỜI:
+ *   + Bật trạng thái 'typing...' trên thanh tiêu đề Telegram.
+ *   + Báo: "⏳ [ĐÃ XONG YÊU CẦU CỦA BẠN, CHỜ CHÚT TÔI ĐANG GỬI PHẢN HỒI YÊU CẦU CỦA BẠN (Xs)...]"
+ * - KHI PHÁT ĐÁP ÁN:
+ *   + Tiêu đề: "🤖 [MÁY TÍNH ĐÃ PHẢN HỒI XONG TRONG Xs]:"
+ *   + Phát nội dung hoàn chỉnh (VĨNH VIỄN, KHÔNG BAO GIỜ XÓA).
+ * - ĐẾM NGƯỢC 10S TỰ HỦY:
+ *   + Báo "🧹 [ĐANG DỌN DẸP TIẾN TRÌNH TRONG VÒNG 10 GIÂY...]" và đếm ngược 10s.
+ *   + Xóa sạch toàn bộ dãy tin nhắn tạm thời ở trên.
+ *   + Đổi thành "✨ [ĐÃ DỌN DẸP THÀNH CÔNG!]".
+ *   + Sau 2 giây tự xóa chính nó!
  */
 
 const fs = require('fs');
@@ -18,7 +21,6 @@ const { spawn } = require('child_process');
 
 const rootDir = __dirname;
 const configPath = path.join(rootDir, 'config.json');
-const statePath = path.join(rootDir, 'bridge_state.json');
 
 if (!fs.existsSync(configPath)) {
     console.error('[Bridge Error] Không tìm thấy config.json tại:', configPath);
@@ -53,7 +55,7 @@ const langServer = path.join(
 );
 
 console.log('========================================================');
-console.log(' Fast Telegram Bridge v2.0 (Stream Flow & 10s Countdown)');
+console.log(' Fast Telegram Bridge v2.1 (Stream Flow, Typing & 10s Countdown)');
 console.log(' Bot Pool Size:', botPool.length, 'bots');
 console.log(' Conversation ID:', conversationId);
 console.log(' Transcript:', transcriptPath);
@@ -77,7 +79,7 @@ async function tgApi(method, data) {
         const json = await res.json();
         if (!json.ok) {
             if (json.error_code === 429 && json.parameters && json.parameters.retry_after) {
-                console.warn(`[429 Rate Limit Bot ${currentBotIndex}] Chuyển bot trong pool...`);
+                console.warn(`[429 Rate Limit Bot ${currentBotIndex}] Đổi bot trong pool...`);
                 currentBotIndex = (currentBotIndex + 1) % botPool.length;
                 return tgApi(method, data);
             }
@@ -90,6 +92,12 @@ async function tgApi(method, data) {
         console.error(`[API ${method} Ex]:`, e.message);
         return { ok: false, error: e.message };
     }
+}
+
+async function sendTyping(chatId, threadId = null) {
+    const payload = { chat_id: chatId, action: 'typing' };
+    if (threadId) payload.message_thread_id = threadId;
+    await tgApi('sendChatAction', payload);
 }
 
 async function sendMsg(chatId, text, threadId = null, parseMode = 'HTML') {
@@ -185,13 +193,15 @@ function mdToTgHtml(text) {
     return text;
 }
 
-async function sendLongResponse(chatId, answerText, threadId = null) {
+async function sendLongResponse(chatId, answerText, totalSec, threadId = null) {
     if (!answerText) return;
 
     const maxLen = 3500;
+    const headerTitle = `🤖 <b>[MÁY TÍNH ĐÃ PHẢN HỒI XONG TRONG ${totalSec}s]:</b>\n\n`;
+
     if (answerText.length <= maxLen) {
         const html = mdToTgHtml(answerText);
-        await sendMsg(chatId, `🤖 <b>[MÁY TÍNH PHẢN HỒI XONG]:</b>\n\n${html}`, threadId);
+        await sendMsg(chatId, `${headerTitle}${html}`, threadId);
         return;
     }
 
@@ -225,7 +235,7 @@ async function sendLongResponse(chatId, answerText, threadId = null) {
 
     for (let i = 0; i < chunks.length; i++) {
         const html = mdToTgHtml(chunks[i]);
-        const header = (i === 0) ? '🤖 <b>[MÁY TÍNH PHẢN HỒI XONG]:</b>\n\n' : `<i>(Phần ${i + 1}/${chunks.length})</i>\n\n`;
+        const header = (i === 0) ? headerTitle : `<i>(Phần ${i + 1}/${chunks.length})</i>\n\n`;
         await sendMsg(chatId, `${header}${html}`, threadId);
         if (i < chunks.length - 1) {
             await new Promise(r => setTimeout(r, 200));
@@ -245,7 +255,6 @@ async function runCountdownCleanup(chatId, threadId, msgIdsToDelete) {
             threadId
         );
 
-        // Đếm ngược 10s (edit mỗi 2s: 8s, 6s, 4s, 2s, 1s)
         const countdownSteps = [8, 6, 4, 2, 1];
         for (const s of countdownSteps) {
             await new Promise(r => setTimeout(r, 2000));
@@ -258,15 +267,12 @@ async function runCountdownCleanup(chatId, threadId, msgIdsToDelete) {
             }
         }
 
-        // Xóa sạch toàn bộ các tin nhắn tiến trình tạm thời ở trên
         console.log('[Countdown Cleanup] Xóa toàn bộ tiến trình tạm...');
         await deleteMsgs(chatId, msgIdsToDelete);
 
-        // Hiển thị đã dọn dẹp thành công
         if (countdownMsgId) {
             await editMsg(chatId, countdownMsgId, `✨ <b>[ĐÃ DỌN DẸP THÀNH CÔNG!]</b>`);
 
-            // Xóa luôn chính nó sau 2 giây
             setTimeout(async () => {
                 await tgApi('deleteMessage', { chat_id: chatId, message_id: countdownMsgId });
                 console.log('[Countdown Cleanup] Hoàn tất, khung chat sạch bong!');
@@ -291,6 +297,10 @@ let currentWorkingMsgId = null;
 let currentToolStartTime = null;
 let currentToolSummary = '';
 
+let finalPrepMsgId = null;
+let isPreparingResponse = false;
+let typingInterval = null;
+
 let tempMsgIds = [];
 
 function forwardToAntigravity(text) {
@@ -308,8 +318,6 @@ function forwardToAntigravity(text) {
         }
     }
 }
-
-// --- TRANSCRIPT MIRROR WATCHER ---
 
 let lastOffset = 0;
 if (fs.existsSync(transcriptPath)) {
@@ -389,6 +397,25 @@ async function processTranscript() {
                     );
                     currentWorkingMsgId = null;
                 }
+
+                // Khi xong tác vụ: Bật trạng thái chuẩn bị phát câu trả lời
+                if (!isPreparingResponse) {
+                    isPreparingResponse = true;
+                    finalPrepMsgId = await sendMsg(
+                        activeChatId,
+                        `⏳ <b>[ĐÃ XONG YÊU CẦU CỦA BẠN, CHỜ CHÚT TÔI ĐANG GỬI PHẢN HỒI (1s)...]</b>`,
+                        activeThreadId
+                    );
+                    if (finalPrepMsgId) tempMsgIds.push(finalPrepMsgId);
+
+                    // Bật typing liên tục
+                    sendTyping(activeChatId, activeThreadId);
+                    if (!typingInterval) {
+                        typingInterval = setInterval(() => {
+                            sendTyping(activeChatId, activeThreadId);
+                        }, 3000);
+                    }
+                }
             }
 
             // Giai đoạn: Phản hồi hoàn chỉnh -> PHÁT CÂU TRẢ LỜI & KÍCH HOẠT ĐẾM NGƯỢC 10S XÓA SẠCH
@@ -396,9 +423,17 @@ async function processTranscript() {
                 const answer = entry.content.toString().trim();
                 if (!answer) continue;
 
+                if (typingInterval) {
+                    clearInterval(typingInterval);
+                    typingInterval = null;
+                }
+                isPreparingResponse = false;
+
+                const totalSec = promptStartTime ? Math.max(1, Math.round((Date.now() - promptStartTime) / 1000)) : 1;
+
                 // 1. Gửi câu trả lời hoàn chỉnh của Máy tính
                 console.log('[Bridge] Gửi câu trả lời hoàn chỉnh tới Telegram...');
-                await sendLongResponse(activeChatId, answer, activeThreadId);
+                await sendLongResponse(activeChatId, answer, totalSec, activeThreadId);
 
                 // Gom tất cả các tin nhắn tiến trình cần dọn dẹp
                 const toClean = [...tempMsgIds];
@@ -407,6 +442,7 @@ async function processTranscript() {
                 promptTextSaved = '';
                 thinkingSent = false;
                 currentWorkingMsgId = null;
+                finalPrepMsgId = null;
 
                 // 2. Kích hoạt đếm ngược 10 giây để dọn dẹp
                 if (toClean.length > 0) {
@@ -430,7 +466,6 @@ async function pollUpdates() {
     const allowedList = [2029333412, -1004457846636];
     if (allowedChatId) allowedList.push(Number(allowedChatId));
 
-    // Khởi tạo offset ban đầu để không bao giờ đọc lại tin cũ
     try {
         const initRes = await tgApi('getUpdates', { offset: -1 });
         if (initRes.ok && initRes.result && initRes.result.length > 0) {
@@ -478,6 +513,7 @@ async function pollUpdates() {
                     promptStartTime = Date.now();
                     promptTextSaved = userText;
                     thinkingSent = false;
+                    isPreparingResponse = false;
 
                     const previewClean = userText.replace(/[<>]/g, '');
                     const previewSafe = escapeHtml(previewClean.length > 50 ? previewClean.substring(0, 50) + '...' : previewClean);
