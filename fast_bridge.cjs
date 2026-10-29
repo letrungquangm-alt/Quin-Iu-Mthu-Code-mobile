@@ -1065,6 +1065,13 @@ async function pollUpdates() {
                     activeChatId = chatId;
                     activeThreadId = threadId || 1114;
 
+                    // Tự động xóa tin nhắn người dùng tại Sảnh Lobby (#1114) sau 2.5s để giữ Sảnh luôn sạch bong
+                    if (Number(threadId) === 1114 && msg.message_id) {
+                        setTimeout(() => {
+                            tgApiRaw('deleteMessage', { chat_id: chatId, message_id: msg.message_id }).catch(() => {});
+                        }, 2500);
+                    }
+
                     let userText = '';
                     let isPhoto = false;
                     let photoFileId = null;
