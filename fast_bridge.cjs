@@ -215,7 +215,13 @@ async function runCountdownCleanup(chatId, threadId, msgIdsToDelete) {
     }
 }
 
-// --- LIVE TICKING STOPWATCH (EVERY 2.5S) ---
+function formatStopwatch(sec) {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m > 0 ? m + 'm ' : ''}${s}s`;
+}
+
+// --- LIVE TICKING STOPWATCH (EVERY 1.5S) ---
 
 async function updateStatusBubble() {
     if (isUpdatingStatus || currentPhase === 'IDLE' || currentPhase === 'CANCELED') return;
@@ -240,21 +246,22 @@ async function updateStatusBubble() {
     if (!promptMsgId || !promptStartTime) return;
 
     const elapsed = Math.max(1, Math.round((Date.now() - promptStartTime) / 1000));
+    const timeStr = formatStopwatch(elapsed);
     let text = '';
 
     if (currentPhase === 'READING') {
         const promptLabel = isEditedPrompt
-            ? `✏️ <b>[ĐÃ CẬP NHẬT PROMPT MỚI, KHỞI ĐỘNG LẠI (${elapsed}s)...]</b>`
+            ? `✏️ <b>[ĐÃ CẬP NHẬT PROMPT MỚI]</b> • ⏱️ <code>${timeStr}</code>`
             : (isPhotoSaved
-                ? `📷 <b>[ĐÃ NHẬN ẢNH VÀ ĐANG PHÂN TÍCH, VUI LÒNG ĐỢI (${elapsed}s)...]</b>`
-                : `📖 <b>[ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (${elapsed}s)...]</b>`);
+                ? `📷 <b>[ĐÃ NHẬN ẢNH VÀ ĐANG PHÂN TÍCH]</b> • ⏱️ <code>${timeStr}</code>`
+                : `📖 <b>[ĐÃ ĐỌC PROMPT &amp; ĐANG XỬ LÝ]</b> • ⏱️ <code>${timeStr}</code>`);
         const previewClean = (promptTextSaved || '').replace(/[<>]/g, '');
         const previewSafe = escapeHtml(previewClean.length > 55 ? previewClean.substring(0, 55) + '...' : previewClean);
-        text = `${promptLabel}\n<blockquote><i>${previewSafe}</i></blockquote>`;
+        text = `${promptLabel}\n<blockquote><i>${previewSafe}</i></blockquote>\n⏱️ <i>Đang đếm giây xử lý: ${timeStr}...</i>`;
     } else if (currentPhase === 'THINKING' || currentPhase === 'WORKING') {
         const safe = escapeHtml(promptTextSaved || 'Yêu cầu của bạn');
         const detail = currentToolSummary ? `\n<i>⚡ ${escapeHtml(currentToolSummary)}</i>` : '';
-        text = `💡 <b>[ĐANG SUY NGHĨ & XỬ LÝ (${elapsed}s)...]</b>\n<blockquote><i>${safe}</i></blockquote>${detail}`;
+        text = `💡 <b>[ĐANG SUY NGHĨ &amp; XỬ LÝ]</b> • ⏱️ <code>${timeStr}</code>\n<blockquote><i>${safe}</i></blockquote>${detail}\n⏱️ <i>Đang đếm giây xử lý: ${timeStr}...</i>`;
     } else {
         return;
     }
@@ -273,7 +280,7 @@ async function updateStatusBubble() {
 
 function startTicker() {
     if (!tickerInterval) {
-        tickerInterval = setInterval(updateStatusBubble, 2500);
+        tickerInterval = setInterval(updateStatusBubble, 1500);
     }
 }
 
@@ -379,14 +386,14 @@ async function executePromptImmediately(chatId, threadId, promptText, previewTex
     }
 
     const promptLabel = isEdit
-        ? '✏️ <b>[ĐÃ CẬP NHẬT PROMPT MỚI, KHỞI ĐỘNG LẠI (1s)...]</b>'
+        ? '✏️ <b>[ĐÃ CẬP NHẬT PROMPT MỚI]</b> • ⏱️ <code>1s</code>'
         : (isPhoto
-            ? '📷 <b>[ĐÃ NHẬN ẢNH VÀ ĐANG PHÂN TÍCH, VUI LÒNG ĐỢI (1s)...]</b>'
-            : '📖 <b>[ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (1s)...]</b>');
+            ? '📷 <b>[ĐÃ NHẬN ẢNH VÀ ĐANG PHÂN TÍCH]</b> • ⏱️ <code>1s</code>'
+            : '📖 <b>[ĐÃ ĐỌC PROMPT &amp; ĐANG XỬ LÝ]</b> • ⏱️ <code>1s</code>');
 
     const previewClean = previewText.replace(/[<>]/g, '');
     const previewSafe = escapeHtml(previewClean.length > 55 ? previewClean.substring(0, 55) + '...' : previewClean);
-    const initialText = `${promptLabel}\n<blockquote><i>${previewSafe}</i></blockquote>`;
+    const initialText = `${promptLabel}\n<blockquote><i>${previewSafe}</i></blockquote>\n⏱️ <i>Đang đếm giây xử lý: 1s...</i>`;
 
     await clearAllCancelButtons(chatId);
     promptMsgId = await sendMsg(chatId, initialText, threadId, 'HTML', cancelKeyboard);
