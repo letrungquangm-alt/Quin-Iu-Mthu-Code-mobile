@@ -440,6 +440,7 @@ let thinkingSent = false;
 let currentWorkingMsgId = null;
 let currentToolStartTime = null;
 let currentToolSummary = '';
+let currentToolBubbleText = '';
 let typingInterval = null;
 let tempMsgIds = [];
 
@@ -613,26 +614,34 @@ async function processTranscript() {
                 currentToolStartTime = Date.now();
                 currentPhase = 'THINKING'; // Duy trì trạng thái ticking trong suốt quá trình tool chạy
                 startTicker(); // Tiếp tục đồng hồ nếu có thêm tool tiếp theo
-                const tc = entry.tool_calls[0];
-                const { summary, bubbleText } = formatToolCall(tc);
-                currentToolSummary = summary;
+                for (const tc of entry.tool_calls) {
+                    const { summary, bubbleText } = formatToolCall(tc);
+                    currentToolSummary = summary;
+                    currentToolBubbleText = bubbleText;
+                    console.log(`[Bridge Tool Call] ${summary}`);
 
-                currentWorkingMsgId = await sendMsg(activeChatId, bubbleText, activeThreadId);
-                if (currentWorkingMsgId) tempMsgIds.push(currentWorkingMsgId);
+                    currentWorkingMsgId = await sendMsg(activeChatId, bubbleText, activeThreadId);
+                    if (currentWorkingMsgId) tempMsgIds.push(currentWorkingMsgId);
+                }
             }
 
             // Giai đoạn: Hoàn tất Tool Call -> DỪNG ĐẾM GIÂY & CỐ ĐỊNH THỜI GIAN HOÀN TẤT
             if (entry.type === 'GENERIC' && entry.content) {
                 const wSec = currentToolStartTime ? Math.max(1, Math.round((Date.now() - currentToolStartTime) / 1000)) : 1;
                 const safeTask = escapeHtml(currentToolSummary || 'Tác vụ');
+                console.log(`[Bridge Tool Done in ${wSec}s] ${safeTask}`);
 
                 if (currentWorkingMsgId) {
+                    const finishedBubble = currentToolBubbleText
+                        ? `${currentToolBubbleText}\n<i>↳ ✅ Hoàn tất trong ${wSec}s</i>`
+                        : `✅ <b>[ĐÃ HOÀN TẤT TRONG ${wSec}s]</b>: <code>${safeTask}</code>`;
                     await editMsg(
                         activeChatId,
                         currentWorkingMsgId,
-                        `✅ <b>[ĐÃ HOÀN TẤT TRONG ${wSec}s]</b>: <code>${safeTask}</code>`
+                        finishedBubble
                     );
                     currentWorkingMsgId = null;
+                    currentToolBubbleText = '';
                 }
 
                 // DỪNG ĐẾM GIÂY NGAY LẬP TỨC: Tác vụ đã xong, số giây này là thời gian cuối cùng của tác vụ!
