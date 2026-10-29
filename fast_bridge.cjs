@@ -1,24 +1,29 @@
 /**
- * QuinloveRin Code - Fast Telegram Bridge v2.5 (.cjs)
- * - TÍCH HỢP ĐẦY ĐỦ 2 CHẾ ĐỘ:
- *   1. Chế độ Điều khiển từ xa (Remote Control): Nhận lệnh từ Telegram -> Gemini AI xử lý -> Chạy code trên máy tính -> Phản hồi.
- *   2. Chế độ Phản chiếu máy tính (PC Mirror): Khi chat trực tiếp trên Antigravity PC -> Tự động stream toàn bộ tiến trình lên Telegram.
- * - GIAO DIỆN CHUẨN XÁC:
- *   + 📖 [ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (Xs)...]
- *   + 💡 [ĐÃ CÓ CÁCH, ĐỢI MÌNH CHÚT - Xs]
- *   + ⚡ [MÁY TÍNH ĐANG THỰC HIỆN] ▶ <tên tác vụ> (Không gắn tổng thời gian thừa thãi)
- *   + ✅ [ĐÃ HOÀN TẤT TRONG Xs]: <tên tác vụ>
- *   + Typing trạng thái trên thanh tiêu đề khi chuẩn bị đáp án
- *   + 🤖 [MÁY TÍNH ĐÃ PHẢN HỒI XONG TRONG Xs]: <nội dung> (VĨNH VIỄN, KHÔNG BAO GIỜ XÓA)
- *   + Đếm ngược 10s tự hủy: 🧹 [ĐANG DỌN DẸP TIẾN TRÌNH TRONG VÒNG 10 GIÂY...] -> ✨ [ĐÃ DỌN DẸP THÀNH CÔNG!] -> tự xóa sau 2s.
+ * QuinloveRin Code - Fast Telegram Bridge v2.6 (.cjs)
+ * - ĐỒNG BỘ 100% VỚI BOX CHAT ANTIGRAVITY TRÊN MÁY TÍNH (SYNC BRIDGE):
+ *   + Mã kết nối: GM_6585_Mthu (Status: CONNECTED)
+ *   + Khi người dùng gửi lệnh/chat từ Telegram:
+ *     1. Bắn thông báo nổi lên màn hình PC (show_notification.ps1) kèm âm thanh.
+ *     2. Chuyển tin nhắn thẳng vào Box Chat Antigravity PC qua language_server.exe agentapi.
+ *     3. Máy tính Antigravity nhận tin, bắt đầu suy nghĩ, chạy tool và phản hồi trực tiếp trên màn hình!
+ *     4. Bridge phản chiếu (Mirror) trọn vẹn toàn bộ tiến trình đó ngược lại nhóm Telegram:
+ *        - 📖 [ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (Xs)...]
+ *        - 💡 [ĐÃ CÓ CÁCH, ĐỢI MÌNH CHÚT - Xs]
+ *        - ⚡ [MÁY TÍNH ĐANG THỰC HIỆN] ▶ <tên tác vụ> (Không gắn tổng thời gian)
+ *        - ✅ [ĐÃ HOÀN TẤT TRONG Xs]: <tên tác vụ>
+ *        - Bật Typing trên thanh tiêu đề Telegram khi chuẩn bị đáp án.
+ *        - 🤖 [MÁY TÍNH ĐÃ PHẢN HỒI XONG TRONG Xs]: <nội dung> (VĨNH VIỄN, KHÔNG BAO GIỜ XÓA).
+ *        - Đếm ngược 10s: 🧹 [ĐANG DỌN DẸP TIẾN TRÌNH TRONG VÒNG 10 GIÂY...] -> ✨ [ĐÃ DỌN DẸP THÀNH CÔNG!] -> tự xóa sau 2s.
  */
 
 const fs = require('fs');
 const path = require('path');
-const { exec } = require('child_process');
+const { execFile } = require('child_process');
 
 const rootDir = __dirname;
 const configPath = path.join(rootDir, 'config.json');
+const syncBridgePath = path.join(rootDir, 'sync_bridge.json');
+const notifScript = path.join(rootDir, 'show_notification.ps1');
 
 if (!fs.existsSync(configPath)) {
     console.error('[Bridge Error] Không tìm thấy config.json tại:', configPath);
@@ -27,17 +32,9 @@ if (!fs.existsSync(configPath)) {
 
 const config = JSON.parse(fs.readFileSync(configPath, 'utf8').replace(/^\uFEFF/, ''));
 const botToken = config.BOT_TOKEN;
-const geminiApiKey = config.GEMINI_API_KEY || '';
 const allowedChatId = config.ALLOWED_CHAT_ID;
-const projectsRootDir = config.PROJECTS_ROOT_DIR || path.join(process.env.USERPROFILE, '.gemini', 'antigravity', 'scratch', 'model');
-const currentProject = config.CURRENT_PROJECT || 'Quin-Iu-Mthu';
-const currentProjectPath = config.CURRENT_PROJECT_PATH || path.join(projectsRootDir, currentProject);
-
-if (!fs.existsSync(currentProjectPath)) {
-    fs.mkdirSync(currentProjectPath, { recursive: true });
-}
-
 const conversationId = '7f7131ce-dc72-490f-97bd-4a675f9dd0c7';
+
 const transcriptPath = path.join(
     process.env.USERPROFILE,
     '.gemini',
@@ -49,10 +46,20 @@ const transcriptPath = path.join(
     'transcript.jsonl'
 );
 
+const langServer = path.join(
+    process.env.LOCALAPPDATA,
+    'Programs',
+    'antigravity',
+    'resources',
+    'bin',
+    'language_server.exe'
+);
+
 console.log('========================================================');
-console.log(' Fast Telegram Bridge v2.5 (Dual Mode: Remote & PC Mirror)');
+console.log(' Fast Telegram Bridge v2.6 (Live PC Antigravity Sync Bridge)');
 console.log(' Bot Token:', botToken ? botToken.substring(0, 10) + '...' : 'NONE');
-console.log(' Project Path:', currentProjectPath);
+console.log(' Conversation ID:', conversationId);
+console.log(' Sync Bridge:', syncBridgePath);
 console.log(' Transcript:', transcriptPath);
 console.log('========================================================');
 
@@ -274,187 +281,88 @@ async function runCountdownCleanup(chatId, threadId, msgIdsToDelete) {
     }
 }
 
-// --- REMOTE EXECUTION ENGINE (KHI NHẬN LỆNH TỪ TELEGRAM) ---
+// --- SYNC BRIDGE DISPATCHER (CHUYỂN PROMPT TỚI ANTIGRAVITY PC) ---
 
-const chatHistory = [];
-
-function executePowerShell(cmd, workDir) {
-    return new Promise(resolve => {
-        exec(cmd, { cwd: workDir, shell: 'powershell.exe', maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
-            let out = (stdout || '') + (stderr || '');
-            if (!out && err) out = err.message;
-            resolve(out.trim());
-        });
-    });
-}
-
-async function callGeminiApi(promptText) {
-    const sysInstruction = `Bạn là trợ lý lập trình AI thông minh cao cấp cho QuinloveRin Code.
-Bạn đang điều khiển máy tính từ xa qua Telegram của người dùng.
-Thư mục dự án hiện tại: ${currentProjectPath}.
-Khi cần tạo hoặc sửa file, hãy xuất khối lệnh PowerShell trong khối \`\`\`run:
-Ví dụ:
-\`\`\`run
-Set-Content -Path "index.html" -Value @"
-<!DOCTYPE html>
-... nội dung ...
-"@ -Encoding UTF8
-\`\`\`
-QUY TẮC:
-- Trả lời bằng tiếng Việt chuẩn, súc tích, chuyên nghiệp. Xưng hô: 'tôi - bro'.
-- Luôn hoàn thành đúng yêu cầu, tạo mã nguồn chuẩn và lưu vào đúng thư mục dự án.`;
-
-    const contents = [
-        ...chatHistory.slice(-10),
-        { role: 'user', parts: [{ text: promptText }] }
-    ];
-
-    const modelsToTry = ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.5-flash'];
-
-    for (const m of modelsToTry) {
+function showScreenToast(title, msg) {
+    if (fs.existsSync(notifScript)) {
         try {
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${geminiApiKey}`;
-            const res = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    systemInstruction: { parts: [{ text: sysInstruction }] },
-                    contents: contents
-                })
+            execFile('powershell.exe', [
+                '-NoProfile',
+                '-ExecutionPolicy',
+                'Bypass',
+                '-File',
+                notifScript,
+                '-Title',
+                title,
+                '-Message',
+                msg,
+                '-DurationSec',
+                '3'
+            ], { windowsHide: true }, () => {});
+        } catch (e) {}
+    }
+}
+
+function recordSyncMessage(text) {
+    if (fs.existsSync(syncBridgePath)) {
+        try {
+            const raw = fs.readFileSync(syncBridgePath, 'utf8').replace(/^\uFEFF/, '');
+            const br = JSON.parse(raw);
+            if (!Array.isArray(br.messages)) br.messages = [];
+            br.messages.push({
+                sender: 'phone',
+                timestamp: new Date().toISOString(),
+                text: text
             });
-            const data = await res.json();
-            if (data.candidates && data.candidates[0].content && data.candidates[0].content.parts[0].text) {
-                const text = data.candidates[0].content.parts[0].text;
-                chatHistory.push({ role: 'user', parts: [{ text: promptText }] });
-                chatHistory.push({ role: 'model', parts: [{ text: text }] });
-                return text;
-            }
-        } catch (e) {
-            console.warn(`[Gemini Error ${m}]:`, e.message);
-        }
-    }
-    return 'Hệ thống AI đang tạm thời bận, bro vui lòng thử lại sau vài giây nhé!';
-}
-
-let isExecutingFromTelegram = false;
-
-async function handleTelegramMessage(chatId, threadId, userText, isPhoto) {
-    if (isExecutingFromTelegram) {
-        await sendMsg(chatId, '⏳ <i>Máy tính đang xử lý một tác vụ trước đó, bro đợi vài giây nhé...</i>', threadId);
-        return;
-    }
-
-    isExecutingFromTelegram = true;
-    const localTempIds = [];
-    const startTime = Date.now();
-
-    try {
-        const previewClean = userText.replace(/[<>]/g, '');
-        const previewSafe = escapeHtml(previewClean.length > 55 ? previewClean.substring(0, 55) + '...' : previewClean);
-
-        // 1. Bóng đọc Prompt
-        const promptLabel = isPhoto
-            ? '📷 <b>[ĐÃ NHẬN ẢNH VÀ ĐANG PHÂN TÍCH, VUI LÒNG ĐỢI (1s)...]</b>'
-            : '📖 <b>[ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (1s)...]</b>';
-        const pMid = await sendMsg(chatId, `${promptLabel}\n<blockquote><i>${previewSafe}</i></blockquote>`, threadId);
-        if (pMid) localTempIds.push(pMid);
-
-        await new Promise(r => setTimeout(r, 600));
-
-        // 2. Bóng Đã Có Cách
-        const elapsedThink = Math.max(1, Math.round((Date.now() - startTime) / 1000));
-        const tMid = await sendMsg(chatId, `💡 <b>[ĐÃ CÓ CÁCH, ĐỢI MÌNH CHÚT - ${elapsedThink}s]</b>\n<blockquote><i>${previewSafe}</i></blockquote>`, threadId);
-        if (tMid) localTempIds.push(tMid);
-
-        // 3. Xử lý lệnh Terminal nhanh (/cmd hoặc $)
-        if (/^(?:\/cmd|\$|ps)\s+(.+)$/i.test(userText)) {
-            const cmd = userText.replace(/^(?:\/cmd|\$|ps)\s+/i, '').trim();
-            const safeCmd = escapeHtml(cmd);
-
-            const toolStart = Date.now();
-            const wMid = await sendMsg(chatId, `⚡ <b>[MÁY TÍNH ĐANG THỰC HIỆN]</b>\n▶ <code>${safeCmd}</code>`, threadId);
-            if (wMid) localTempIds.push(wMid);
-
-            const out = await executePowerShell(cmd, currentProjectPath);
-            const toolSec = Math.max(1, Math.round((Date.now() - toolStart) / 1000));
-
-            if (wMid) {
-                await editMsg(chatId, wMid, `✅ <b>[ĐÃ HOÀN TẤT TRONG ${toolSec}s]</b>: <code>${safeCmd}</code>`);
-            }
-
-            sendTyping(chatId, threadId);
-            const totalSec = Math.max(1, Math.round((Date.now() - startTime) / 1000));
-            const formattedOut = out ? `<pre><code>${escapeHtml(out)}</code></pre>` : '<i>(Lệnh đã thực thi xong, không có output)</i>';
-            await sendMsg(chatId, `🤖 <b>[MÁY TÍNH ĐÃ PHẢN HỒI XONG TRONG ${totalSec}s]:</b>\n\n${formattedOut}`, threadId);
-
-            runCountdownCleanup(chatId, threadId, localTempIds);
-            return;
-        }
-
-        // 4. Gọi Gemini AI xử lý yêu cầu lập trình
-        const aiAnswer = await callGeminiApi(userText);
-
-        // 5. Kiểm tra và thực thi code khối ```run nếu có
-        let cleanText = aiAnswer;
-        const runMatch = aiAnswer.match(/```(?:run|powershell|ps1|cmd|sh)\s*([\s\S]*?)```/);
-        if (runMatch) {
-            const scriptToRun = runMatch[1].trim();
-            cleanText = aiAnswer.replace(/```(?:run|powershell|ps1|cmd|sh)[\s\S]*?```/g, '').trim();
-
-            const toolStart = Date.now();
-            const wMid = await sendMsg(chatId, `⚡ <b>[MÁY TÍNH ĐANG THỰC HIỆN]</b>\n▶ <code>Cập nhật mã nguồn dự án</code>`, threadId);
-            if (wMid) localTempIds.push(wMid);
-
-            await executePowerShell(scriptToRun, currentProjectPath);
-            const toolSec = Math.max(1, Math.round((Date.now() - toolStart) / 1000));
-
-            if (wMid) {
-                await editMsg(chatId, wMid, `✅ <b>[ĐÃ HOÀN TẤT TRONG ${toolSec}s]</b>: <code>Cập nhật mã nguồn dự án</code>`);
-            }
-        }
-
-        // 6. Phát câu trả lời hoàn chỉnh
-        sendTyping(chatId, threadId);
-        const totalSec = Math.max(1, Math.round((Date.now() - startTime) / 1000));
-        await sendLongResponse(chatId, cleanText || aiAnswer, totalSec, threadId);
-
-        // 7. Kích hoạt đếm ngược 10 giây dọn dẹp tiến trình
-        runCountdownCleanup(chatId, threadId, localTempIds);
-
-    } catch (err) {
-        console.error('[Execute Exception]:', err.message);
-        await sendMsg(chatId, `❌ Lỗi thực thi: ${escapeHtml(err.message)}`, threadId);
-    } finally {
-        isExecutingFromTelegram = false;
+            if (br.messages.length > 20) br.messages = br.messages.slice(-20);
+            br.active = true;
+            br.status = 'CONNECTED';
+            br.conversationId = conversationId;
+            fs.writeFileSync(syncBridgePath, JSON.stringify(br, null, 4), 'utf8');
+        } catch (e) {}
     }
 }
 
-// --- PC MIRROR WATCHER (KHI CHAT TRỰC TIẾP TRÊN ANTIGRAVITY PC) ---
+function forwardToAntigravity(text) {
+    if (fs.existsSync(langServer)) {
+        execFile(langServer, ['agentapi', 'send-message', conversationId, `[Điện thoại gửi]: ${text}`], (err, stdout) => {
+            if (err) {
+                console.error('[Bridge IPC Error] Không thể chuyển prompt tới Antigravity:', err.message);
+            } else {
+                console.log('[Bridge IPC OK] Đã nạp prompt vào Box Chat Antigravity PC:', text.substring(0, 50));
+            }
+        });
+    } else {
+        console.warn('[Bridge Warning] Không tìm thấy language_server.exe tại:', langServer);
+    }
+}
+
+// --- STATE MANAGEMENT ---
 
 let activeChatId = allowedChatId || -1004457846636;
 let activeThreadId = null;
 
-let mirrorPromptStartTime = null;
-let mirrorPromptSaved = '';
-let mirrorThinkingSent = false;
-let mirrorWorkingMsgId = null;
-let mirrorToolStartTime = null;
-let mirrorToolSummary = '';
-let mirrorTypingInterval = null;
-let mirrorTempMsgIds = [];
+let promptStartTime = null;
+let promptTextSaved = '';
+let thinkingSent = false;
+let currentWorkingMsgId = null;
+let currentToolStartTime = null;
+let currentToolSummary = '';
+let typingInterval = null;
+let tempMsgIds = [];
+
+// --- TRANSCRIPT MIRROR WATCHER (THEO DÕI LIVE TỪ ANTIGRAVITY PC) ---
 
 let lastOffset = 0;
 if (fs.existsSync(transcriptPath)) {
     try {
         lastOffset = fs.statSync(transcriptPath).size;
-        console.log('[Bridge PC Mirror] Theo dõi transcript từ byte offset:', lastOffset);
+        console.log('[Bridge] Bắt đầu theo dõi transcript từ byte offset:', lastOffset);
     } catch (e) {}
 }
 
 async function processTranscript() {
-    if (isExecutingFromTelegram) return;
     if (!fs.existsSync(transcriptPath)) return;
-
     let stat;
     try { stat = fs.statSync(transcriptPath); } catch (e) { return; }
     if (stat.size <= lastOffset) return;
@@ -473,102 +381,103 @@ async function processTranscript() {
         try {
             const entry = JSON.parse(line);
 
-            // Bắt Prompt từ PC nếu có
+            // Bắt Prompt nhập từ PC (nếu người dùng gõ trực tiếp trên máy tính)
             if (entry.type === 'USER_INPUT' && entry.content) {
-                mirrorPromptStartTime = Date.now();
-                mirrorPromptSaved = entry.content.toString().trim();
-                mirrorThinkingSent = false;
+                const uText = entry.content.toString().trim();
+                promptStartTime = Date.now();
+                promptTextSaved = uText;
+                thinkingSent = false;
 
-                const pClean = mirrorPromptSaved.replace(/[<>]/g, '');
-                const pSafe = escapeHtml(pClean.length > 55 ? pClean.substring(0, 55) + '...' : pClean);
+                const previewClean = uText.replace(/[<>]/g, '');
+                const previewSafe = escapeHtml(previewClean.length > 55 ? previewClean.substring(0, 55) + '...' : previewClean);
                 const pid = await sendMsg(
                     activeChatId,
-                    `📖 <b>[ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (1s)...]</b>\n<blockquote><i>${pSafe}</i></blockquote>`,
+                    `📖 <b>[ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (1s)...]</b>\n<blockquote><i>${previewSafe}</i></blockquote>`,
                     activeThreadId
                 );
-                if (pid) mirrorTempMsgIds.push(pid);
+                if (pid) tempMsgIds.push(pid);
             }
 
-            // Giai đoạn: Đã có cách
+            // Giai đoạn: AI đã có cách / đang suy nghĩ
             if (entry.thinking && !entry.content && (!entry.tool_calls || entry.tool_calls.length === 0)) {
-                if (!mirrorThinkingSent) {
-                    mirrorThinkingSent = true;
-                    const elapsed = mirrorPromptStartTime ? Math.max(1, Math.round((Date.now() - mirrorPromptStartTime) / 1000)) : 1;
-                    const safe = escapeHtml(mirrorPromptSaved);
+                if (!thinkingSent) {
+                    thinkingSent = true;
+                    const elapsed = promptStartTime ? Math.max(1, Math.round((Date.now() - promptStartTime) / 1000)) : 1;
+                    const safe = escapeHtml(promptTextSaved || 'Yêu cầu của bạn');
                     const tid = await sendMsg(
                         activeChatId,
                         `💡 <b>[ĐÃ CÓ CÁCH, ĐỢI MÌNH CHÚT - ${elapsed}s]</b>\n<blockquote><i>${safe}</i></blockquote>`,
                         activeThreadId
                     );
-                    if (tid) mirrorTempMsgIds.push(tid);
+                    if (tid) tempMsgIds.push(tid);
                 }
             }
 
-            // Giai đoạn: Tool Call
+            // Giai đoạn: Thực thi Tool Call (lệnh terminal, sửa file...)
             if (entry.tool_calls && entry.tool_calls.length > 0) {
-                mirrorToolStartTime = Date.now();
+                currentToolStartTime = Date.now();
                 const tc = entry.tool_calls[0];
                 const toolName = tc.name;
-                mirrorToolSummary = tc.args && tc.args.toolSummary ? tc.args.toolSummary.replace(/^"|"$/g, '') : `Thực thi ${toolName}`;
+                currentToolSummary = tc.args && tc.args.toolSummary ? tc.args.toolSummary.replace(/^"|"$/g, '') : `Thực thi ${toolName}`;
 
-                const safeSummary = escapeHtml(mirrorToolSummary);
-                mirrorWorkingMsgId = await sendMsg(
+                const safeSummary = escapeHtml(currentToolSummary);
+                currentWorkingMsgId = await sendMsg(
                     activeChatId,
                     `⚡ <b>[MÁY TÍNH ĐANG THỰC HIỆN]</b>\n▶ <code>${safeSummary}</code>`,
                     activeThreadId
                 );
-                if (mirrorWorkingMsgId) mirrorTempMsgIds.push(mirrorWorkingMsgId);
+                if (currentWorkingMsgId) tempMsgIds.push(currentWorkingMsgId);
             }
 
-            // Giai đoạn: Tool Output
+            // Giai đoạn: Hoàn tất Tool Call
             if (entry.type === 'GENERIC' && entry.content) {
-                const wSec = mirrorToolStartTime ? Math.max(1, Math.round((Date.now() - mirrorToolStartTime) / 1000)) : 1;
-                const safeTask = escapeHtml(mirrorToolSummary || 'Tác vụ');
+                const wSec = currentToolStartTime ? Math.max(1, Math.round((Date.now() - currentToolStartTime) / 1000)) : 1;
+                const safeTask = escapeHtml(currentToolSummary || 'Tác vụ');
 
-                if (mirrorWorkingMsgId) {
+                if (currentWorkingMsgId) {
                     await editMsg(
                         activeChatId,
-                        mirrorWorkingMsgId,
+                        currentWorkingMsgId,
                         `✅ <b>[ĐÃ HOÀN TẤT TRONG ${wSec}s]</b>: <code>${safeTask}</code>`
                     );
-                    mirrorWorkingMsgId = null;
+                    currentWorkingMsgId = null;
                 }
 
                 sendTyping(activeChatId, activeThreadId);
-                if (!mirrorTypingInterval) {
-                    mirrorTypingInterval = setInterval(() => {
+                if (!typingInterval) {
+                    typingInterval = setInterval(() => {
                         sendTyping(activeChatId, activeThreadId);
                     }, 3000);
                 }
             }
 
-            // Giai đoạn: Final Response
+            // Giai đoạn: Phản hồi hoàn chỉnh từ Antigravity PC
             if (entry.type === 'PLANNER_RESPONSE' && entry.content && (!entry.tool_calls || entry.tool_calls.length === 0)) {
                 const answer = entry.content.toString().trim();
                 if (!answer) continue;
 
-                if (mirrorTypingInterval) {
-                    clearInterval(mirrorTypingInterval);
-                    mirrorTypingInterval = null;
+                if (typingInterval) {
+                    clearInterval(typingInterval);
+                    typingInterval = null;
                 }
 
-                const totalSec = mirrorPromptStartTime ? Math.max(1, Math.round((Date.now() - mirrorPromptStartTime) / 1000)) : 1;
-                console.log('[Bridge PC Mirror] Gửi câu trả lời hoàn chỉnh tới Telegram...');
+                const totalSec = promptStartTime ? Math.max(1, Math.round((Date.now() - promptStartTime) / 1000)) : 1;
+                console.log('[Bridge] Gửi câu trả lời hoàn chỉnh từ PC tới Telegram...');
                 await sendLongResponse(activeChatId, answer, totalSec, activeThreadId);
 
-                const toClean = [...mirrorTempMsgIds];
-                mirrorTempMsgIds = [];
-                mirrorPromptStartTime = null;
-                mirrorPromptSaved = '';
-                mirrorThinkingSent = false;
-                mirrorWorkingMsgId = null;
+                const toClean = [...tempMsgIds];
+                tempMsgIds = [];
+                promptStartTime = null;
+                promptTextSaved = '';
+                thinkingSent = false;
+                currentWorkingMsgId = null;
 
                 if (toClean.length > 0) {
                     runCountdownCleanup(activeChatId, activeThreadId, toClean);
                 }
             }
         } catch (e) {
-            console.error('[Mirror Parse Error]:', e.message);
+            console.error('[Bridge Error] Lỗi parse dòng transcript:', e.message);
         }
     }
 }
@@ -605,7 +514,7 @@ async function pollUpdates() {
                     const threadId = msg.message_thread_id || null;
                     const fromId = msg.from ? msg.from.id : 0;
 
-                    // Không xử lý tin nhắn của Bot
+                    // Bỏ qua tin nhắn từ Bot để chống lặp
                     if (msg.from && msg.from.is_bot) continue;
 
                     const isAllowed = allowedList.includes(Number(chatId)) || allowedList.includes(Number(fromId));
@@ -630,7 +539,31 @@ async function pollUpdates() {
                     if (!userText && !isPhoto) continue;
 
                     console.log(`[Telegram Nhận Tin] (${chatId}, thread=${threadId}): ${userText.substring(0, 50)}`);
-                    handleTelegramMessage(chatId, threadId, userText, isPhoto);
+
+                    // Khởi tạo lượt xử lý
+                    promptStartTime = Date.now();
+                    promptTextSaved = userText;
+                    thinkingSent = false;
+
+                    const previewClean = userText.replace(/[<>]/g, '');
+                    const previewSafe = escapeHtml(previewClean.length > 55 ? previewClean.substring(0, 55) + '...' : previewClean);
+
+                    // 1. Phản hồi tức thì bằng bóng đọc prompt (< 0.2s)
+                    const promptLabel = isPhoto
+                        ? '📷 <b>[ĐÃ NHẬN ẢNH VÀ ĐANG PHÂN TÍCH, VUI LÒNG ĐỢI (1s)...]</b>'
+                        : '📖 <b>[ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (1s)...]</b>';
+
+                    const promptMid = await sendMsg(chatId, `${promptLabel}\n<blockquote><i>${previewSafe}</i></blockquote>`, threadId);
+                    if (promptMid) tempMsgIds.push(promptMid);
+
+                    // 2. Bật Popup Toast trên màn hình PC của bro
+                    showScreenToast('📱 Telegram -> PC Sync', previewClean);
+
+                    // 3. Ghi vào file lịch sử sync_bridge.json
+                    recordSyncMessage(userText);
+
+                    // 4. Đẩy thẳng Prompt vào Box Chat Antigravity PC
+                    forwardToAntigravity(userText);
                 }
             }
         } catch (e) {
