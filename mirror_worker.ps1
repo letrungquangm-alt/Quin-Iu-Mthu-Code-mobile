@@ -597,9 +597,20 @@ while ($true) {
                             }
 
                             if ($tempWorkingMsgIds.Count -gt 0) {
-                                foreach ($mid in $tempWorkingMsgIds) {
-                                    Delete-TgMessage -messageId $mid
-                                    Start-Sleep -Milliseconds 80
+                                $target = Get-CurrentTgTarget
+                                $urlDelBatch = "https://api.telegram.org/bot$botToken/deleteMessages"
+                                $delBody = @{
+                                    chat_id = $target.chatId
+                                    message_ids = @($tempWorkingMsgIds)
+                                } | ConvertTo-Json -Compress
+                                try {
+                                    $batchRes = Invoke-RestMethod -Uri $urlDelBatch -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($delBody)) -TimeoutSec 5
+                                    if (-not ($batchRes.ok)) { throw "batch failed" }
+                                } catch {
+                                    foreach ($mid in $tempWorkingMsgIds) {
+                                        Delete-TgMessage -messageId $mid
+                                        Start-Sleep -Milliseconds 50
+                                    }
                                 }
                                 $tempWorkingMsgIds.Clear()
                             }
