@@ -584,10 +584,22 @@ while ($true) {
                             }
                             Set-SyncBridgeWorkingStatus -working $false
 
-                            # TỰ ĐỘNG XÓA SẠCH CÁC TIN NHẮN TIẾN TRÌNH TẠM THỜI (KHÔNG BLOCK)
+                            # XÓA TOÀN BỘ CÁC TIN NHẮN TIẾN TRÌNH TẠM THỜI (TRỪ TIN PHẢN HỒI)
+                            if (Test-Path $syncBridgePath) {
+                                try {
+                                    $br = Get-Content $syncBridgePath -Raw -Encoding UTF8 | ConvertFrom-Json
+                                    if ($br.promptReadingMsgId) {
+                                        [void]$tempWorkingMsgIds.Add([int]$br.promptReadingMsgId)
+                                        $br.promptReadingMsgId = $null
+                                        $br | ConvertTo-Json -Depth 5 | Set-Content $syncBridgePath -Encoding UTF8
+                                    }
+                                } catch {}
+                            }
+
                             if ($tempWorkingMsgIds.Count -gt 0) {
                                 foreach ($mid in $tempWorkingMsgIds) {
                                     Delete-TgMessage -messageId $mid
+                                    Start-Sleep -Milliseconds 80
                                 }
                                 $tempWorkingMsgIds.Clear()
                             }

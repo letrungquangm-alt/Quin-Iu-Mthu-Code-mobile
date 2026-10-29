@@ -239,6 +239,8 @@ function Send-TelegramMessage {
             if ($parseMode) {
                 try {
                     $bodyObj.Remove("parse_mode")
+                    $cleanChunk = [regex]::Replace($chunkText, '<[^>]+>', '')
+                    $bodyObj["text"] = $cleanChunk
                     $plainBody = $bodyObj | ConvertTo-Json -Compress
                     $res = Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($plainBody)) -TimeoutSec 10
                     if ($res.ok -and $res.result) { $lastMsgId = $res.result.message_id }
@@ -1209,8 +1211,9 @@ function Execute-UserPrompt {
         $global:promptReadingStart = [DateTime]::Now
         $global:promptReadingPreview = $preview
         $global:lastReadingSec = 1
-        $safePrev = [System.Net.WebUtility]::HtmlEncode($preview)
-        $global:promptReadingMsgId = Send-TelegramMessage -chatId $chatId -text "📖 <b>[ĐÃ NHẬN & ĐANG ĐỌC PROMPT (1s)...]</b>`n<blockquote expandable><i>`"$safePrev`"</i></blockquote>" -messageThreadId $messageThreadId
+        $cleanPreviewText = ($preview -replace '[<>]', '')
+        $safePrev = [System.Net.WebUtility]::HtmlEncode($cleanPreviewText)
+        $global:promptReadingMsgId = Send-TelegramMessage -chatId $chatId -text "📖 <b>[ĐÃ NHẬN & ĐANG ĐỌC PROMPT (1s)...]</b>`n<blockquote><i>$safePrev</i></blockquote>" -messageThreadId $messageThreadId
         Send-TelegramAction -chatId $chatId -action "typing" -messageThreadId $messageThreadId
 
         if (Test-Path $syncBridgePath) {
