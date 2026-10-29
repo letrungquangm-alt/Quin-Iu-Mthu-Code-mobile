@@ -425,6 +425,9 @@ async function pollUpdates() {
                         const cbData = cb.data;
                         const fromId = cb.from ? cb.from.id : 0;
                         const chatId = cb.message && cb.message.chat ? cb.message.chat.id : activeChatId;
+                        const cbThreadId = (cb.message && cb.message.message_thread_id) ? cb.message.message_thread_id : activeThreadId;
+                        activeChatId = chatId;
+                        activeThreadId = cbThreadId;
 
                         const isAllowed = allowedList.includes(Number(chatId)) || allowedList.includes(Number(fromId));
                         if (!isAllowed) continue;
