@@ -505,6 +505,46 @@ async function removeAllCancelButtons(chatId) {
     }
 }
 
+// --- PIN KEYPAD SYSTEM (3x3 NUMPAD + HỦY, XÓA, ENTER) ---
+
+let currentPin = '';
+let pinFailedCount = 0;
+
+function getPinDisplay(pin) {
+    const slots = ['_', '_', '_', '_'];
+    for (let i = 0; i < (pin || '').length && i < 4; i++) {
+        slots[i] = pin[i];
+    }
+    return `[ ${slots.join('  ')} ]`;
+}
+
+function getKeypadMarkup() {
+    return {
+        inline_keyboard: [
+            [
+                { text: '1', callback_data: 'pin_num_1' },
+                { text: '2', callback_data: 'pin_num_2' },
+                { text: '3', callback_data: 'pin_num_3' }
+            ],
+            [
+                { text: '4', callback_data: 'pin_num_4' },
+                { text: '5', callback_data: 'pin_num_5' },
+                { text: '6', callback_data: 'pin_num_6' }
+            ],
+            [
+                { text: '7', callback_data: 'pin_num_7' },
+                { text: '8', callback_data: 'pin_num_8' },
+                { text: '9', callback_data: 'pin_num_9' }
+            ],
+            [
+                { text: '❌ Hủy', callback_data: 'pin_action_cancel' },
+                { text: '⌫ Xóa', callback_data: 'pin_action_backspace' },
+                { text: '↵ Enter', callback_data: 'pin_action_enter' }
+            ]
+        ]
+    };
+}
+
 // --- LIVE TICKING STOPWATCH (EVERY 2.0 SECONDS - CHỐNG NGHẼN 429) ---
 
 async function updateStatusBubble() {
@@ -818,13 +858,95 @@ async function pollUpdates() {
                         const isAllowed = allowedList.includes(Number(chatId)) || allowedList.includes(Number(fromId));
                         if (!isAllowed) continue;
 
-                        await tgApi('answerCallbackQuery', {
-                            callback_query_id: cb.id,
-                            text: '🛑 Đang dừng tác vụ...'
-                        });
+                        // A. XỬ LÝ NÚT SỐ TRÊN BÀN PHÍM PIN (1 - 9)
+                        if (cbData.startsWith('pin_num_')) {
+                            const num = cbData.replace('pin_num_', '');
+                            if (currentPin.length < 4) {
+                                currentPin += num;
+                                await tgApi('answerCallbackQuery', { callback_query_id: cb.id, text: `Đã bấm: ${num}` });
+                                const screen = `📟 <b>[BÀN PHÍM XÁC THỰC KẾT NỐI]</b>\n──────────────────────\nMàn hình: <code>${getPinDisplay(currentPin)}</code>\n<i>(Nhập 4 số rồi bấm ↵ Enter để kết nối với PC)</i>`;
+                                await editMsg(chatId, cb.message.message_id, screen, 'HTML', getKeypadMarkup());
+                            } else {
+                                await tgApi('answerCallbackQuery', { callback_query_id: cb.id, text: 'Đã đủ 4 số! Hãy bấm ↵ Enter' });
+                            }
+                            continue;
+                        }
 
+                        // B. XỬ LÝ NÚT XÓA TỪNG SỐ (BACKSPACE)
+                        if (cbData === 'pin_action_backspace') {
+                            if (currentPin.length > 0) {
+                                currentPin = currentPin.slice(0, -1);
+                                await tgApi('answerCallbackQuery', { callback_query_id: cb.id, text: 'Đã xóa 1 số' });
+                                const screen = `📟 <b>[BÀN PHÍM XÁC THỰC KẾT NỐI]</b>\n──────────────────────\nMàn hình: <code>${getPinDisplay(currentPin)}</code>\n<i>(Nhập 4 số rồi bấm ↵ Enter để kết nối với PC)</i>`;
+                                await editMsg(chatId, cb.message.message_id, screen, 'HTML', getKeypadMarkup());
+                            } else {
+                                await tgApi('answerCallbackQuery', { callback_query_id: cb.id, text: 'Màn hình đang trống' });
+                            }
+                            continue;
+                        }
+
+                        // C. XỬ LÝ NÚT HỦY (CANCEL KEYPAD) -> Về lại Cloud bình thường
+                        if (cbData === 'pin_action_cancel') {
+                            currentPin = '';
+                            pinFailedCount = 0;
+                            await tgApi('answerCallbackQuery', { callback_query_id: cb.id, text: 'Đã hủy xác thực' });
+                            const cancelText = `☁️ <b>[ĐÃ HỦY NHẬP MÃ ĐỒNG BỘ]</b>\n──────────────────────\nBro đã hủy bàn phím nhập mã. Hệ thống duy trì chế độ Vercel Cloud 24/7 bình thường (không chặn).\n\n👉 Khi cần kết nối lại, gõ <code>/ketnoi</code> hoặc <code>/ketnoilai</code>.`;
+                            await editMsg(chatId, cb.message.message_id, cancelText, 'HTML', { inline_keyboard: [] });
+                            continue;
+                        }
+
+                        // D. XỬ LÝ NÚT ENTER (XÁC NHẬN MÃ)
+                        if (cbData === 'pin_action_enter') {
+                            if (currentPin.length < 4) {
+                                await tgApi('answerCallbackQuery', { callback_query_id: cb.id, text: 'Vui lòng nhập đủ 4 số trước khi Enter!' });
+                                continue;
+                            }
+
+                            if (currentPin === '6585') {
+                                pinFailedCount = 0;
+                                currentPin = '';
+                                currentPhase = 'IDLE';
+                                stopTicker();
+                                if (typingInterval) {
+                                    clearInterval(typingInterval);
+                                    typingInterval = null;
+                                }
+                                tempMsgIds = [];
+                                promptMsgId = null;
+                                activeThreadId = (cb.message && cb.message.message_thread_id) || activeThreadId || 315;
+                                await tgApi('answerCallbackQuery', { callback_query_id: cb.id, text: '✅ Mã chính xác! Đang kết nối...' });
+                                const successText = `⚡ <b>[ĐÃ KẾT NỐI QUA MÃ 6585 THÀNH CÔNG!]</b>\n──────────────────────\n🖥️ <b>Cửa sổ Antigravity PC:</b> SẴN SÀNG 100%\n🚀 <b>Kênh làm việc:</b> Topic 315 (Quin-Iu-Mthu)\n🔗 <b>Mã định danh:</b> <code>GM_6585_Mthu</code>\n✨ Đã cưỡng chế kết nối máy tính thành công! Bro gửi yêu cầu code hoặc ảnh ngay bây giờ nhé!`;
+                                await editMsg(chatId, cb.message.message_id, successText, 'HTML', { inline_keyboard: [] });
+                                forwardToAntigravity(`[LỆNH CƯỠNG CHẾ KẾT NỐI LẠI]: Người dùng đã nhập đúng mã 6585 qua bàn phím PIN. Đồng bộ tức thì với cửa sổ Antigravity PC.`);
+                                continue;
+                            } else {
+                                pinFailedCount++;
+                                const wrongPin = currentPin;
+                                currentPin = '';
+
+                                if (pinFailedCount >= 3) {
+                                    pinFailedCount = 0;
+                                    await tgApi('answerCallbackQuery', { callback_query_id: cb.id, text: '❌ Sai 3 lần! Trở về Cloud 24/7' });
+                                    const failMaxText = `☁️ <b>[NHẬP SAI 3 LẦN - TRỞ VỀ CLOUD 24/7]</b>\n──────────────────────\nBro đã nhập sai mã 3 lần. Hệ thống tự động chuyển về chế độ Vercel Cloud 24/7 bình thường (không chặn).\n\n👉 Khi muốn kết nối lại với PC, gõ <code>/ketnoi</code> hoặc <code>/ketnoilai</code>.`;
+                                    await editMsg(chatId, cb.message.message_id, failMaxText, 'HTML', { inline_keyboard: [] });
+                                    continue;
+                                } else {
+                                    await tgApi('answerCallbackQuery', { callback_query_id: cb.id, text: `❌ Sai mã! Còn ${3 - pinFailedCount} lần thử` });
+                                    const retryText = `❌ <b>[MÃ 4 SỐ KHÔNG CHÍNH XÁC!]</b> <i>(Sai ${pinFailedCount}/3 lần)</i>\n──────────────────────\nMàn hình: <code>${getPinDisplay('')}</code>\n<i>Vui lòng nhập lại mã 4 số chính xác rồi bấm ↵ Enter:</i>`;
+                                    await editMsg(chatId, cb.message.message_id, retryText, 'HTML', getKeypadMarkup());
+                                    continue;
+                                }
+                            }
+                        }
+
+                        // E. XỬ LÝ NÚT HỦY TÁC VỤ ĐANG CHẠY (CANCEL_TASK)
                         if (cbData === 'cancel_task') {
+                            await tgApi('answerCallbackQuery', {
+                                callback_query_id: cb.id,
+                                text: '🛑 Đang dừng tác vụ...'
+                            });
                             await handleCancelAction('Inline Button');
+                            continue;
                         }
                         continue;
                     }
@@ -894,18 +1016,16 @@ async function pollUpdates() {
                         }
                     }
 
-                    // 2. Xử lý lệnh cưỡng chế kết nối lại (/ketnoilai, /reconnect, /pc, /local)
-                    if (/^(?:\/ketnoilai|\/reconnect|\/pc|\/local|kết nối lại)(?:\s+(\w+))?$/i.test(userText)) {
-                        const match = userText.match(/^(?:\/ketnoilai|\/reconnect|\/pc|\/local|kết nối lại)(?:\s+(\w+))?$/i);
+                    // 2. Xử lý lệnh cưỡng chế kết nối lại (/ketnoi, /ketnoilai, /reconnect, /pc, /local)
+                    if (/^(?:\/ketnoi|\/ketnoilai|\/reconnect|\/pc|\/local|kết nối lại)(?:\s+(\w+))?$/i.test(userText.trim())) {
+                        const match = userText.trim().match(/^(?:\/ketnoi|\/ketnoilai|\/reconnect|\/pc|\/local|kết nối lại)(?:\s+(\w+))?$/i);
                         const providedCode = match ? match[1] : null;
 
                         if (!providedCode) {
-                            waitingForPairCode = true;
-                            await sendMsg(
-                                chatId,
-                                `🔑 <b>[XÁC THỰC KẾT NỐI]</b>\n──────────────────────\nBro vui lòng nhập <b>mã 4 số</b> (Ví dụ: <code>6585</code>) để cưỡng chế đồng bộ với máy tính:`,
-                                activeThreadId
-                            );
+                            currentPin = '';
+                            pinFailedCount = 0;
+                            const initialScreen = `📟 <b>[BÀN PHÍM XÁC THỰC KẾT NỐI]</b>\n──────────────────────\nMàn hình: <code>${getPinDisplay('')}</code>\n<i>(Nhập mã 4 số rồi bấm ↵ Enter để kết nối với PC)</i>`;
+                            await sendMsg(chatId, initialScreen, activeThreadId, 'HTML', getKeypadMarkup());
                             continue;
                         }
 
