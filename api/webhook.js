@@ -56,10 +56,11 @@ function convertMdToTgHtml(text) {
     return s;
 }
 
-async function sendTelegramMessage(chatId, text, parseMode = 'HTML', replyMarkup = null) {
+async function sendTelegramMessage(chatId, text, parseMode = 'HTML', replyMarkup = null, threadId = null) {
     if (!text) return null;
     const chunks = splitTelegramText(text, 3500);
     const totalParts = chunks.length;
+    const targetThread = threadId || (String(chatId) === '-1004457846636' ? 315 : null);
 
     for (let i = 0; i < totalParts; i++) {
         let chunkText = chunks[i];
@@ -73,6 +74,7 @@ async function sendTelegramMessage(chatId, text, parseMode = 'HTML', replyMarkup
             text: chunkText,
             disable_web_page_preview: true
         };
+        if (targetThread) bodyObj.message_thread_id = Number(targetThread);
         if (parseMode) bodyObj.parse_mode = parseMode;
         if (replyMarkup && i === totalParts - 1) bodyObj.reply_markup = replyMarkup;
 
@@ -145,7 +147,7 @@ async function listRepoFiles(repo, path = '') {
         return res.data.map(item => ({
             name: item.name,
             path: item.path,
-            type: item.type, // 'file' or 'dir'
+            type: item.type,
             size: item.size
         }));
     }
@@ -162,14 +164,12 @@ async function readRepoFile(repo, path) {
 }
 
 async function commitFileToGitHub(repo, path, content, commitMessage = 'feat(cloud): update file via Telegram') {
-    // 1. Kiểm tra xem file đã tồn tại trên repo chưa để lấy SHA
     let existingSha = undefined;
     const checkRes = await fetchGitHub(`/repos/${GITHUB_OWNER}/${repo}/contents/${path}`);
     if (checkRes.ok && checkRes.data?.sha) {
         existingSha = checkRes.data.sha;
     }
 
-    // 2. Commit file mới hoặc cập nhật
     const b64 = Buffer.from(content, 'utf-8').toString('base64');
     const body = {
         message: commitMessage,
@@ -282,17 +282,18 @@ export default async function handler(req, res) {
         const update = req.body;
         if (!update) return res.status(200).json({ ok: true });
 
-        // Xử lý Callback Query (nếu người dùng bấm nút inline keyboard)
+        // Xử lý Callback Query
         if (update.callback_query) {
             const cb = update.callback_query;
             const cbChatId = String(cb.message.chat.id);
+            const cbThreadId = cb.message.message_thread_id || (cbChatId === '-1004457846636' ? 315 : null);
             const cbData = cb.data || '';
 
             if (cbData.startsWith('repo:select:')) {
                 const selRepo = cbData.substring(12).trim();
                 CURRENT_ACTIVE_REPO = selRepo;
                 await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/answerCallbackQuery?callback_query_id=${cb.id}&text=Đã chọn repo ${selRepo}`);
-                await sendTelegramMessage(cbChatId, `📁 <b>[ĐÃ CHUYỂN DỰ ÁN CLOUD]</b>\n──────────────────────\n• <b>GitHub Repo</b>: <code>${CURRENT_ACTIVE_REPO}</code>\n• <b>Owner</b>: <code>${GITHUB_OWNER}</code>\n\nMọi file bạn yêu cầu viết tiếp sẽ được commit thẳng vào repo này! Khi máy tính bật lại sẽ tự động git pull về ổ cứng.`);
+                await sendTelegramMessage(cbChatId, `📁 <b>[ĐÃ CHUYỂN DỰ ÁN CLOUD]</b>\n──────────────────────\n• <b>GitHub Repo</b>: <code>${CURRENT_ACTIVE_REPO}</code>\n• <b>Owner</b>: <code>${GITHUB_OWNER}</code>\n\nMọi file bạn yêu cầu viết tiếp sẽ được commit thẳng vào repo này! Khi máy tính bật lại sẽ tự động git pull về ổ cứng.`, 'HTML', null, cbThreadId);
             }
             return res.status(200).json({ ok: true });
         }
@@ -301,24 +302,28 @@ export default async function handler(req, res) {
 
         const msg = update.message;
         const chatId = String(msg.chat.id);
+        const fromId = msg.from ? String(msg.from.id) : '';
+        const threadId = msg.message_thread_id || (chatId === '-1004457846636' ? 315 : null);
 
-        // Kiểm tra quyền truy cập Chat ID
-        if (ALLOWED_CHAT_ID && chatId !== ALLOWED_CHAT_ID) {
-            await sendTelegramMessage(chatId, 'Xin lỗi, bạn không có quyền sử dụng Bot này!');
+        // Kiểm tra quyền truy cập (cho phép cá nhân hoặc nhóm được cấp phép)
+        const allowedIds = ['2029333412', '-1004457846636'];
+        if (ALLOWED_CHAT_ID) allowedIds.push(String(ALLOWED_CHAT_ID));
+        if (!allowedIds.includes(chatId) && !allowedIds.includes(fromId)) {
+            await sendTelegramMessage(chatId, 'Xin lỗi, bạn không có quyền sử dụng Bot này!', 'HTML', null, threadId);
             return res.status(200).json({ ok: true });
         }
 
-        // 1. Chuyển quyền về máy tính (/pc hoặc /local)
+        // 1. Chuyển quyền về máy tính (/pc, /local, /ketnoi, 6585)
         if (/^(?:\/pc|\/local|\/ketnoi|\/ketnoilai|\/reconnect|6585)$/i.test((msg.text || '').trim()) || /^(?:\/ketnoi|\/ketnoilai)\s+6585$/i.test((msg.text || '').trim())) {
             await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/deleteWebhook`);
-            await sendTelegramMessage(chatId, '💻 <b>[ĐÃ BÀN GIAO CHO MÁY TÍNH]</b>\nĐã gỡ Webhook Cloud! Máy tính của bro (nếu đang bật) sẽ tiếp nhận tin nhắn trực tiếp qua Long Polling.');
+            await sendTelegramMessage(chatId, '💻 <b>[ĐÃ BÀN GIAO CHO MÁY TÍNH]</b>\n──────────────────────\nĐã gỡ Webhook Cloud! Máy tính của bro (nếu đang bật) sẽ tự động nhận diện và tiếp quản trực tiếp qua Long Polling ngay tức thì.', 'HTML', null, threadId);
             return res.status(200).json({ ok: true });
         }
 
         // 2. Trạng thái Cloud GitOps (/status)
         if (msg.text === '/status') {
             const statusMsg = `☁️ <b>[QUINLOVERIN CLOUD GITOPS 24/7]</b>\n──────────────────────\n• <b>Hạ tầng</b>: Vercel Serverless Global Edge\n• <b>Trạng thái</b>: Trực tuyến 24/7 (Sẵn sàng khi máy nhà tắt)\n• <b>GitHub Owner</b>: <code>${GITHUB_OWNER}</code>\n• <b>Project/Repo Đang Chọn</b>: <code>${CURRENT_ACTIVE_REPO}</code>\n• <b>Cơ chế</b>: Tự động commit lên GitHub khi tạo/sửa file\n\n👉 Gõ <code>/projects</code> hoặc <code>/repos</code> để xem danh sách dự án trên GitHub.\n👉 Gõ <code>/ls</code> để xem cây thư mục của dự án hiện tại.\n👉 Khi máy tính chính bật lại, gõ <code>/pc</code> để điều khiển trực tiếp máy tính!`;
-            await sendTelegramMessage(chatId, statusMsg);
+            await sendTelegramMessage(chatId, statusMsg, 'HTML', null, threadId);
             return res.status(200).json({ ok: true });
         }
 
@@ -326,7 +331,7 @@ export default async function handler(req, res) {
         if (msg.text === '/projects' || msg.text === '/repos' || msg.text === '/project') {
             const repos = await listGitHubRepos();
             if (repos.length === 0) {
-                await sendTelegramMessage(chatId, `📂 Không tìm thấy repo nào trên GitHub của tài khoản <code>${GITHUB_OWNER}</code>.`);
+                await sendTelegramMessage(chatId, `📂 Không tìm thấy repo nào trên GitHub của tài khoản <code>${GITHUB_OWNER}</code>.`, 'HTML', null, threadId);
             } else {
                 let repoListText = `📂 <b>DANH SÁCH DỰ ÁN TRÊN GITHUB (${repos.length}):</b>\n──────────────────────\n`;
                 const buttons = [];
@@ -336,7 +341,7 @@ export default async function handler(req, res) {
                     buttons.push([{ text: `📁 ${r.name}${isCur}`, callback_data: `repo:select:${r.name}` }]);
                 }
                 repoListText += `\n<i>👉 Bấm vào nút bên dưới hoặc gõ <code>/use &lt;tên_repo&gt;</code> để chọn dự án tiếp tục làm việc!</i>`;
-                await sendTelegramMessage(chatId, repoListText, 'HTML', { inline_keyboard: buttons.slice(0, 8) });
+                await sendTelegramMessage(chatId, repoListText, 'HTML', { inline_keyboard: buttons.slice(0, 8) }, threadId);
             }
             return res.status(200).json({ ok: true });
         }
@@ -346,9 +351,9 @@ export default async function handler(req, res) {
             const targetRepo = msg.text.split(' ')[1]?.trim();
             if (targetRepo) {
                 CURRENT_ACTIVE_REPO = targetRepo;
-                await sendTelegramMessage(chatId, `✅ <b>[ĐÃ CHỌN DỰ ÁN]</b>: <code>${CURRENT_ACTIVE_REPO}</code>\nTừ bây giờ mọi file code sinh ra sẽ được commit thẳng vào repo này.`);
+                await sendTelegramMessage(chatId, `✅ <b>[ĐÃ CHỌN DỰ ÁN]</b>: <code>${CURRENT_ACTIVE_REPO}</code>\nTừ bây giờ mọi file code sinh ra sẽ được commit thẳng vào repo này.`, 'HTML', null, threadId);
             } else {
-                await sendTelegramMessage(chatId, 'Cú pháp: <code>/use &lt;tên_repo&gt;</code>');
+                await sendTelegramMessage(chatId, 'Cú pháp: <code>/use &lt;tên_repo&gt;</code>', 'HTML', null, threadId);
             }
             return res.status(200).json({ ok: true });
         }
@@ -357,7 +362,7 @@ export default async function handler(req, res) {
         if (msg.text === '/ls' || msg.text === '/dir') {
             const files = await listRepoFiles(CURRENT_ACTIVE_REPO);
             if (!files) {
-                await sendTelegramMessage(chatId, `❌ Không thể đọc danh sách file của repo <code>${CURRENT_ACTIVE_REPO}</code> từ GitHub.`);
+                await sendTelegramMessage(chatId, `❌ Không thể đọc danh sách file của repo <code>${CURRENT_ACTIVE_REPO}</code> từ GitHub.`, 'HTML', null, threadId);
             } else {
                 let out = `📂 <b>DỰ ÁN: [${CURRENT_ACTIVE_REPO}] (GitHub)</b>\n──────────────────────\n`;
                 for (const f of files) {
@@ -366,7 +371,7 @@ export default async function handler(req, res) {
                     out += `${icon} <code>${f.path}</code>${sizeStr}\n`;
                 }
                 out += `\n<i>👉 Gõ <code>/read &lt;tên_file&gt;</code> để xem nội dung file trực tiếp trên GitHub!</i>`;
-                await sendTelegramMessage(chatId, out);
+                await sendTelegramMessage(chatId, out, 'HTML', null, threadId);
             }
             return res.status(200).json({ ok: true });
         }
@@ -382,9 +387,9 @@ export default async function handler(req, res) {
                     .replace(/</g, '&lt;')
                     .replace(/>/g, '&gt;');
                 const body = `<pre><code>${safeCode}</code></pre>`;
-                await sendTelegramMessage(chatId, header + body);
+                await sendTelegramMessage(chatId, header + body, 'HTML', null, threadId);
             } else {
-                await sendTelegramMessage(chatId, `❌ Không tìm thấy file <code>${filePath}</code> trong repo <code>${CURRENT_ACTIVE_REPO}</code>.`);
+                await sendTelegramMessage(chatId, `❌ Không tìm thấy file <code>${filePath}</code> trong repo <code>${CURRENT_ACTIVE_REPO}</code>.`, 'HTML', null, threadId);
             }
             return res.status(200).json({ ok: true });
         }
@@ -395,12 +400,12 @@ export default async function handler(req, res) {
             if (firstLineBreak > 0) {
                 const filePath = msg.text.substring(6, firstLineBreak).trim();
                 const fileContent = msg.text.substring(firstLineBreak + 1);
-                await sendTelegramMessage(chatId, `⏳ Đang commit file <code>${filePath}</code> lên GitHub repo <code>${CURRENT_ACTIVE_REPO}</code>...`);
+                await sendTelegramMessage(chatId, `⏳ Đang commit file <code>${filePath}</code> lên GitHub repo <code>${CURRENT_ACTIVE_REPO}</code>...`, 'HTML', null, threadId);
                 const commitRes = await commitFileToGitHub(CURRENT_ACTIVE_REPO, filePath, fileContent, `feat(cloud): add ${filePath} via Telegram`);
                 if (commitRes.success) {
-                    await sendTelegramMessage(chatId, `💾 <b>[ĐÃ COMMIT LÊN GITHUB THÀNH CÔNG]</b>\n──────────────────────\n• <b>Repo</b>: <code>${CURRENT_ACTIVE_REPO}</code>\n• <b>File</b>: <code>${filePath}</code>\n• <b>Commit SHA</b>: <code>${commitRes.sha.slice(0, 7)}</code>\n\n<i>👉 Khi máy tính chính bật lại, code sẽ tự động git pull về ổ cứng!</i>`);
+                    await sendTelegramMessage(chatId, `💾 <b>[ĐÃ COMMIT LÊN GITHUB THÀNH CÔNG]</b>\n──────────────────────\n• <b>Repo</b>: <code>${CURRENT_ACTIVE_REPO}</code>\n• <b>File</b>: <code>${filePath}</code>\n• <b>Commit SHA</b>: <code>${commitRes.sha.slice(0, 7)}</code>\n\n<i>👉 Khi máy tính chính bật lại, code sẽ tự động git pull về ổ cứng!</i>`, 'HTML', null, threadId);
                 } else {
-                    await sendTelegramMessage(chatId, `❌ Lỗi commit: ${commitRes.error}`);
+                    await sendTelegramMessage(chatId, `❌ Lỗi commit: ${commitRes.error}`, 'HTML', null, threadId);
                 }
                 return res.status(200).json({ ok: true });
             }
@@ -412,7 +417,7 @@ export default async function handler(req, res) {
             const fileId = largest.file_id;
             const caption = msg.caption ? msg.caption.trim() : 'Hãy quan sát bức ảnh này và phân tích chi tiết giúp tôi.';
 
-            await sendTelegramMessage(chatId, `📷 <b>[CLOUD VISION - ĐANG PHÂN TÍCH ẢNH...]</b>\n<blockquote><i>"${caption.slice(0, 100)}"</i></blockquote>`);
+            await sendTelegramMessage(chatId, `📷 <b>[CLOUD VISION - ĐANG PHÂN TÍCH ẢNH...]</b>\n<blockquote><i>"${caption.slice(0, 100)}"</i></blockquote>`, 'HTML', null, threadId);
 
             const fInfoResp = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getFile?file_id=${fileId}`);
             const fInfo = await fInfoResp.json();
@@ -424,9 +429,9 @@ export default async function handler(req, res) {
 
                 const answer = await askGeminiVision(caption, base64, 'image/jpeg');
                 const htmlAnswer = convertMdToTgHtml(answer) + '\n\n☁️ <i>[Phản hồi từ QuinloveRin Cloud 24/7]</i>';
-                await sendTelegramMessage(chatId, htmlAnswer);
+                await sendTelegramMessage(chatId, htmlAnswer, 'HTML', null, threadId);
             } else {
-                await sendTelegramMessage(chatId, '❌ Không thể tải ảnh từ máy chủ Telegram.');
+                await sendTelegramMessage(chatId, '❌ Không thể tải ảnh từ máy chủ Telegram.', 'HTML', null, threadId);
             }
             return res.status(200).json({ ok: true });
         }
@@ -435,17 +440,14 @@ export default async function handler(req, res) {
         if (msg.text) {
             const userPrompt = msg.text.trim();
 
-            // Nếu người dùng gõ lệnh terminal đặc thù của Windows
             if (userPrompt.startsWith('/cmd ')) {
                 const notice = `💻 <b>[CHẾ ĐỘ CLOUD GITOPS 24/7 - MÁY TÍNH ĐANG TẮT]</b>\n──────────────────────\nLệnh Terminal <code>${userPrompt}</code> yêu cầu máy tính Windows chính đang bật.\n\nHiện tại bro đang kết nối qua Cloud AI trên Vercel. Mọi file mã nguồn bro yêu cầu sẽ được lưu an toàn trên GitHub Repo <code>${CURRENT_ACTIVE_REPO}</code>. Khi máy tính chính có điện và bật lại, bro hãy gõ <code>/pc</code> để thực thi trực tiếp trên máy tính nhé!`;
-                await sendTelegramMessage(chatId, notice);
+                await sendTelegramMessage(chatId, notice, 'HTML', null, threadId);
                 return res.status(200).json({ ok: true });
             }
 
-            // Gọi Gemini AI xử lý
             const rawAnswer = await askGeminiText(userPrompt, CURRENT_ACTIVE_REPO);
 
-            // Kiểm tra xem Gemini có xuất khối ```commit:<file_path>\n<code>``` không
             const commitRegex = /```commit:([^\r\n]+)\r?\n([\s\S]*?)```/g;
             let match;
             const committedFiles = [];
@@ -471,7 +473,6 @@ export default async function handler(req, res) {
                 }
             }
 
-            // Định dạng câu trả lời gửi về Telegram
             let cleanAnswer = rawAnswer.replace(/```commit:([^\r\n]+)/g, '```');
             let formatted = convertMdToTgHtml(cleanAnswer);
 
@@ -485,7 +486,7 @@ export default async function handler(req, res) {
             }
 
             formatted += '\n\n☁️ <i>[QuinloveRin Cloud GitOps 24/7]</i>';
-            await sendTelegramMessage(chatId, formatted);
+            await sendTelegramMessage(chatId, formatted, 'HTML', null, threadId);
             return res.status(200).json({ ok: true });
         }
 
