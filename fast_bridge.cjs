@@ -23,6 +23,13 @@ const {
     setActiveCancelMsgId
 } = require('./lib/telegram.cjs');
 
+const {
+    forwardToAntigravity,
+    showScreenToast,
+    recordSyncMessage
+} = require('./lib/ipc.cjs');
+
+const { createTranscriptWatcher } = require('./lib/transcript.cjs');
 const { formatToolCall } = require('./lib/formatter.cjs');
 const { getPinDisplay, getKeypadMarkup } = require('./lib/numpad.cjs');
 const {
@@ -38,8 +45,11 @@ const {
 
 const {
     MASTER_PASSWORD,
+    getPCDrives,
+    getDriveFolders,
     getMainMenuMarkup,
     getDriveSelectionMarkup,
+    getFolderSelectionMarkup,
     getMainMenuText,
     handleCreateProjectClick,
     verifyMasterPassword,
@@ -54,88 +64,26 @@ const {
 const rootDir = __dirname;
 const conversationId = '7f7131ce-dc72-490f-97bd-4a675f9dd0c7';
 const transcriptPath = `C:\\Users\\letru\\.gemini\\antigravity\\brain\\${conversationId}\\.system_generated\\logs\\transcript.jsonl`;
-let langServer = path.join(process.env.LOCALAPPDATA || 'C:\\Users\\letru\\AppData\\Local', 'Programs', 'antigravity', 'resources', 'bin', 'language_server.exe');
-if (!fs.existsSync(langServer)) {
-    langServer = 'C:\\Users\\letru\\AppData\\Local\\Programs\\antigravity\\resources\\bin\\language_server.exe';
-}
-const notifScript = path.join(rootDir, 'show_notification.ps1');
 const syncBridgePath = path.join(rootDir, 'sync_bridge.json');
 
 console.log('========================================================');
-console.log(' Fast Modular Telegram Bridge v3.2 (Cloud Standby & Raw Polling)');
+console.log(' Fast Modular Telegram Bridge v3.3 (High Speed & Zero Lag)');
 console.log(` Working Dir: ${rootDir}`);
 console.log(` Bot Token: ${botToken.substring(0, 10)}...`);
 console.log(` Conversation ID: ${conversationId}`);
-console.log(` Language Server: ${langServer}`);
 console.log('========================================================');
-
-// --- DISPATCHERS ---
-
-function showScreenToast(title, msg) {
-    if (fs.existsSync(notifScript)) {
-        try {
-            execFile('powershell.exe', [
-                '-NoProfile',
-                '-ExecutionPolicy',
-                'Bypass',
-                '-File',
-                notifScript,
-                '-Title',
-                title,
-                '-Message',
-                msg,
-                '-DurationSec',
-                '3'
-            ], { windowsHide: true }, () => {});
-        } catch (e) {}
-    }
-}
-
-function recordSyncMessage(text) {
-    if (fs.existsSync(syncBridgePath)) {
-        try {
-            const raw = fs.readFileSync(syncBridgePath, 'utf8').replace(/^\uFEFF/, '');
-            const br = JSON.parse(raw);
-            if (!Array.isArray(br.messages)) br.messages = [];
-            br.messages.push({
-                sender: 'phone',
-                timestamp: new Date().toISOString(),
-                text: text
-            });
-            if (br.messages.length > 25) br.messages = br.messages.slice(-25);
-            br.active = true;
-            br.status = 'CONNECTED';
-            br.conversationId = conversationId;
-            fs.writeFileSync(syncBridgePath, JSON.stringify(br, null, 4), 'utf8');
-        } catch (e) {}
-    }
-}
-
-function forwardToAntigravity(text) {
-    if (fs.existsSync(langServer)) {
-        execFile(langServer, ['agentapi', 'send-message', conversationId, text], (err, stdout) => {
-            if (err) {
-                console.error('[Bridge IPC Error] Không thể chuyển tin nhắn tới Antigravity:', err.message);
-            } else {
-                console.log('[Bridge IPC OK] Đã nạp tin nhắn vào Box Chat Antigravity PC:', text.substring(0, 60));
-            }
-        });
-    } else {
-        console.warn('[Bridge Warning] Không tìm thấy language_server.exe tại:', langServer);
-    }
-}
 
 // --- STATE MANAGEMENT ---
 
 let activeChatId = -1004457846636;
-let activeThreadId = 1114;
+let activeThreadId = 1160; // Default to workspace topic 1160; Lobby is 1114
 
 if (fs.existsSync(syncBridgePath)) {
     try {
         const raw = fs.readFileSync(syncBridgePath, 'utf8').replace(/^\uFEFF/, '');
         const br = JSON.parse(raw);
         if (br.chatId) activeChatId = Number(br.chatId);
-        if (br.threadId) activeThreadId = Number(br.threadId);
+        if (br.threadId && Number(br.threadId) !== 1114) activeThreadId = Number(br.threadId);
     } catch (e) {}
 }
 
@@ -145,7 +93,6 @@ let promptTextSaved = '';
 let isPhotoSaved = false;
 let isEditedPrompt = false;
 let currentPhase = 'IDLE'; // 'IDLE' | 'READING' | 'THINKING' | 'WORKING' | 'CANCELED'
-let isCanceled = false;
 let isCloudStandby = false;
 let tickerInterval = null;
 let lastStatusText = '';
@@ -165,9 +112,14 @@ let waitingForEditQueueId = null;
 
 // --- LONG RESPONSE SENDER ---
 
-async function sendLongResponse(chatId, answerText, totalSec, threadId = 315) {
+async function sendLongResponse(chatId, answerText, totalSec, threadId = 1160) {
     if (!answerText) return;
-    const targetThreadId = threadId || activeThreadId || 315;
+    // CRITICAL: Conversational text must NEVER be sent to Lobby #1114!
+    let targetThreadId = Number(threadId);
+    if (!targetThreadId || targetThreadId === 1114) {
+        targetThreadId = 1160;
+    }
+
     const maxLen = 3500;
     const headerTitle = `🤖 <b>[MÁY TÍNH ĐÃ PHẢN HỒI (Hoàn tất trong ${totalSec}s)]:</b>\n\n`;
 
@@ -210,24 +162,20 @@ async function sendLongResponse(chatId, answerText, totalSec, threadId = 315) {
         const header = (i === 0) ? headerTitle : `<i>(Phần ${i + 1}/${chunks.length})</i>\n\n`;
         await sendMsg(chatId, `${header}${html}`, targetThreadId);
         if (i < chunks.length - 1) {
-            await new Promise(r => setTimeout(r, 200));
+            await new Promise(r => setTimeout(r, 150));
         }
     }
 }
 
-// --- SILENT CLEANUP (ZERO SPAM, 1 API CALL) ---
+// --- SILENT CLEANUP (1 FAST API CALL) ---
 
 async function runCountdownCleanup(chatId, threadId, msgIdsToDelete) {
     if (!msgIdsToDelete || msgIdsToDelete.length === 0) return;
     try {
-        console.log(`[Cleanup] Dọn dẹp ${msgIdsToDelete.length} tin nhắn tạm sau 1.5s...`);
         setTimeout(async () => {
             await deleteMsgs(chatId, msgIdsToDelete);
-            console.log('[Cleanup] Hoàn tất, khung chat sạch bong!');
         }, 1500);
-    } catch (e) {
-        console.error('[Cleanup Error]:', e.message);
-    }
+    } catch (e) {}
 }
 
 function formatStopwatch(sec) {
@@ -236,7 +184,7 @@ function formatStopwatch(sec) {
     return `${m > 0 ? m + 'm ' : ''}${s}s`;
 }
 
-// --- LIVE TICKING STOPWATCH (EVERY 1.5S) ---
+// --- LIVE TICKING STOPWATCH (EVERY 1.5S, ROBUST ERROR HANDLING) ---
 
 async function updateStatusBubble() {
     if (isUpdatingStatus || currentPhase === 'IDLE' || currentPhase === 'CANCELED') return;
@@ -250,7 +198,10 @@ async function updateStatusBubble() {
             recordBubbleText(currentWorkingMsgId, updatedToolText);
             isUpdatingStatus = true;
             try {
-                await editMsg(activeChatId, currentWorkingMsgId, updatedToolText, 'HTML', cancelKeyboard);
+                const res = await editMsg(activeChatId, currentWorkingMsgId, updatedToolText, 'HTML', cancelKeyboard);
+                if (res && res.notFound) {
+                    currentWorkingMsgId = null;
+                }
             } catch (e) {}
             isUpdatingStatus = false;
         }
@@ -286,9 +237,14 @@ async function updateStatusBubble() {
     isUpdatingStatus = true;
     try {
         const kb = (getActiveCancelMsgId() === promptMsgId ? cancelKeyboard : { inline_keyboard: [] });
-        await editMsg(activeChatId, promptMsgId, text, 'HTML', kb);
-        lastStatusText = text;
-        recordBubbleText(promptMsgId, text);
+        const res = await editMsg(activeChatId, promptMsgId, text, 'HTML', kb);
+        if (res && res.notFound) {
+            promptMsgId = null;
+            stopTicker();
+        } else {
+            lastStatusText = text;
+            recordBubbleText(promptMsgId, text);
+        }
     } catch (e) {}
     isUpdatingStatus = false;
 }
@@ -309,7 +265,7 @@ function stopTicker() {
 // --- HANDLE DISCONNECT & CLOUD HANDOVER ---
 
 async function handleDisconnectCloud() {
-    console.log('[Bridge Disconnect] Người dùng yêu cầu ngắt kết nối máy tính, bàn giao cho Cloud 24/7');
+    console.log('[Bridge Disconnect] Bàn giao cho Cloud 24/7');
     isCloudStandby = true;
     stopTicker();
     if (typingInterval) {
@@ -321,22 +277,18 @@ async function handleDisconnectCloud() {
     promptMsgId = null;
     currentWorkingMsgId = null;
 
-    const handoverText = `☁️ <b>[ĐÃ NGẮT KẾT NỐI VỚI PC - BÀN GIAO CHO VERCEL CLOUD 24/7]</b>\n──────────────────────\n🖥️ <b>Máy tính:</b> Đã ngưng tiếp nhận lệnh trực tiếp (Chế độ Chờ)\n🌐 <b>Vercel Cloud:</b> ĐÃ TIẾP QUẢN 24/7!\n\n✨ Giờ bro có thể chat, yêu cầu code, phân tích ảnh hoặc commit file lên GitHub an toàn ngay cả khi máy tính tắt nguồn hoặc cúp điện!\n\n👉 Khi muốn kết nối lại máy tính, chỉ cần gõ <code>/pc</code>, <code>/ketnoi</code> hoặc nhập mã <code>6585</code>.`;
+    const handoverText = `☁️ <b>[ĐÃ NGẮT KẾT NỐI VỚI PC - BÀN GIAO CHO VERCEL CLOUD 24/7]</b>\n──────────────────────\n🖥️ <b>Máy tính:</b> Đã ngưng tiếp nhận lệnh trực tiếp (Chế độ Chờ)\n🌐 <b>Vercel Cloud:</b> ĐÃ TIẾP QUẢN 24/7!\n\n✨ Giờ bro có thể chat, yêu cầu code hoặc commit file ngay cả khi máy tính tắt nguồn!\n\n👉 Khi muốn kết nối lại máy tính, chỉ cần gõ <code>/pc</code> hoặc nhập mã <code>6585</code>.`;
     await sendMsg(activeChatId, handoverText, activeThreadId, 'HTML', { inline_keyboard: [] });
 
     try {
-        const setRes = await tgApiRaw('setWebhook', { url: 'https://quiniumthucode.vercel.app/api/webhook' });
-        console.log('[Bridge Disconnect] Đã gán Webhook Vercel:', setRes);
-    } catch (e) {
-        console.error('[Bridge Disconnect Error]:', e.message);
-    }
+        await tgApiRaw('setWebhook', { url: 'https://quiniumthucode.vercel.app/api/webhook' });
+    } catch (e) {}
 }
 
-// --- HANDLE CANCEL ACTION (STOP IMMEDIATELY) ---
+// --- HANDLE CANCEL ACTION ---
 
 async function handleCancelAction(source = 'button') {
-    console.log(`[Bridge Action] Người dùng yêu cầu hủy tác vụ (${source})`);
-    isCanceled = true;
+    console.log(`[Bridge Action] Hủy tác vụ (${source})`);
     currentPhase = 'CANCELED';
     stopTicker();
 
@@ -345,23 +297,20 @@ async function handleCancelAction(source = 'button') {
         typingInterval = null;
     }
 
-    if (fs.existsSync(transcriptPath)) {
-        try {
-            lastOffset = fs.statSync(transcriptPath).size;
-            console.log('[Bridge Cancel] Đã tua nhanh offset transcript để ngừng đọc các tác vụ dở dang:', lastOffset);
-        } catch (e) {}
+    if (transcriptWatcher) {
+        transcriptWatcher.fastForward();
     }
 
     await clearAllCancelButtons(activeChatId, tempMsgIds);
 
-    const cancelMsg = `🛑 <b>[ĐÃ HỦY TÁC VỤ THEO YÊU CẦU CỦA BRO!]</b>\n<i>Đã dừng tiến trình, không chạy tiếp các phần còn lại và tiến hành dọn dẹp.</i>`;
+    const cancelMsg = `🛑 <b>[ĐÃ HỦY TÁC VỤ THEO YÊU CẦU CỦA BRO!]</b>\n<i>Đã dừng tiến trình và dọn dẹp sạch sẽ.</i>`;
     if (promptMsgId) {
         await editMsg(activeChatId, promptMsgId, cancelMsg, 'HTML', { inline_keyboard: [] }, true);
     } else {
         await sendMsg(activeChatId, cancelMsg, activeThreadId, 'HTML', { inline_keyboard: [] });
     }
 
-    forwardToAntigravity(`[LỆNH HỦY TỪ ĐIỆN THOẠI]: Người dùng đã yêu cầu dừng/hủy tác vụ hiện tại. Ngừng ngay lập tức mọi hoạt động.`);
+    forwardToAntigravity(conversationId, `[LỆNH HỦY TỪ ĐIỆN THOẠI]: Người dùng đã yêu cầu dừng/hủy tác vụ hiện tại. Ngừng ngay lập tức mọi hoạt động.`);
 
     const toClean = [...tempMsgIds];
     tempMsgIds = [];
@@ -384,7 +333,6 @@ async function handleCancelAction(source = 'button') {
 // --- START PROMPT EXECUTION HELPER ---
 
 async function executePromptImmediately(chatId, threadId, promptText, previewText, isEdit = false, isPhoto = false) {
-    isCanceled = false;
     currentPhase = 'READING';
     stopTicker();
     promptStartTime = Date.now();
@@ -392,7 +340,9 @@ async function executePromptImmediately(chatId, threadId, promptText, previewTex
     isPhotoSaved = isPhoto;
     isEditedPrompt = isEdit;
 
-    forwardToAntigravity(promptText);
+    forwardToAntigravity(conversationId, promptText);
+
+    // Bật gõ chữ
     sendTyping(chatId, threadId);
     if (!typingInterval) {
         typingInterval = setInterval(() => {
@@ -421,176 +371,131 @@ async function executePromptImmediately(chatId, threadId, promptText, previewTex
     }
 }
 
-// --- TRANSCRIPT MIRROR WATCHER ---
+// --- TRANSCRIPT WATCHER SETUP ---
 
-let lastOffset = 0;
-if (fs.existsSync(transcriptPath)) {
-    try {
-        lastOffset = fs.statSync(transcriptPath).size;
-        console.log('[Bridge] Bắt đầu theo dõi transcript từ byte offset:', lastOffset);
-    } catch (e) {}
-}
+const transcriptWatcher = createTranscriptWatcher({
+    transcriptPath,
+    onToolCall: async (toolCalls) => {
+        if (currentPhase === 'CANCELED') return;
+        currentToolStartTime = Date.now();
+        currentPhase = 'WORKING';
 
-async function processTranscript() {
-    if (isCloudStandby || !fs.existsSync(transcriptPath)) return;
-    let stat;
-    try { stat = fs.statSync(transcriptPath); } catch (e) { return; }
-    if (stat.size <= lastOffset) return;
+        for (const tc of toolCalls) {
+            const { summary, runningFn, finishedFn } = formatToolCall(tc);
+            currentToolSummary = summary;
+            currentToolRunningFn = runningFn;
+            currentToolFinishedFn = finishedFn;
 
-    const fd = fs.openSync(transcriptPath, 'r');
-    const bufLen = stat.size - lastOffset;
-    const buf = Buffer.alloc(bufLen);
-    fs.readSync(fd, buf, 0, bufLen, lastOffset);
-    fs.closeSync(fd);
-    lastOffset = stat.size;
-
-    if (isCanceled) {
-        return;
-    }
-
-    const content = buf.toString('utf8');
-    const lines = content.split(/\r?\n/).filter(l => l.trim().length > 0);
-
-    for (const line of lines) {
-        try {
-            const entry = JSON.parse(line);
-
-            // Giai đoạn: Tool Call (Phân loại màu sắc & Ticking)
-            if (entry.tool_calls && entry.tool_calls.length > 0) {
-                currentToolStartTime = Date.now();
-                currentPhase = 'WORKING';
-
-                for (const tc of entry.tool_calls) {
-                    const { summary, runningFn, finishedFn } = formatToolCall(tc);
-                    currentToolSummary = summary;
-                    currentToolRunningFn = runningFn;
-                    currentToolFinishedFn = finishedFn;
-                    console.log(`[Bridge Tool Call] ${summary}`);
-
-                    // CHỈ tạo bong bóng riêng cho các tool thực thi quan trọng (run_command, write_file, edit_file)
-                    if (runningFn) {
-                        const prevCancelId = getActiveCancelMsgId();
-                        if (prevCancelId) {
-                            await removeCancelButtonFrom(activeChatId, prevCancelId);
-                        }
-
-                        const initialText = runningFn(1);
-                        lastWorkingBubbleText = initialText;
-                        currentWorkingMsgId = await sendMsg(
-                            activeChatId,
-                            initialText,
-                            activeThreadId,
-                            'HTML',
-                            cancelKeyboard
-                        );
-                        if (currentWorkingMsgId) {
-                            tempMsgIds.push(currentWorkingMsgId);
-                            setActiveCancelMsgId(currentWorkingMsgId);
-                            recordBubbleText(currentWorkingMsgId, initialText);
-                        }
-                    }
+            if (runningFn) {
+                const prevCancelId = getActiveCancelMsgId();
+                if (prevCancelId) {
+                    await removeCancelButtonFrom(activeChatId, prevCancelId);
                 }
-                startTicker();
-            }
 
-            // Giai đoạn: Hoàn tất Tool Call
-            if (entry.type === 'GENERIC' && entry.content) {
-                const wSec = currentToolStartTime ? Math.max(1, Math.round((Date.now() - currentToolStartTime) / 1000)) : 1;
-                const safeTask = escapeHtml(currentToolSummary || 'Tác vụ');
-                console.log(`[Bridge Tool Done in ${wSec}s] ${safeTask}`);
-
+                const initialText = runningFn(1);
+                lastWorkingBubbleText = initialText;
+                currentWorkingMsgId = await sendMsg(
+                    activeChatId,
+                    initialText,
+                    activeThreadId,
+                    'HTML',
+                    cancelKeyboard
+                );
                 if (currentWorkingMsgId) {
-                    const finishedBubble = currentToolFinishedFn
-                        ? currentToolFinishedFn(wSec)
-                        : `✅ <b>[ĐÃ HOÀN TẤT TRONG ${wSec}s]</b>: <code>${safeTask}</code>`;
-                    recordBubbleText(currentWorkingMsgId, finishedBubble);
-
-                    await editMsg(
-                        activeChatId,
-                        currentWorkingMsgId,
-                        finishedBubble,
-                        'HTML',
-                        { inline_keyboard: [] },
-                        true
-                    );
-                    setActiveCancelMsgId(null);
-                    currentWorkingMsgId = null;
-                    currentToolRunningFn = null;
-                    currentToolFinishedFn = null;
-                    lastWorkingBubbleText = '';
-                }
-
-                currentPhase = 'THINKING';
-                startTicker();
-
-                if (promptMsgId) {
-                    setActiveCancelMsgId(promptMsgId);
-                }
-
-                sendTyping(activeChatId, activeThreadId);
-                if (!typingInterval) {
-                    typingInterval = setInterval(() => {
-                        sendTyping(activeChatId, activeThreadId);
-                    }, 4000);
+                    tempMsgIds.push(currentWorkingMsgId);
+                    setActiveCancelMsgId(currentWorkingMsgId);
+                    recordBubbleText(currentWorkingMsgId, initialText);
                 }
             }
+        }
+        startTicker();
+    },
+    onToolComplete: async (entry) => {
+        if (currentPhase === 'CANCELED') return;
+        const wSec = currentToolStartTime ? Math.max(1, Math.round((Date.now() - currentToolStartTime) / 1000)) : 1;
+        const safeTask = escapeHtml(currentToolSummary || 'Tác vụ');
 
-            // Giai đoạn: Phản hồi hoàn chỉnh từ Antigravity PC
-            if (entry.type === 'PLANNER_RESPONSE' && entry.content && (!entry.tool_calls || entry.tool_calls.length === 0)) {
-                const answer = entry.content.toString().trim();
-                if (!answer) continue;
+        if (currentWorkingMsgId) {
+            const finishedBubble = currentToolFinishedFn
+                ? currentToolFinishedFn(wSec)
+                : `✅ <b>[ĐÃ HOÀN TẤT TRONG ${wSec}s]</b>: <code>${safeTask}</code>`;
+            recordBubbleText(currentWorkingMsgId, finishedBubble);
 
-                currentPhase = 'IDLE';
-                isCanceled = false;
-                stopTicker();
+            await editMsg(
+                activeChatId,
+                currentWorkingMsgId,
+                finishedBubble,
+                'HTML',
+                { inline_keyboard: [] },
+                true
+            );
+            setActiveCancelMsgId(null);
+            currentWorkingMsgId = null;
+            currentToolRunningFn = null;
+            currentToolFinishedFn = null;
+            lastWorkingBubbleText = '';
+        }
 
-                if (typingInterval) {
-                    clearInterval(typingInterval);
-                    typingInterval = null;
-                }
+        currentPhase = 'THINKING';
+        startTicker();
 
-                const totalSec = promptStartTime ? Math.max(1, Math.round((Date.now() - promptStartTime) / 1000)) : 1;
-                console.log(`[Bridge] Gửi câu trả lời hoàn chỉnh từ PC tới Telegram (Hoàn tất trong ${totalSec}s)...`);
+        if (promptMsgId) {
+            setActiveCancelMsgId(promptMsgId);
+        }
 
-                await clearAllCancelButtons(activeChatId, tempMsgIds);
-                await sendLongResponse(activeChatId, answer, totalSec, activeThreadId);
+        sendTyping(activeChatId, activeThreadId);
+    },
+    onPlannerResponse: async (answer) => {
+        currentPhase = 'IDLE';
+        stopTicker();
 
-                const toClean = [...tempMsgIds];
-                tempMsgIds = [];
-                promptMsgId = null;
-                promptStartTime = null;
-                promptTextSaved = '';
-                lastStatusText = '';
-                isPhotoSaved = false;
-                isEditedPrompt = false;
-                currentWorkingMsgId = null;
+        if (typingInterval) {
+            clearInterval(typingInterval);
+            typingInterval = null;
+        }
 
-                if (toClean.length > 0) {
-                    runCountdownCleanup(activeChatId, activeThreadId, toClean);
-                }
+        const totalSec = promptStartTime ? Math.max(1, Math.round((Date.now() - promptStartTime) / 1000)) : 1;
+        console.log(`[Bridge] Phản hồi hoàn tất trong ${totalSec}s. Gửi tới Telegram...`);
 
-                // Chạy prompt tiếp theo trong hàng đợi (nếu có)
-                if (promptQueue.length > 0) {
-                    const nextItem = getNextPrompt();
-                    if (nextItem) {
-                        const remCount = promptQueue.length;
-                        const remNotice = remCount > 0 ? `\n<i>(Còn lại trong hàng chờ: ${remCount} prompt)</i>` : '';
-                        await sendMsg(
-                            activeChatId,
-                            `🚀 <b>[ĐANG THỰC THI PROMPT TIẾP THEO TỪ HÀNG ĐỢI]:</b>\n<blockquote><i>${escapeHtml(nextItem.preview)}</i></blockquote>${remNotice}`,
-                            activeThreadId
-                        );
-                        await executePromptImmediately(nextItem.chatId, nextItem.threadId, nextItem.text, nextItem.preview);
-                    }
-                }
+        await clearAllCancelButtons(activeChatId, tempMsgIds);
+
+        // Đảm bảo tin nhắn hội thoại KHÔNG BAO GIỜ gửi vào Sảnh #1114
+        let targetThread = activeThreadId;
+        if (Number(targetThread) === 1114) {
+            targetThread = 1160;
+        }
+        await sendLongResponse(activeChatId, answer, totalSec, targetThread);
+
+        const toClean = [...tempMsgIds];
+        tempMsgIds = [];
+        promptMsgId = null;
+        promptStartTime = null;
+        promptTextSaved = '';
+        lastStatusText = '';
+        isPhotoSaved = false;
+        isEditedPrompt = false;
+        currentWorkingMsgId = null;
+
+        if (toClean.length > 0) {
+            runCountdownCleanup(activeChatId, activeThreadId, toClean);
+        }
+
+        // Chạy prompt tiếp theo trong hàng đợi (nếu có)
+        if (promptQueue.length > 0) {
+            const nextItem = getNextPrompt();
+            if (nextItem) {
+                const remCount = promptQueue.length;
+                const remNotice = remCount > 0 ? `\n<i>(Còn lại trong hàng chờ: ${remCount} prompt)</i>` : '';
+                await sendMsg(
+                    activeChatId,
+                    `🚀 <b>[ĐANG THỰC THI PROMPT TIẾP THEO TỪ HÀNG ĐỢI]:</b>\n<blockquote><i>${escapeHtml(nextItem.preview)}</i></blockquote>${remNotice}`,
+                    activeThreadId
+                );
+                await executePromptImmediately(nextItem.chatId, nextItem.threadId, nextItem.text, nextItem.preview);
             }
-        } catch (e) {
-            console.error('[Bridge Error] Lỗi parse dòng transcript:', e.message);
         }
     }
-}
-
-setInterval(processTranscript, 120);
+});
 
 // --- TELEGRAM RAW POLLING & STANDBY DISPATCHER ---
 
@@ -612,7 +517,6 @@ async function pollUpdates() {
         const initRes = await tgApiRaw('getUpdates', { offset: -1 });
         if (initRes.ok && initRes.result && initRes.result.length > 0) {
             pollOffset = initRes.result[0].update_id + 1;
-            console.log('[Bridge Polling] Đồng bộ offset mới nhất:', pollOffset);
         }
     } catch (e) {}
 
@@ -627,17 +531,16 @@ async function pollUpdates() {
                     isCloudStandby = false;
                     await sendMsg(
                         activeChatId,
-                        `⚡ <b>[MÁY TÍNH ĐÃ TIẾP QUẢN LẠI TỪ CLOUD!]</b>\n──────────────────────\n🖥️ <b>Cửa sổ Antigravity PC:</b> ĐÃ THỨC TỈNH & SẴN SÀNG 100%\n🚀 <b>Kênh làm việc:</b> Topic 315 (Quin-Iu-Mthu)\n✨ Máy tính đã lấy lại quyền điều khiển trực tiếp qua Long Polling!`,
+                        `⚡ <b>[MÁY TÍNH ĐÃ TIẾP QUẢN LẠI TỪ CLOUD!]</b>\n──────────────────────\n🖥️ <b>Cửa sổ Antigravity PC:</b> ĐÃ THỨC TỈNH & SẴN SÀNG 100%\n🚀 <b>Kênh làm việc:</b> Topic 1160 (Quin-Iu-Mthu)\n✨ Máy tính đã lấy lại quyền điều khiển trực tiếp qua Long Polling!`,
                         activeThreadId
                     );
                 }
                 continue;
             }
 
-            const res = await tgApiRaw('getUpdates', { offset: pollOffset, timeout: 12 });
+            const res = await tgApiRaw('getUpdates', { offset: pollOffset, timeout: 8 });
             if (!res.ok) {
                 if (res.error_code === 409) {
-                    // Webhook đang hoạt động, chuyển sang standby
                     isCloudStandby = true;
                     await new Promise(r => setTimeout(r, 2000));
                     continue;
@@ -687,12 +590,12 @@ async function pollUpdates() {
                             continue;
                         }
 
-                        // C. XỬ LÝ NÚT HỦY PIN KEYPAD -> Về lại Cloud bình thường
+                        // C. XỬ LÝ NÚT HỦY PIN KEYPAD
                         if (cbData === 'pin_action_cancel') {
                             currentPin = '';
                             pinFailedCount = 0;
                             await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: 'Đã hủy xác thực' });
-                            const cancelText = `☁️ <b>[ĐÃ HỦY NHẬP MÃ ĐỒNG BỘ]</b>\n──────────────────────\nBro đã hủy bàn phím nhập mã. Hệ thống duy trì chế độ Vercel Cloud 24/7 bình thường (không chặn).\n\n👉 Khi cần kết nối lại, gõ <code>/ketnoi</code> hoặc <code>/ketnoilai</code>.`;
+                            const cancelText = `☁️ <b>[ĐÃ HỦY NHẬP MÃ ĐỒNG BỘ]</b>\n──────────────────────\nBro đã hủy bàn phím nhập mã. Hệ thống duy trì chế độ Vercel Cloud 24/7 bình thường.\n\n👉 Khi cần kết nối lại, gõ <code>/pc</code> hoặc <code>/ketnoi</code>.`;
                             await editMsg(chatId, cb.message.message_id, cancelText, 'HTML', { inline_keyboard: [] }, true);
                             continue;
                         }
@@ -708,7 +611,6 @@ async function pollUpdates() {
                                 pinFailedCount = 0;
                                 currentPin = '';
                                 currentPhase = 'IDLE';
-                                isCanceled = false;
                                 isCloudStandby = false;
                                 stopTicker();
                                 if (typingInterval) {
@@ -717,11 +619,11 @@ async function pollUpdates() {
                                 }
                                 tempMsgIds = [];
                                 promptMsgId = null;
-                                activeThreadId = (cb.message && cb.message.message_thread_id) || activeThreadId || 315;
+                                activeThreadId = (cb.message && cb.message.message_thread_id) || activeThreadId || 1160;
                                 await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: '✅ Mã chính xác! Đang kết nối...' });
-                                const successText = `⚡ <b>[ĐÃ KẾT NỐI QUA MÃ 6585 THÀNH CÔNG!]</b>\n──────────────────────\n🖥️ <b>Cửa sổ Antigravity PC:</b> SẴN SÀNG 100%\n🚀 <b>Kênh làm việc:</b> Topic 315 (Quin-Iu-Mthu)\n🔗 <b>Mã định danh:</b> <code>GM_6585_Mthu</code>\n✨ Đã cưỡng chế kết nối máy tính thành công! Bro gửi yêu cầu code hoặc ảnh ngay bây giờ nhé!`;
+                                const successText = `⚡ <b>[ĐÃ KẾT NỐI QUA MÃ 6585 THÀNH CÔNG!]</b>\n──────────────────────\n🖥️ <b>Cửa sổ Antigravity PC:</b> SẴN SÀNG 100%\n🚀 <b>Kênh làm việc:</b> Topic 1160 (Quin-Iu-Mthu)\n🔗 <b>Mã định danh:</b> <code>GM_6585_Mthu</code>\n✨ Đã cưỡng chế kết nối máy tính thành công! Bro gửi yêu cầu code hoặc ảnh ngay bây giờ nhé!`;
                                 await editMsg(chatId, cb.message.message_id, successText, 'HTML', { inline_keyboard: [] }, true);
-                                forwardToAntigravity(`[LỆNH CƯỠNG CHẾ KẾT NỐI LẠI]: Người dùng đã nhập đúng mã 6585 qua bàn phím PIN. Đồng bộ tức thì với cửa sổ Antigravity PC.`);
+                                forwardToAntigravity(conversationId, `[LỆNH CƯỠNG CHẾ KẾT NỐI LẠI]: Người dùng đã nhập đúng mã 6585 qua bàn phím PIN. Đồng bộ tức thì với cửa sổ Antigravity PC.`);
                                 continue;
                             } else {
                                 pinFailedCount++;
@@ -730,7 +632,7 @@ async function pollUpdates() {
                                 if (pinFailedCount >= 3) {
                                     pinFailedCount = 0;
                                     await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: '❌ Sai 3 lần! Trở về Cloud 24/7' });
-                                    const failMaxText = `☁️ <b>[NHẬP SAI 3 LẦN - TRỞ VỀ CLOUD 24/7]</b>\n──────────────────────\nBro đã nhập sai mã 3 lần. Hệ thống tự động chuyển về chế độ Vercel Cloud 24/7 bình thường (không chặn).\n\n👉 Khi muốn kết nối lại với PC, gõ <code>/ketnoi</code> hoặc <code>/ketnoilai</code>.`;
+                                    const failMaxText = `☁️ <b>[NHẬP SAI 3 LẦN - TRỞ VỀ CLOUD 24/7]</b>\n──────────────────────\nBro đã nhập sai mã 3 lần. Hệ thống tự động chuyển về chế độ Vercel Cloud 24/7 bình thường.\n\n👉 Khi muốn kết nối lại với PC, gõ <code>/pc</code> hoặc <code>/ketnoi</code>.`;
                                     await editMsg(chatId, cb.message.message_id, failMaxText, 'HTML', { inline_keyboard: [] }, true);
                                     continue;
                                 } else {
@@ -763,7 +665,7 @@ async function pollUpdates() {
                             if (qItem) {
                                 await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: '⚡ Ưu tiên chạy prompt này!' });
                                 await handleCancelAction('Priority Send Now');
-                                await new Promise(r => setTimeout(r, 600));
+                                await new Promise(r => setTimeout(r, 400));
                                 await sendMsg(chatId, `⚡ <b>[ĐÃ ƯU TIÊN THỰC THI NGAY TỪ HÀNG ĐỢI]:</b>\n<blockquote><i>${escapeHtml(qItem.preview)}</i></blockquote>`, activeThreadId);
                                 await executePromptImmediately(qItem.chatId, qItem.threadId, qItem.text, qItem.preview);
                             } else {
@@ -781,7 +683,7 @@ async function pollUpdates() {
                                 await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: 'Vui lòng gửi tin nhắn mới!' });
                                 await sendMsg(
                                     chatId,
-                                    `✏️ <b>[CHẾ ĐỘ SỬA PROMPT TRONG HÀNG ĐỢI]</b>\nPrompt hiện tại: <blockquote><i>${escapeHtml(qItem.preview)}</i></blockquote>\n<i>Bro hãy gửi tin nhắn tiếp theo, hệ thống sẽ tự động cập nhật nội dung mới cho prompt này!</i>`,
+                                    `✏️ <b>[CHẾ ĐỘ SỬA PROMPT TRONG HÀNG ĐỢI]</b>\nPrompt hiện tại: <blockquote><i>${escapeHtml(qItem.preview)}</i></blockquote>\n<i>Bro hãy gửi tin nhắn tiếp theo, hệ thống sẽ tự động cập nhật nội dung mới!</i>`,
                                     activeThreadId
                                 );
                             } else {
@@ -831,7 +733,6 @@ async function pollUpdates() {
                         if (cbData === 'hub_create_proj') {
                             const res = handleCreateProjectClick(
                                 async () => {
-                                    // 🚀 KÍCH HOẠT KHI ĐỦ 7 LẦN
                                     await tgApiRaw('answerCallbackQuery', {
                                         callback_query_id: cb.id,
                                         text: '🔒 [7/7] ĐÃ KÍCH HOẠT CHẾ ĐỘ SUPER ADMIN!',
@@ -841,7 +742,6 @@ async function pollUpdates() {
                                     await sendMsg(chatId, secretPrompt, activeThreadId, 'HTML');
                                 },
                                 async () => {
-                                    // 📁 BẤM 1 LẦN BÌNH THƯỜNG -> BẮT ĐẦU TẠO DỰ ÁN
                                     const wiz = getProjectWizard();
                                     wiz.active = true;
                                     wiz.chatId = chatId;
@@ -862,7 +762,7 @@ async function pollUpdates() {
                             continue;
                         }
 
-                        // L. MASTER LOBBY: QUẢN LÝ Ổ ĐĨA & DỰ ÁN PC (KIỂM TRA Ổ CỨNG TRỰC TIẾP TRÊN PC)
+                        // L. MASTER LOBBY: QUẢN LÝ Ổ ĐĨA & DỰ ÁN PC
                         if (cbData === 'hub_explore_drives') {
                             await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: '🔍 Đang quét toàn bộ ổ cứng PC...' });
                             const drives = getPCDrives();
@@ -888,18 +788,18 @@ async function pollUpdates() {
                                     text += `${idx + 1}. 📁 <code>${d}:\\${f}</code>\n`;
                                 });
                             }
-                            text += `\n<i>👉 Bấm vào thư mục bên dưới để khởi chạy Cửa sổ làm việc mới, hoặc tạo thư mục mới:</i>`;
+                            text += `\n<i>👉 Bấm vào thư mục bên dưới để khởi chạy Cửa sổ làm việc mới:</i>`;
                             await sendMsg(chatId, text, activeThreadId, 'HTML', getFolderSelectionMarkup(d));
                             continue;
                         }
 
-                        // L3. CHỌN 1 FOLDER CỤ THỂ ĐỂ KHỞI CHẠY CỬA SỔ MỚI
+                        // L3. CHỌN 1 FOLDER ĐỂ KHỞI CHẠY CỬA SỔ MỚI
                         if (cbData.startsWith('sel_folder:')) {
                             const [, drive, fName] = cbData.split(':');
                             const fullPath = `${drive}:\\${fName}`;
                             await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: `Khởi chạy: ${fName}` });
 
-                            // 1. Tạo Forum Topic mới trên Telegram Supergroup
+                            // Tạo Forum Topic mới
                             let newTopicId = null;
                             try {
                                 const topicRes = await tgApiRaw('createForumTopic', {
@@ -910,81 +810,42 @@ async function pollUpdates() {
                                     newTopicId = topicRes.result.message_thread_id;
                                     await sendMsg(
                                         activeChatId,
-                                        `🎉 <b>[CỬA SỔ DỰ ÁN ĐÃ KHỞI CHẠY]</b>\n──────────────────────\n📁 <b>Dự án:</b> <code>${fName}</code>\n💾 <b>Đường dẫn PC:</b> <code>${fullPath}</code>\n🚀 <b>Topic ID:</b> <code>#${newTopicId}</code>\n\n✨ Cửa sổ Antigravity PC và Topic Telegram đã được kích hoạt! Bro trao đổi code tại Topic này nhé!`,
+                                        `🎉 <b>[CỬA SỔ DỰ ÁN ĐÃ KHỞI CHẠY]</b>\n──────────────────────\n📁 <b>Tên thư mục:</b> <code>${fName}</code>\n💾 <b>Đường dẫn:</b> <code>${fullPath}</code>\n🚀 <b>Topic ID:</b> <code>#${newTopicId}</code>\n\n✨ Cửa sổ Antigravity PC và Topic Telegram đã sẵn sàng! Bro gửi yêu cầu code ngay tại Topic này nhé!`,
                                         newTopicId,
                                         'HTML'
                                     );
                                 }
                             } catch (e) {}
 
-                            // 2. Mở Cửa Sổ Antigravity IDE Mới trên PC
+                            // Mở Antigravity IDE
                             try {
                                 const agyExe = 'C:\\Users\\letru\\AppData\\Local\\Programs\\antigravity\\Antigravity.exe';
                                 if (fs.existsSync(agyExe)) {
                                     execFile(agyExe, [fullPath], { detached: true, stdio: 'ignore' }).unref();
-                                    console.log(`[Bridge Spawner] Đã mở Antigravity IDE cho: ${fullPath}`);
                                 }
                             } catch (e) {}
 
                             const topicNote = newTopicId ? `\n🚀 <b>Telegram Topic mới:</b> <code>#${newTopicId}</code>` : '';
-                            const openMsg = `⚡ <b>[ĐÃ KHỞI CHẠY CỬA SỔ DỰ ÁN MỚI]</b>\n──────────────────────\n📁 <b>Thư mục:</b> <code>${fullPath}</code>\n🖥️ <b>Cửa sổ Antigravity PC:</b> ĐÃ BẬT MỞ${topicNote}\n\n✨ Sảnh Lobby (QuinloveRin Code) vẫn giữ nguyên để bro tiếp tục quản lý!`;
-                            await sendMsg(chatId, openMsg, activeThreadId, 'HTML', getMainMenuMarkup());
+                            await sendMsg(chatId, `🎉 <b>[ĐÃ MỞ CỬA SỔ DỰ ÁN TRÊN PC]</b>\n──────────────────────\n📁 <b>Dự án:</b> <code>${fName}</code>\n💾 <b>Vị trí:</b> <code>${fullPath}</code>${topicNote}`, activeThreadId, 'HTML', getMainMenuMarkup());
+                            forwardToAntigravity(conversationId, `[MỞ DỰ ÁN TRÊN PC]: Người dùng đã mở thư mục '${fullPath}'${topicNote}`);
                             continue;
                         }
 
-                        // L4. TẠO THƯ MỤC MỚI TRONG Ổ ĐÃ CHỌN
-                        if (cbData.startsWith('new_in_drive:')) {
-                            const drive = cbData.replace('new_in_drive:', '');
-                            const wiz = getProjectWizard();
-                            wiz.active = true;
-                            wiz.chatId = chatId;
-                            wiz.threadId = activeThreadId;
-                            wiz.step = 'AWAITING_NAME';
-                            wiz.selectedDrive = drive;
-                            await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: `Tạo dự án mới tại ổ ${drive}:` });
-                            await sendMsg(
-                                chatId,
-                                `📁 <b>[TẠO DỰ ÁN MỚI TẠI Ổ ${drive}:]</b>\n──────────────────────\nBro muốn đặt tên cho thư mục / dự án mới là gì?\n<i>(Ví dụ: <code>MyProject</code>, <code>BotApp</code>...)</i>\n\n👉 Hãy gửi tên dự án vào ô chat:`,
-                                activeThreadId,
-                                'HTML'
-                            );
-                            continue;
-                        }
-
-                        // M. MASTER LOBBY: BÀN GIAO CLOUD 24/7 (MỞ CỬA SỔ TOPIC RIÊNG BIỆT)
+                        // M. MASTER LOBBY: BÀN GIAO CLOUD 24/7
                         if (cbData === 'hub_cloud') {
                             await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: '☁️ Khởi tạo Cửa sổ Cloud 24/7...' });
-                            
-                            let cloudTopicId = null;
-                            try {
-                                const topicRes = await tgApiRaw('createForumTopic', {
-                                    chat_id: activeChatId,
-                                    name: '☁️ Cloud GitOps 24/7'
-                                });
-                                if (topicRes.ok && topicRes.result?.message_thread_id) {
-                                    cloudTopicId = topicRes.result.message_thread_id;
-                                    await sendMsg(
-                                        activeChatId,
-                                        `☁️ <b>[CỬA SỔ BÀN GIAO CLOUD 24/7]</b>\n──────────────────────\n🌐 <b>Hạ tầng:</b> Vercel Serverless Edge Global\n⚡ <b>Trạng thái:</b> SẴN SÀNG TIẾP NHẬN 24/7\n\nBro có thể chat, yêu cầu code và commit lên GitHub tại Topic này ngay cả khi máy tính tắt nguồn!\n👉 Khi bật lại máy tính, gõ <code>/pc</code> hoặc nhập mã <code>6585</code>.`,
-                                        cloudTopicId,
-                                        'HTML'
-                                    );
-                                }
-                            } catch (e) {}
-
                             await handleDisconnectCloud();
-                            const note = cloudTopicId ? ` qua Topic <code>#${cloudTopicId} (Cloud GitOps 24/7)</code>` : '';
-                            await sendMsg(chatId, `☁️ <b>[ĐÃ BÀN GIAO CHO CLOUD 24/7 THÀNH CÔNG]</b>\n──────────────────────\nMáy tính chuyển sang chế độ Chờ. Bro có thể tiếp tục làm việc${note}!`, activeThreadId, 'HTML', getMainMenuMarkup());
+                            await sendMsg(chatId, `☁️ <b>[ĐÃ BÀN GIAO CHO CLOUD 24/7 THÀNH CÔNG]</b>\n──────────────────────\nMáy tính chuyển sang chế độ Chờ!`, activeThreadId, 'HTML', getMainMenuMarkup());
                             continue;
                         }
 
-                        // P. PROJECT WIZARD: CHỌN Ổ ĐĨA KHI TẠO MỚI (TỰ ĐỘNG PHÁT HIỆN TẤT CẢ Ổ CỨNG PC)
+                        // P. PROJECT WIZARD: CHỌN Ổ ĐĨA KHI TẠO MỚI
                         if (cbData.startsWith('wizard_drive_')) {
                             const drive = cbData.replace('wizard_drive_', '');
                             const wiz = getProjectWizard();
                             const pName = wiz.projectName || 'New-Project';
                             const pPath = `${drive}:\\${pName}`;
-                            
+
                             try {
                                 if (!fs.existsSync(pPath)) {
                                     fs.mkdirSync(pPath, { recursive: true });
@@ -993,7 +854,6 @@ async function pollUpdates() {
                                 fs.writeFileSync(path.join(pPath, 'GEMINI.md'), geminiDoc, 'utf8');
                             } catch (e) {}
 
-                            // 1. Tạo Forum Topic mới trên Telegram Supergroup
                             let newTopicId = null;
                             try {
                                 const topicRes = await tgApiRaw('createForumTopic', {
@@ -1002,7 +862,6 @@ async function pollUpdates() {
                                 });
                                 if (topicRes.ok && topicRes.result?.message_thread_id) {
                                     newTopicId = topicRes.result.message_thread_id;
-                                    console.log(`[Bridge Spawner] Đã tạo Telegram Topic mới: #${newTopicId} (${pName})`);
                                     await sendMsg(
                                         activeChatId,
                                         `🎉 <b>[CỬA SỔ DỰ ÁN MỚI ĐÃ KHỞI TẠO]</b>\n──────────────────────\n📁 <b>Tên dự án:</b> <code>${pName}</code>\n💾 <b>Thư mục PC:</b> <code>${pPath}</code>\n🚀 <b>Topic ID:</b> <code>#${newTopicId}</code>\n\n✨ Cửa sổ Antigravity PC và Topic Telegram đã sẵn sàng! Bro gửi yêu cầu code ngay tại Topic này nhé!`,
@@ -1010,27 +869,21 @@ async function pollUpdates() {
                                         'HTML'
                                     );
                                 }
-                            } catch (e) {
-                                console.error('[Bridge Spawner Topic Error]:', e.message);
-                            }
+                            } catch (e) {}
 
-                            // 2. Mở Cửa Sổ Antigravity IDE Mới trên PC
                             try {
                                 const agyExe = 'C:\\Users\\letru\\AppData\\Local\\Programs\\antigravity\\Antigravity.exe';
                                 if (fs.existsSync(agyExe)) {
                                     execFile(agyExe, [pPath], { detached: true, stdio: 'ignore' }).unref();
-                                    console.log(`[Bridge Spawner] Đã mở Cửa sổ Antigravity IDE mới cho: ${pPath}`);
                                 }
-                            } catch (e) {
-                                console.error('[Bridge Spawner Antigravity Error]:', e.message);
-                            }
+                            } catch (e) {}
 
                             await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: `✅ Đã tạo dự án tại ổ ${drive}:` });
                             const topicNote = newTopicId ? `\n🚀 <b>Telegram Topic mới:</b> <code>#${newTopicId}</code>` : '';
                             const createdText = `🎉 <b>[ĐÃ KHỞI TẠO DỰ ÁN MỚI THÀNH CÔNG!]</b>\n──────────────────────\n📁 <b>Tên dự án:</b> <code>${pName}</code>\n💾 <b>Vị trí lưu trữ:</b> <code>${pPath}</code>\n🖥️ <b>Cửa sổ Antigravity PC:</b> ĐÃ BẬT MỞ${topicNote}\n\n✨ Cửa sổ làm việc mới trên PC và Topic Telegram đã được đồng bộ song song 1-1!`;
                             resetProjectWizard();
                             await sendMsg(chatId, createdText, activeThreadId, 'HTML', getMainMenuMarkup());
-                            forwardToAntigravity(`[DỰ ÁN MỚI ĐÃ TẠO]: Người dùng vừa tạo dự án mới '${pName}' tại: ${pPath}${topicNote}`);
+                            forwardToAntigravity(conversationId, `[DỰ ÁN MỚI ĐÃ TẠO]: Người dùng vừa tạo dự án mới '${pName}' tại: ${pPath}${topicNote}`);
                             continue;
                         }
 
@@ -1051,19 +904,19 @@ async function pollUpdates() {
                     const isEdit = !!update.edited_message;
 
                     const chatId = msg.chat.id;
-                    const threadId = msg.message_thread_id || 1114;
+                    const threadId = msg.message_thread_id || 1160;
                     const fromId = msg.from ? msg.from.id : 0;
 
                     if (msg.from && msg.from.is_bot) continue;
 
                     const isAllowed = allowedList.includes(Number(chatId)) || allowedList.includes(Number(fromId));
-                    if (!isAllowed) {
-                        console.log(`[Bridge Security] Chặn tin nhắn từ chatId=${chatId}, fromId=${fromId}`);
-                        continue;
-                    }
+                    if (!isAllowed) continue;
 
                     activeChatId = chatId;
-                    activeThreadId = threadId || 1114;
+                    // Nếu người dùng nhắn ở Workspace topic thì ghi nhận, nếu nhắn ở Sảnh Lobby (#1114) thì không đổi activeThreadId
+                    if (Number(threadId) !== 1114) {
+                        activeThreadId = threadId;
+                    }
 
                     // Tự động xóa tin nhắn người dùng tại Sảnh Lobby (#1114) sau 2.5s để giữ Sảnh luôn sạch bong
                     if (Number(threadId) === 1114 && msg.message_id) {
@@ -1111,7 +964,7 @@ async function pollUpdates() {
                     if (isWaitingForMasterPassword()) {
                         if (verifyMasterPassword(userText)) {
                             console.log('[Easter Egg] Mật mã chính xác: 270927-260626-ltqlovepmt! Super Admin Unlocked!');
-                            forwardToAntigravity(`[XÁC THỰC SUPER ADMIN THÀNH CÔNG]: Người dùng đã nhập đúng mật mã bí mật '270927-260626-ltqlovepmt' qua cơ chế gõ 7 lần. Toàn quyền quản trị repo đã được kích hoạt!`);
+                            forwardToAntigravity(conversationId, `[XÁC THỰC SUPER ADMIN THÀNH CÔNG]: Người dùng đã nhập đúng mật mã bí mật '270927-260626-ltqlovepmt' qua cơ chế gõ 7 lần. Toàn quyền quản trị repo đã được kích hoạt!`);
                             const adminUnlockedText = `👑 <b>[XÁC THỰC THÀNH CÔNG - SUPER ADMIN ACTIVATED]</b>\n──────────────────────\n🔑 <b>Mật khẩu chính xác:</b> <code>270927-260626-ltqlovepmt</code>\n✨ <b>Quyền hạn:</b> TOÀN QUYỀN SỞ HỮU &amp; ĐIỀU HÀNH REPO\n🚀 <b>Trạng thái:</b> Master Control Board đã mở khóa 100%!\n\nBro đã nắm giữ toàn quyền sử dụng repo và kiểm soát toàn bộ hệ sinh thái QuinloveRin Code!`;
                             await sendMsg(chatId, adminUnlockedText, activeThreadId, 'HTML', getMainMenuMarkup());
                             continue;
@@ -1132,51 +985,6 @@ async function pollUpdates() {
                         }
                         currentWiz.projectName = cleanProjectName;
 
-                        // Nếu đã chọn sẵn ổ đĩa trước đó
-                        if (currentWiz.selectedDrive) {
-                            const drive = currentWiz.selectedDrive;
-                            const pPath = `${drive}:\\${cleanProjectName}`;
-                            try {
-                                if (!fs.existsSync(pPath)) fs.mkdirSync(pPath, { recursive: true });
-                                const geminiDoc = `# Dự Án: ${cleanProjectName}\n\n- Khởi tạo lúc: ${new Date().toLocaleString('vi-VN')}\n- Vị trí: ${pPath}\n- Hệ điều hành: Windows\n- Trạng thái: Sẵn sàng\n`;
-                                fs.writeFileSync(path.join(pPath, 'GEMINI.md'), geminiDoc, 'utf8');
-                            } catch (e) {}
-
-                            // Tạo Forum Topic mới
-                            let newTopicId = null;
-                            try {
-                                const topicRes = await tgApiRaw('createForumTopic', {
-                                    chat_id: activeChatId,
-                                    name: `🚀 Dự Án: ${cleanProjectName}`
-                                });
-                                if (topicRes.ok && topicRes.result?.message_thread_id) {
-                                    newTopicId = topicRes.result.message_thread_id;
-                                    await sendMsg(
-                                        activeChatId,
-                                        `🎉 <b>[CỬA SỔ DỰ ÁN MỚI ĐÃ KHỞI TẠO]</b>\n──────────────────────\n📁 <b>Tên dự án:</b> <code>${cleanProjectName}</code>\n💾 <b>Thư mục PC:</b> <code>${pPath}</code>\n🚀 <b>Topic ID:</b> <code>#${newTopicId}</code>\n\n✨ Cửa sổ Antigravity PC và Topic Telegram đã sẵn sàng! Bro gửi yêu cầu code ngay tại Topic này nhé!`,
-                                        newTopicId,
-                                        'HTML'
-                                    );
-                                }
-                            } catch (e) {}
-
-                            // Mở Antigravity IDE
-                            try {
-                                const agyExe = 'C:\\Users\\letru\\AppData\\Local\\Programs\\antigravity\\Antigravity.exe';
-                                if (fs.existsSync(agyExe)) {
-                                    execFile(agyExe, [pPath], { detached: true, stdio: 'ignore' }).unref();
-                                }
-                            } catch (e) {}
-
-                            const topicNote = newTopicId ? `\n🚀 <b>Telegram Topic mới:</b> <code>#${newTopicId}</code>` : '';
-                            const createdText = `🎉 <b>[ĐÃ KHỞI TẠO DỰ ÁN MỚI THÀNH CÔNG!]</b>\n──────────────────────\n📁 <b>Tên dự án:</b> <code>${cleanProjectName}</code>\n💾 <b>Vị trí lưu trữ:</b> <code>${pPath}</code>\n🖥️ <b>Cửa sổ Antigravity PC:</b> ĐÃ BẬT MỞ${topicNote}\n\n✨ Cửa sổ làm việc mới trên PC và Topic Telegram đã được đồng bộ song song 1-1!`;
-                            resetProjectWizard();
-                            await sendMsg(chatId, createdText, activeThreadId, 'HTML', getMainMenuMarkup());
-                            forwardToAntigravity(`[DỰ ÁN MỚI ĐÃ TẠO]: Người dùng vừa tạo dự án mới '${cleanProjectName}' tại: ${pPath}${topicNote}`);
-                            continue;
-                        }
-
-                        // Chưa chọn ổ đĩa -> Quét và hiển thị toàn bộ ổ cứng vật lý trên PC
                         currentWiz.step = 'AWAITING_DRIVE';
                         const drivePrompt = `💾 <b>[KHỞI TẠO DỰ ÁN MỚI - BƯỚC 2/2]</b>\n──────────────────────\n• <b>Tên dự án:</b> <code>${cleanProjectName}</code>\n\nĐã phát hiện các ổ cứng trên PC của bro. Chọn vị trí lưu trữ dự án:`;
                         await sendMsg(chatId, drivePrompt, activeThreadId, 'HTML', getDriveSelectionMarkup('wizard_drive_'));
@@ -1185,12 +993,12 @@ async function pollUpdates() {
 
                     // 3. Menu Hub Command (/menu, /start, /hub)
                     if (/^(?:\/menu|\/start|\/hub|menu)$/i.test(userText.trim())) {
-                        await sendMsg(chatId, getMainMenuText(), activeThreadId, 'HTML', getMainMenuMarkup());
+                        await sendMsg(chatId, getMainMenuText(), 1114, 'HTML', getMainMenuMarkup());
                         continue;
                     }
 
                     // Xử lý lệnh ngắt kết nối / bàn giao Cloud 24/7
-                    if (/^(?:\/disconnect|\/ngatketnoi|\/cloud|ngắt kết nối|ngắt kết nối đi)$/i.test(userText.trim())) {
+                    if (/^(?:\/disconnect|\/ngatketnoi|\/cloud|ngắt kết nối)$/i.test(userText.trim())) {
                         await handleDisconnectCloud();
                         continue;
                     }
@@ -1201,43 +1009,16 @@ async function pollUpdates() {
                         continue;
                     }
 
-                    // Lệnh quét lịch sử tin nhắn trong box chat (/quet, /scan, /history)
-                    if (/^(?:\/quet|\/scan|\/history|\/tinnhan)$/i.test(userText.trim())) {
-                        let historyText = `📋 <b>[LỊCH SỬ TIN NHẮN GẦN ĐÂY TRONG BOX CHAT]:</b>\n──────────────────────\n`;
-                        if (fs.existsSync(syncBridgePath)) {
-                            try {
-                                const raw = fs.readFileSync(syncBridgePath, 'utf8').replace(/^\uFEFF/, '');
-                                const br = JSON.parse(raw);
-                                const msgs = (br.messages || []).slice(-8);
-                                if (msgs.length === 0) {
-                                    historyText += `<i>Chưa có tin nhắn nào được ghi nhận.</i>`;
-                                } else {
-                                    msgs.forEach((m, idx) => {
-                                        const time = m.timestamp ? new Date(m.timestamp).toLocaleTimeString('vi-VN') : '';
-                                        const sender = m.sender === 'phone' ? '📱 Bro' : '🖥️ PC';
-                                        historyText += `<b>${idx + 1}. [${time}] ${sender}:</b> <code>${escapeHtml(m.text.substring(0, 100))}</code>\n`;
-                                    });
-                                }
-                            } catch (e) {
-                                historyText += `<i>Không thể đọc sync_bridge.json</i>`;
-                            }
-                        }
-                        historyText += `\n<i>👉 Bro có thể reply bất kỳ tin nhắn nào và gửi chỉ thị, tôi sẽ tự kiểm tra đúng vị trí đó!</i>`;
-                        await sendMsg(chatId, historyText, activeThreadId, 'HTML');
-                        continue;
-                    }
-
                     // Kiểm tra nếu đang chờ mã 4 số kết nối lại
                     if ((waitingForPairCode && /^\d{4}$/.test(userText.trim())) || userText.trim() === '6585') {
                         const code = userText.trim();
                         if (code === '6585') {
                             waitingForPairCode = false;
                             isCloudStandby = false;
-                            console.log(`[Bridge Pair] Đã xác thực thành công mã 4 số: 6585`);
-                            forwardToAntigravity(`[LỆNH CƯỠNG CHẾ KẾT NỐI LẠI]: Người dùng đã nhập đúng mã 6585 từ Telegram. Đồng bộ tức thì với cửa sổ Antigravity PC.`);
+                            forwardToAntigravity(conversationId, `[LỆNH CƯỠNG CHẾ KẾT NỐI LẠI]: Người dùng đã nhập đúng mã 6585 từ Telegram. Đồng bộ tức thì với cửa sổ Antigravity PC.`);
                             await sendMsg(
                                 chatId,
-                                `⚡ <b>[ĐÃ KẾT NỐI QUA MÃ 6585 THÀNH CÔNG!]</b>\n──────────────────────\n🖥️ <b>Cửa sổ Antigravity PC:</b> SẴN SÀNG 100%\n🚀 <b>Kênh làm việc:</b> Topic 315 (Quin-Iu-Mthu)\n🔗 <b>Mã định danh:</b> <code>GM_6585_Mthu</code>\n✨ Cầu nối PC đã thức tỉnh hoàn toàn! Bro gửi yêu cầu code hoặc ảnh ngay bây giờ nhé!`,
+                                `⚡ <b>[ĐÃ KẾT NỐI QUA MÃ 6585 THÀNH CÔNG!]</b>\n──────────────────────\n🖥️ <b>Cửa sổ Antigravity PC:</b> SẴN SÀNG 100%\n🚀 <b>Kênh làm việc:</b> Topic 1160 (Quin-Iu-Mthu)\n✨ Cầu nối PC đã thức tỉnh hoàn toàn! Bro gửi yêu cầu code hoặc ảnh ngay bây giờ nhé!`,
                                 activeThreadId
                             );
                             continue;
@@ -1251,7 +1032,7 @@ async function pollUpdates() {
                         }
                     }
 
-                    // Xử lý lệnh cưỡng chế kết nối lại (/ketnoi, /ketnoilai, /reconnect, /pc, /local)
+                    // Xử lý lệnh cưỡng chế kết nối lại (/ketnoi, /ketnoilai, /reconnect, /pc)
                     if (/^(?:\/ketnoi|\/ketnoilai|\/reconnect|\/pc|\/local|kết nối lại)(?:\s+(\w+))?$/i.test(userText.trim())) {
                         const match = userText.trim().match(/^(?:\/ketnoi|\/ketnoilai|\/reconnect|\/pc|\/local|kết nối lại)(?:\s+(\w+))?$/i);
                         const providedCode = match ? match[1] : null;
@@ -1267,7 +1048,6 @@ async function pollUpdates() {
                         if (providedCode === '6585' || /6585/i.test(providedCode)) {
                             waitingForPairCode = false;
                             currentPhase = 'IDLE';
-                            isCanceled = false;
                             isCloudStandby = false;
                             stopTicker();
                             if (typingInterval) {
@@ -1276,13 +1056,12 @@ async function pollUpdates() {
                             }
                             tempMsgIds = [];
                             promptMsgId = null;
-                            activeThreadId = threadId || 315;
 
-                            forwardToAntigravity(`[LỆNH CƯỠNG CHẾ KẾT NỐI LẠI]: Người dùng yêu cầu đồng bộ tức thì qua mã 6585. Cửa sổ Antigravity PC đã kết nối sẵn sàng 100%.`);
+                            forwardToAntigravity(conversationId, `[LỆNH CƯỠNG CHẾ KẾT NỐI LẠI]: Người dùng yêu cầu đồng bộ tức thì qua mã 6585. Cửa sổ Antigravity PC đã kết nối sẵn sàng 100%.`);
 
                             await sendMsg(
                                 chatId,
-                                `⚡ <b>[ĐÃ CƯỠNG CHẾ KẾT NỐI LẠI THÀNH CÔNG!]</b>\n──────────────────────\n🖥️ <b>Cửa sổ Antigravity PC:</b> SẴN SÀNG 100%\n🚀 <b>Kênh làm việc:</b> Topic 315 (Quin-Iu-Mthu)\n🔗 <b>Mã đồng bộ:</b> <code>GM_6585_Mthu</code>\n✨ Cầu nối PC đã thức tỉnh hoàn toàn! Mọi tin nhắn hoặc hình ảnh bro gửi tiếp theo sẽ được xử lý ngay lập tức!`,
+                                `⚡ <b>[ĐÃ CƯỠNG CHẾ KẾT NỐI LẠI THÀNH CÔNG!]</b>\n──────────────────────\n🖥️ <b>Cửa sổ Antigravity PC:</b> SẴN SÀNG 100%\n🚀 <b>Kênh làm việc:</b> Topic 1160 (Quin-Iu-Mthu)\n✨ Cầu nối PC đã thức tỉnh hoàn toàn! Mọi tin nhắn bro gửi tiếp theo sẽ được xử lý ngay lập tức!`,
                                 activeThreadId
                             );
                             continue;
@@ -1295,12 +1074,6 @@ async function pollUpdates() {
                             );
                             continue;
                         }
-                    }
-
-                    if (isEdit) {
-                        console.log(`[Telegram Sửa Tin] (${chatId}, thread=${threadId}): ${userText.substring(0, 50)}`);
-                    } else {
-                        console.log(`[Telegram Nhận Tin] (${chatId}, thread=${threadId}): ${userText.substring(0, 50)}`);
                     }
 
                     // Tải ảnh nếu có
@@ -1317,7 +1090,6 @@ async function pollUpdates() {
                         const rSender = rm.from ? (rm.from.first_name || 'Bot') : 'Bot';
                         const rText = rm.text || rm.caption || '[Đoạn mã / Hình ảnh / Tin nhắn hệ thống]';
                         replyContext = `[NGƯỜI DÙNG REPLY TIN NHẮN CỦA ${rSender} (#${rm.message_id})]:\n"""\n${rText.substring(0, 500)}\n"""\n↳ `;
-                        console.log(`[Bridge Reply Detection] Trích xuất tin nhắn reply (#${rm.message_id}): ${rText.substring(0, 50)}`);
                     }
 
                     const forwardPrompt = localPhotoPath
@@ -1327,7 +1099,7 @@ async function pollUpdates() {
                     const previewClean = userText.replace(/[<>]/g, '');
                     const previewSafe = escapeHtml(previewClean.length > 55 ? previewClean.substring(0, 55) + '...' : previewClean);
                     showScreenToast(isEdit ? '✏️ Telegram -> Prompt Sửa' : '📱 Telegram -> PC Sync', previewClean);
-                    recordSyncMessage(isEdit ? `[Sửa tin]: ${userText}` : userText);
+                    recordSyncMessage(syncBridgePath, conversationId, 'phone', isEdit ? `[Sửa tin]: ${userText}` : userText);
 
                     // Nếu máy tính đang bận: Đưa vào hàng đợi
                     if (currentPhase !== 'IDLE' && currentPhase !== 'CANCELED') {
@@ -1343,7 +1115,6 @@ async function pollUpdates() {
 
                         const qNotice = `📥 <b>[ĐÃ NẠP VÀO HÀNG ĐỢI PC]</b>\n<blockquote><i>${previewSafe}</i></blockquote>\n<i>Máy tính đang xử lý tác vụ trước đó. Prompt này đã được xếp vị trí <b>#${promptQueue.length}</b> trong hàng chờ!</i>`;
                         await sendMsg(chatId, qNotice, activeThreadId, 'HTML', getQueueButtons(qId));
-                        console.log(`[Bridge Queue] Đã nạp prompt vào hàng đợi (#${promptQueue.length}): ${userText.substring(0, 40)}`);
                         continue;
                     }
 
