@@ -12,13 +12,13 @@
 - Cloud Fallback: Vercel serverless webhook automatically dropped when PC runs (`deleteWebhook`).
 
 ## 3. UI/UX & Interaction Standards
-- **In-Place Live Stopwatch & Freeze Rule**:
+- **In-Place Live Stopwatch Across All Stages**:
   - Live ticker running every 2.0s on the single status bubble (`promptMsgId`).
-  - Seamlessly transitions across:
+  - Seamlessly transitions with live seconds counting:
     - 📖 `[ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (Xs)...]` (ticking)
     - ✏️ `[ĐÃ CẬP NHẬT PROMPT MỚI, KHỞI ĐỘNG LẠI (Xs)...]` (ticking)
-    - 💡 `[ĐÃ CÓ CÁCH, ĐỢI MÌNH CHÚT - Xs]` (ticking)
-    - ⏳ `[ĐÃ XONG YÊU CẦU CỦA BẠN, CHỜ CHÚT TÔI ĐANG GỬI PHẢN HỒI YÊU CẦU CỦA BẠN (Xs)]` (FROZEN: Đóng băng đồng hồ bấm giờ ngay lập tức vì tác vụ đã hoàn tất xong, cố định số giây thực thi cuối cùng, KHÔNG đếm tiếp).
+    - 💡 `[ĐANG SUY NGHĨ, ĐỢI MÌNH CHÚT (Xs)...]` (ticking)
+    - ⏳ `[ĐANG KHỞI TẠO PHẢN HỒI CHO BẠN, VUI LÒNG CHỜ TRONG GIÂY LÁT (Xs)...]` (ticking liên tục trong lúc PC đang sinh câu trả lời)
 - **1-Touch Cancel Button**:
   - Inline keyboard `[🛑 Dừng tác vụ (Cancel)]` attached directly under active status bubbles.
   - User tap triggers `callback_query` to immediately abort ongoing commands, clean up, and notify.
@@ -30,7 +30,8 @@
   - 🟠 `[SỬA FILE]` (+ X dòng thêm, - Y dòng sửa, ! Ghi đè)
   - 🔴 `[XÓA FILE / THƯ MỤC]` (- Lệnh xóa)
   - 📄 `[ĐỌC FILE]` (Kèm phạm vi dòng)
-  - ⚡ `[MÁY TÍNH ĐANG THỰC HIỆN]` (Chạy lệnh terminal)
+  - ⚡ `[ĐANG XỬ LÝ]` (Chạy lệnh terminal - Tuyệt đối không dùng chữ 'tiến trình ngầm')
+  - Tự động ẩn các lệnh kiểm tra nội bộ (như manage_task status/list) để không làm loãng khung chat.
 - **Response Preservation & Cleanup**:
   - The final response `🤖 [MÁY TÍNH ĐÃ PHẢN HỒI XONG TRONG Xs]:` is permanent and MUST NEVER be deleted.
   - Temporary progress bubbles are cleared after a safe 5-second countdown to prevent Telegram 429 rate limits.
