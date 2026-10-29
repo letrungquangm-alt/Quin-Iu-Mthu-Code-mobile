@@ -14,3 +14,4 @@ temp_*/
 *.tar.gz
 tunnel_state.json
 stream_state.json
+outbox/

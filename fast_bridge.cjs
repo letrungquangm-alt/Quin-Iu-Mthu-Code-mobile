@@ -110,56 +110,43 @@ let pinFailedCount = 0;
 let waitingForPairCode = false;
 let waitingForEditQueueId = null;
 
-// --- LONG RESPONSE SENDER ---
+// --- LONG RESPONSE SENDER (OFFLOADED TO STANDALONE .BAT WORKER) ---
 
 async function sendLongResponse(chatId, answerText, totalSec, threadId = 1160) {
     if (!answerText) return;
     const targetThreadId = Number(threadId) || activeThreadId || 1160;
-    const maxLen = 3500;
+
+    const outboxDir = path.join(rootDir, 'outbox');
+    if (!fs.existsSync(outboxDir)) {
+        try { fs.mkdirSync(outboxDir, { recursive: true }); } catch (e) {}
+    }
+
+    const payloadFile = path.join(outboxDir, `send_${Date.now()}_${Math.random().toString(36).substring(7)}.json`);
+    const payloadData = {
+        chat_id: chatId,
+        message_thread_id: targetThreadId,
+        text: answerText,
+        totalSec: totalSec
+    };
+
+    try {
+        fs.writeFileSync(payloadFile, JSON.stringify(payloadData), 'utf8');
+        const batPath = path.join(rootDir, 'scripts', 'send_message.bat');
+        if (fs.existsSync(batPath)) {
+            execFile(batPath, [payloadFile], { windowsHide: true }, (err) => {
+                if (err) console.error('[Send BAT Error]:', err.message);
+            });
+            console.log(`[Bridge] Đã bàn giao tin nhắn (${answerText.length} ký tự) cho send_message.bat xử lý ngầm!`);
+            return;
+        }
+    } catch (e) {
+        console.error('[Outbox Write Error]:', e.message);
+    }
+
+    // Fallback nếu không tìm thấy bat
+    const html = mdToTgHtml(answerText);
     const headerTitle = `🤖 <b>[MÁY TÍNH ĐÃ PHẢN HỒI (Hoàn tất trong ${totalSec}s)]:</b>\n\n`;
-
-    if (answerText.length <= maxLen) {
-        const html = mdToTgHtml(answerText);
-        await sendMsg(chatId, `${headerTitle}${html}`, targetThreadId);
-        return;
-    }
-
-    const paragraphs = answerText.split(/\r?\n\r?\n/);
-    const chunks = [];
-    let currentChunk = '';
-
-    for (const p of paragraphs) {
-        if ((currentChunk + '\n\n' + p).length > maxLen) {
-            if (currentChunk) chunks.push(currentChunk.trim());
-            if (p.length > maxLen) {
-                const lines = p.split(/\r?\n/);
-                let lineChunk = '';
-                for (const l of lines) {
-                    if ((lineChunk + '\n' + l).length > maxLen) {
-                        if (lineChunk) chunks.push(lineChunk.trim());
-                        lineChunk = l;
-                    } else {
-                        lineChunk = lineChunk ? lineChunk + '\n' + l : l;
-                    }
-                }
-                if (lineChunk) currentChunk = lineChunk;
-            } else {
-                currentChunk = p;
-            }
-        } else {
-            currentChunk = currentChunk ? currentChunk + '\n\n' + p : p;
-        }
-    }
-    if (currentChunk) chunks.push(currentChunk.trim());
-
-    for (let i = 0; i < chunks.length; i++) {
-        const html = mdToTgHtml(chunks[i]);
-        const header = (i === 0) ? headerTitle : `<i>(Phần ${i + 1}/${chunks.length})</i>\n\n`;
-        await sendMsg(chatId, `${header}${html}`, targetThreadId);
-        if (i < chunks.length - 1) {
-            await new Promise(r => setTimeout(r, 200));
-        }
-    }
+    await sendMsg(chatId, `${headerTitle}${html}`, targetThreadId);
 }
 
 // --- SILENT CLEANUP (1 FAST API CALL) ---
