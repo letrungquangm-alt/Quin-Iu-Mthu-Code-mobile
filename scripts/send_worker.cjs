@@ -36,6 +36,17 @@ const cancelKeyboard = {
     ]
 };
 
+function getQueueButtons(targetId) {
+    return {
+        inline_keyboard: [
+            [{ text: '⚡ Ưu tiên dùng prompt này (Send now)', callback_data: `q_now:${targetId}` }],
+            [{ text: '✏️ Sửa prompt đang chờ đó', callback_data: `q_edit:${targetId}` }],
+            [{ text: '🗑️ Xóa prompt này', callback_data: `q_del:${targetId}` }],
+            [{ text: '➕ Gửi thêm vào hàng chờ', callback_data: 'q_add' }]
+        ]
+    };
+}
+
 function escapeHtml(str) {
     return (str || '')
         .replace(/&/g, '&amp;')
@@ -78,6 +89,12 @@ function mdToTgHtml(text) {
     return text;
 }
 
+function formatStopwatch(sec) {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m > 0 ? m + 'm ' : ''}${s}s`;
+}
+
 async function tgApi(method, payload) {
     const url = `https://api.telegram.org/bot${botToken}/${method}`;
     let attempts = 0;
@@ -96,7 +113,7 @@ async function tgApi(method, payload) {
             // Handle 429 Rate Limit
             if (json.error_code === 429 && json.parameters && json.parameters.retry_after) {
                 const waitSec = json.parameters.retry_after;
-                console.warn(`[SendWorker 429] Cho ${waitSec}s truoc khi gui lai...`);
+                console.warn(`[SendWorker 429] Chờ ${waitSec}s trước khi gửi tiếp...`);
                 await new Promise(r => setTimeout(r, (waitSec + 1) * 1000));
                 continue;
             }
@@ -106,6 +123,13 @@ async function tgApi(method, payload) {
                 delete payload.parse_mode;
                 payload.text = payload.text.replace(/<[^>]+>/g, '');
                 continue;
+            }
+
+            if (json.description && (
+                json.description.includes('message to edit not found') ||
+                json.description.includes('message is not modified')
+            )) {
+                return json;
             }
 
             console.error(`[SendWorker Fail]:`, json.description);
@@ -151,18 +175,23 @@ function chunkText(text, maxLen = 3500) {
     return chunks;
 }
 
-function updateBridgeState(stateUpdates) {
-    const stateFile = path.join(rootDir, 'bridge_state.json');
-    let currentState = {};
+const stateFile = path.join(rootDir, 'bridge_state.json');
+
+function getBridgeState() {
     if (fs.existsSync(stateFile)) {
         try {
-            currentState = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+            return JSON.parse(fs.readFileSync(stateFile, 'utf8'));
         } catch (e) {}
     }
-    Object.assign(currentState, stateUpdates);
+    return {};
+}
+
+function updateBridgeState(patch) {
+    const st = Object.assign(getBridgeState(), patch);
     try {
-        fs.writeFileSync(stateFile, JSON.stringify(currentState, null, 2), 'utf8');
+        fs.writeFileSync(stateFile, JSON.stringify(st, null, 2), 'utf8');
     } catch (e) {}
+    return st;
 }
 
 async function run() {
@@ -187,12 +216,12 @@ async function run() {
             process.exit(1);
         }
     }
-    // Case 2: Cờ --ack: Gửi bong bóng bắt thấy prompt ("Đã đọc prompt & đang xử lý")
+    // Case 2: Cờ --ack: Gửi bong bóng bắt thấy prompt
     else if (firstArg === '--ack') {
         const preview = args[1] || 'Yêu cầu của bro';
         const thread = args[2] ? Number(args[2]) : defaultThreadId;
         payload = {
-            action: 'prompt_ack',
+            action: 'prompt_start',
             chat_id: supergroupId,
             message_thread_id: thread,
             preview: preview,
@@ -223,11 +252,21 @@ async function run() {
     const chatId = payload.chat_id || supergroupId;
     const threadId = payload.message_thread_id || defaultThreadId;
 
-    // --- XỬ LÝ ACTION: PROMPT_ACK (BẮT THẤY PROMPT) ---
-    if (action === 'prompt_ack') {
+    // --- 1. ACTION: PROMPT_START (BẮT ĐẦU NHẬN PROMPT & LIVE TICKING STOPWATCH) ---
+    if (action === 'prompt_start' || action === 'prompt_ack') {
         const preview = payload.preview || '';
         const isEdit = !!payload.isEdit;
         const isPhoto = !!payload.isPhoto;
+        const startTime = Date.now();
+        const workerSessionId = 'sess_' + startTime;
+
+        updateBridgeState({
+            isWorking: true,
+            currentSessionId: workerSessionId,
+            promptStartTime: startTime,
+            promptMsgId: null,
+            preview: preview
+        });
 
         const promptLabel = isEdit
             ? '✏️ <b>[ĐÃ CẬP NHẬT PROMPT MỚI]</b> • ⏱️ <code>1s</code>'
@@ -237,44 +276,139 @@ async function run() {
 
         const previewClean = preview.replace(/[<>]/g, '');
         const previewSafe = escapeHtml(previewClean.length > 55 ? previewClean.substring(0, 55) + '...' : previewClean);
-        const text = `${promptLabel}\n<blockquote><i>${previewSafe}</i></blockquote>\n⏱️ <i>Đang đếm giây xử lý: 1s...</i>`;
+        const initialText = `${promptLabel}\n<blockquote><i>${previewSafe}</i></blockquote>\n⏱️ <i>Đang đếm giây xử lý: 1s...</i>`;
 
         const res = await tgApi('sendMessage', {
             chat_id: chatId,
             message_thread_id: threadId,
-            text: text,
+            text: initialText,
             parse_mode: 'HTML',
             disable_web_page_preview: true,
             reply_markup: cancelKeyboard
         });
 
-        if (res && res.ok && res.result) {
-            const msgId = res.result.message_id;
-            console.log(`[SendWorker PromptAck OK] Msg ID: ${msgId} tai Topic #${threadId}`);
-            updateBridgeState({
-                lastPromptAckMsgId: msgId,
-                lastPromptAckThreadId: threadId,
-                lastPromptAckTime: Date.now(),
-                previewText: preview
-            });
+        if (isFile) {
+            try { fs.unlinkSync(firstArg); } catch (e) {}
         }
+
+        if (!res || !res.ok || !res.result) {
+            console.error('[SendWorker] Khong the gui bong bong ban dau');
+            process.exit(1);
+        }
+
+        const promptMsgId = res.result.message_id;
+        console.log(`[SendWorker PromptStart OK] Msg ID: ${promptMsgId} tại Topic #${threadId}`);
+        updateBridgeState({ promptMsgId: promptMsgId });
+
+        // 👉 VÒNG LẶP ĐẾM GIÂY STOPWATCH NGẦM TẠI ĐÂY (3.5s / lần)
+        let lastText = initialText;
+
+        while (true) {
+            await new Promise(r => setTimeout(r, 3500));
+            const currentState = getBridgeState();
+
+            // Nếu tác vụ đã kết thúc hoặc phiên mới đã đè lên -> Dừng đếm giây
+            if (!currentState.isWorking || currentState.currentSessionId !== workerSessionId) {
+                console.log(`[SendWorker Ticker Stopped] Phien ${workerSessionId} da hoan tat.`);
+                break;
+            }
+
+            const elapsed = Math.max(1, Math.round((Date.now() - startTime) / 1000));
+            const timeStr = formatStopwatch(elapsed);
+
+            const updatedPromptLabel = isEdit
+                ? `✏️ <b>[ĐÃ CẬP NHẬT PROMPT MỚI]</b> • ⏱️ <code>${timeStr}</code>`
+                : (isPhoto
+                    ? `📷 <b>[ĐÃ NHẬN ẢNH VÀ ĐANG PHÂN TÍCH]</b> • ⏱️ <code>${timeStr}</code>`
+                    : `📖 <b>[ĐÃ ĐỌC PROMPT &amp; ĐANG XỬ LÝ]</b> • ⏱️ <code>${timeStr}</code>`);
+
+            const newText = `${updatedPromptLabel}\n<blockquote><i>${previewSafe}</i></blockquote>\n⏱️ <i>Đang đếm giây xử lý: ${timeStr}...</i>`;
+
+            if (newText !== lastText) {
+                lastText = newText;
+                const editRes = await tgApi('editMessageText', {
+                    chat_id: chatId,
+                    message_id: promptMsgId,
+                    text: newText,
+                    parse_mode: 'HTML',
+                    disable_web_page_preview: true,
+                    reply_markup: cancelKeyboard
+                });
+
+                if (editRes && !editRes.ok && editRes.description && editRes.description.includes('message to edit not found')) {
+                    console.log('[SendWorker] Tin nhan da bi xoa, dung ticker.');
+                    break;
+                }
+            }
+        }
+        process.exit(0);
     }
-    // --- XỬ LÝ ACTION: CANCEL (HỦY TÁC VỤ) ---
-    else if (action === 'cancel') {
-        const cancelMsg = `🛑 <b>[ĐÃ HỦY TÁC VỤ THEO YÊU CẦU CỦA BRO!]</b>\n<i>Đã dừng tiến trình và dọn dẹp sạch sẽ.</i>`;
+
+    // --- 2. ACTION: QUEUE (NẠP PROMPT VÀO HÀNG ĐỢI) ---
+    else if (action === 'queue') {
+        const preview = payload.preview || '';
+        const queueId = payload.queueId || 'q_' + Date.now();
+        const queuePos = payload.queuePos || 1;
+
+        const previewClean = preview.replace(/[<>]/g, '');
+        const previewSafe = escapeHtml(previewClean.length > 55 ? previewClean.substring(0, 55) + '...' : previewClean);
+        const qNotice = `📥 <b>[ĐÃ NẠP VÀO HÀNG ĐỢI PC]</b>\n<blockquote><i>${previewSafe}</i></blockquote>\n<i>Máy tính đang xử lý tác vụ trước đó. Prompt này đã được xếp vị trí <b>#${queuePos}</b> trong hàng chờ!</i>`;
+
         await tgApi('sendMessage', {
             chat_id: chatId,
             message_thread_id: threadId,
-            text: cancelMsg,
+            text: qNotice,
             parse_mode: 'HTML',
-            disable_web_page_preview: true
+            disable_web_page_preview: true,
+            reply_markup: getQueueButtons(queueId)
         });
-        console.log(`[SendWorker Cancel OK] Tai Topic #${threadId}`);
+        console.log(`[SendWorker Queue OK] Da nap vao hang cho #${queuePos}`);
     }
-    // --- XỬ LÝ ACTION: RESPONSE HOẶC TEXT (PHẢN HỒI HOÀN TẤT / TIN NHẮN DÀI) ---
+
+    // --- 3. ACTION: CANCEL (HỦY TÁC VỤ & DỌN DẸP) ---
+    else if (action === 'cancel') {
+        const st = updateBridgeState({ isWorking: false });
+        const oldMsgId = st.promptMsgId;
+
+        const cancelMsg = `🛑 <b>[ĐÃ HỦY TÁC VỤ THEO YÊU CẦU CỦA BRO!]</b>\n<i>Đã dừng tiến trình và dọn dẹp sạch sẽ.</i>`;
+
+        if (oldMsgId) {
+            await tgApi('editMessageText', {
+                chat_id: chatId,
+                message_id: oldMsgId,
+                text: cancelMsg,
+                parse_mode: 'HTML',
+                disable_web_page_preview: true,
+                reply_markup: { inline_keyboard: [] }
+            });
+
+            // Tự động dọn dẹp bong bóng sau 1.5s
+            setTimeout(async () => {
+                await tgApi('deleteMessage', { chat_id: chatId, message_id: oldMsgId });
+            }, 1500);
+        } else {
+            const res = await tgApi('sendMessage', {
+                chat_id: chatId,
+                message_thread_id: threadId,
+                text: cancelMsg,
+                parse_mode: 'HTML',
+                disable_web_page_preview: true
+            });
+            if (res && res.result) {
+                setTimeout(async () => {
+                    await tgApi('deleteMessage', { chat_id: chatId, message_id: res.result.message_id });
+                }, 1500);
+            }
+        }
+        console.log(`[SendWorker Cancel OK] Đã dừng và dọn dẹp`);
+    }
+
+    // --- 4. ACTION: RESPONSE (GỬI KẾT QUẢ HOÀN TẤT & TỰ ĐỘNG DỌN BUBBLE) ---
     else {
         const rawText = payload.text || '';
         const totalSec = payload.totalSec;
+        const st = updateBridgeState({ isWorking: false });
+        const oldMsgId = st.promptMsgId;
 
         if (rawText.trim()) {
             const header = totalSec
@@ -302,6 +436,13 @@ async function run() {
                 }
             }
             console.log(`[SendWorker Response OK] Da gui ${chunks.length} phan toi Topic #${threadId}!`);
+        }
+
+        // Tự động xóa bong bóng đếm giây cũ sau khi đã gửi xong kết quả
+        if (oldMsgId) {
+            setTimeout(async () => {
+                await tgApi('deleteMessage', { chat_id: chatId, message_id: oldMsgId });
+            }, 1500);
         }
     }
 

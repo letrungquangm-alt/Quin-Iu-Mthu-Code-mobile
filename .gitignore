@@ -15,3 +15,5 @@ temp_*/
 tunnel_state.json
 stream_state.json
 outbox/
+antigravity_ls.json
+bridge_state.json

@@ -165,83 +165,9 @@ function formatStopwatch(sec) {
     return `${m > 0 ? m + 'm ' : ''}${s}s`;
 }
 
-// --- LIVE TICKING STOPWATCH (EVERY 3.5S TO PREVENT TELEGRAM 429) ---
-
-async function updateStatusBubble() {
-    if (isUpdatingStatus || isRateLimited() || currentPhase === 'IDLE' || currentPhase === 'CANCELED') return;
-
-    // A. Nếu có tool đang chạy và có runningFn, đếm giây trên bong bóng tool
-    if (currentWorkingMsgId && currentToolStartTime && currentToolRunningFn) {
-        const toolElapsed = Math.max(1, Math.round((Date.now() - currentToolStartTime) / 1000));
-        const updatedToolText = currentToolRunningFn(toolElapsed);
-        if (updatedToolText !== lastWorkingBubbleText) {
-            lastWorkingBubbleText = updatedToolText;
-            recordBubbleText(currentWorkingMsgId, updatedToolText);
-            isUpdatingStatus = true;
-            try {
-                const res = await editMsg(activeChatId, currentWorkingMsgId, updatedToolText, 'HTML', cancelKeyboard);
-                if (res && res.notFound) {
-                    currentWorkingMsgId = null;
-                }
-            } catch (e) {}
-            isUpdatingStatus = false;
-        }
-        return;
-    }
-
-    // B. Nếu không có tool nào đang chạy, đếm giây trên promptMsgId
-    if (!promptMsgId || !promptStartTime) return;
-
-    const elapsed = Math.max(1, Math.round((Date.now() - promptStartTime) / 1000));
-    const timeStr = formatStopwatch(elapsed);
-    let text = '';
-
-    if (currentPhase === 'READING') {
-        const promptLabel = isEditedPrompt
-            ? `✏️ <b>[ĐÃ CẬP NHẬT PROMPT MỚI]</b> • ⏱️ <code>${timeStr}</code>`
-            : (isPhotoSaved
-                ? `📷 <b>[ĐÃ NHẬN ẢNH VÀ ĐANG PHÂN TÍCH]</b> • ⏱️ <code>${timeStr}</code>`
-                : `📖 <b>[ĐÃ ĐỌC PROMPT &amp; ĐANG XỬ LÝ]</b> • ⏱️ <code>${timeStr}</code>`);
-        const previewClean = (promptTextSaved || '').replace(/[<>]/g, '');
-        const previewSafe = escapeHtml(previewClean.length > 55 ? previewClean.substring(0, 55) + '...' : previewClean);
-        text = `${promptLabel}\n<blockquote><i>${previewSafe}</i></blockquote>\n⏱️ <i>Đang đếm giây xử lý: ${timeStr}...</i>`;
-    } else if (currentPhase === 'THINKING' || currentPhase === 'WORKING') {
-        const safe = escapeHtml(promptTextSaved || 'Yêu cầu của bạn');
-        const detail = currentToolSummary ? `\n<i>⚡ ${escapeHtml(currentToolSummary)}</i>` : '';
-        text = `💡 <b>[ĐANG SUY NGHĨ &amp; XỬ LÝ]</b> • ⏱️ <code>${timeStr}</code>\n<blockquote><i>${safe}</i></blockquote>${detail}\n⏱️ <i>Đang đếm giây xử lý: ${timeStr}...</i>`;
-    } else {
-        return;
-    }
-
-    if (text === lastStatusText) return;
-
-    isUpdatingStatus = true;
-    try {
-        const kb = (getActiveCancelMsgId() === promptMsgId ? cancelKeyboard : { inline_keyboard: [] });
-        const res = await editMsg(activeChatId, promptMsgId, text, 'HTML', kb);
-        if (res && res.notFound) {
-            promptMsgId = null;
-            stopTicker();
-        } else {
-            lastStatusText = text;
-            recordBubbleText(promptMsgId, text);
-        }
-    } catch (e) {}
-    isUpdatingStatus = false;
-}
-
-function startTicker() {
-    if (!tickerInterval) {
-        tickerInterval = setInterval(updateStatusBubble, 3500); // 3.5s per edit -> max 17 edits/min
-    }
-}
-
-function stopTicker() {
-    if (tickerInterval) {
-        clearInterval(tickerInterval);
-        tickerInterval = null;
-    }
-}
+// --- LIVE TICKING STOPWATCH IS OFFLOADED TO STANDALONE .BAT WORKER (send_worker.cjs) ---
+function startTicker() {}
+function stopTicker() {}
 
 // --- HANDLE DISCONNECT & CLOUD HANDOVER ---
 
@@ -275,12 +201,11 @@ async function handleCancelAction(source = 'button') {
 
     await clearAllCancelButtons(activeChatId, tempMsgIds);
 
-    const cancelMsg = `🛑 <b>[ĐÃ HỦY TÁC VỤ THEO YÊU CẦU CỦA BRO!]</b>\n<i>Đã dừng tiến trình và dọn dẹp sạch sẽ.</i>`;
-    if (promptMsgId) {
-        await editMsg(activeChatId, promptMsgId, cancelMsg, 'HTML', { inline_keyboard: [] }, true);
-    } else {
-        await sendMsg(activeChatId, cancelMsg, activeThreadId, 'HTML', { inline_keyboard: [] });
-    }
+    sendViaBat({
+        action: 'cancel',
+        chat_id: activeChatId,
+        message_thread_id: activeThreadId
+    });
 
     forwardToAntigravity(conversationId, `[LỆNH HỦY TỪ ĐIỆN THOẠI]: Người dùng đã yêu cầu dừng/hủy tác vụ hiện tại. Ngừng ngay lập tức mọi hoạt động.`);
 
@@ -306,7 +231,6 @@ async function handleCancelAction(source = 'button') {
 
 async function executePromptImmediately(chatId, threadId, promptText, previewText, isEdit = false, isPhoto = false) {
     currentPhase = 'READING';
-    stopTicker();
     promptStartTime = Date.now();
     promptTextSaved = previewText;
     isPhotoSaved = isPhoto;
@@ -317,43 +241,17 @@ async function executePromptImmediately(chatId, threadId, promptText, previewTex
     forwardToAntigravity(conversationId, promptText);
     sendTyping(chatId, threadId);
 
-    const promptLabel = isEdit
-        ? '✏️ <b>[ĐÃ CẬP NHẬT PROMPT MỚI]</b> • ⏱️ <code>1s</code>'
-        : (isPhoto
-            ? '📷 <b>[ĐÃ NHẬN ẢNH VÀ ĐANG PHÂN TÍCH]</b> • ⏱️ <code>1s</code>'
-            : '📖 <b>[ĐÃ ĐỌC PROMPT &amp; ĐANG XỬ LÝ]</b> • ⏱️ <code>1s</code>');
-
-    const previewClean = previewText.replace(/[<>]/g, '');
-    const previewSafe = escapeHtml(previewClean.length > 55 ? previewClean.substring(0, 55) + '...' : previewClean);
-    const initialText = `${promptLabel}\n<blockquote><i>${previewSafe}</i></blockquote>\n⏱️ <i>Đang đếm giây xử lý: 1s...</i>`;
-
     await clearAllCancelButtons(chatId);
 
-    // Gửi bong bóng bắt thấy prompt qua file BAT độc lập theo đúng chỉ đạo của bro!
+    // Giao toàn bộ việc gửi bong bóng nhận prompt & Live Ticking Stopwatch cho BAT độc lập
     sendViaBat({
-        action: 'prompt_ack',
+        action: 'prompt_start',
         chat_id: chatId,
         message_thread_id: threadId,
         preview: previewText,
         isEdit: isEdit,
         isPhoto: isPhoto
     });
-
-    // Sau khi BAT gửi xong (trong ~350ms), đồng bộ promptMsgId để ticker tiếp tục đếm giây
-    setTimeout(() => {
-        try {
-            const stateFile = path.join(rootDir, 'bridge_state.json');
-            if (fs.existsSync(stateFile)) {
-                const st = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
-                if (st.lastPromptAckMsgId && (Date.now() - (st.lastPromptAckTime || 0) < 6000)) {
-                    promptMsgId = st.lastPromptAckMsgId;
-                    tempMsgIds.push(promptMsgId);
-                    setActiveCancelMsgId(promptMsgId);
-                    startTicker();
-                }
-            }
-        } catch (e) {}
-    }, 450);
 }
 
 // --- TRANSCRIPT WATCHER SETUP ---
@@ -1063,8 +961,14 @@ async function pollUpdates() {
                             timestamp: Date.now()
                         });
 
-                        const qNotice = `📥 <b>[ĐÃ NẠP VÀO HÀNG ĐỢI PC]</b>\n<blockquote><i>${previewSafe}</i></blockquote>\n<i>Máy tính đang xử lý tác vụ trước đó. Prompt này đã được xếp vị trí <b>#${promptQueue.length}</b> trong hàng chờ!</i>`;
-                        await sendMsg(chatId, qNotice, threadId, 'HTML', getQueueButtons(qId));
+                        sendViaBat({
+                            action: 'queue',
+                            chat_id: chatId,
+                            message_thread_id: threadId,
+                            preview: userText,
+                            queueId: qId,
+                            queuePos: promptQueue.length
+                        });
                         continue;
                     }
 
