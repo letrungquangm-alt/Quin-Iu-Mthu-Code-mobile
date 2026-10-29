@@ -103,6 +103,23 @@ async function tgApi(method, data) {
     }
 }
 
+async function downloadTelegramPhoto(fileId, savePath) {
+    try {
+        const fileRes = await tgApi('getFile', { file_id: fileId });
+        if (fileRes.ok && fileRes.result && fileRes.result.file_path) {
+            const fileUrl = `https://api.telegram.org/file/bot${botToken}/${fileRes.result.file_path}`;
+            const res = await fetch(fileUrl);
+            const buffer = Buffer.from(await res.arrayBuffer());
+            fs.writeFileSync(savePath, buffer);
+            console.log(`[Bridge Photo] Đã tải ảnh Telegram về: ${savePath} (${buffer.length} bytes)`);
+            return savePath;
+        }
+    } catch (e) {
+        console.error('[Bridge Photo Error]:', e.message);
+    }
+    return null;
+}
+
 async function sendTyping(chatId, threadId = 315) {
     const payload = { chat_id: chatId, action: 'typing' };
     if (threadId) payload.message_thread_id = threadId;
@@ -346,14 +363,19 @@ function formatToolCall(tc) {
     } else if (toolName === 'read_file') {
         const rawPath = args.Path ? args.Path.toString().replace(/^"|"$/g, '') : 'file';
         const fileName = path.basename(rawPath);
-        const sLine = args.StartLine || '';
-        const eLine = args.EndLine || '';
-        let rangeInfo = '(Đọc toàn bộ file)';
-        if (sLine && eLine) rangeInfo = `(Dòng ${sLine} - ${eLine})`;
-        else if (sLine) rangeInfo = `(Từ dòng ${sLine})`;
-        else if (eLine) rangeInfo = `(Đến dòng ${eLine})`;
-        summary = rawSummary || `Đọc nội dung ${fileName}`;
-        bubbleText = `📄 <b>[ĐỌC FILE]:</b> <code>${fileName}</code> <i>${rangeInfo}</i>`;
+        if (/\.(jpg|jpeg|png|webp|gif)$/i.test(fileName)) {
+            summary = rawSummary || `Phân tích thị giác hình ảnh ${fileName}`;
+            bubbleText = `🖼️ <b>[PHÂN TÍCH HÌNH ẢNH]:</b> <code>${fileName}</code>`;
+        } else {
+            const sLine = args.StartLine || '';
+            const eLine = args.EndLine || '';
+            let rangeInfo = '(Đọc toàn bộ file)';
+            if (sLine && eLine) rangeInfo = `(Dòng ${sLine} - ${eLine})`;
+            else if (sLine) rangeInfo = `(Từ dòng ${sLine})`;
+            else if (eLine) rangeInfo = `(Đến dòng ${eLine})`;
+            summary = rawSummary || `Đọc nội dung ${fileName}`;
+            bubbleText = `📄 <b>[ĐỌC FILE]:</b> <code>${fileName}</code> <i>${rangeInfo}</i>`;
+        }
     } else if (toolName === 'manage_task') {
         const action = args.Action || '';
         if (action === 'status' || action === 'list') {
@@ -790,10 +812,13 @@ async function pollUpdates() {
 
                     let userText = '';
                     let isPhoto = false;
+                    let photoFileId = null;
 
                     if (msg.photo && msg.photo.length > 0) {
                         isPhoto = true;
                         userText = msg.caption ? msg.caption.trim() : 'Phân tích hình ảnh này';
+                        const bestPhoto = msg.photo[msg.photo.length - 1];
+                        photoFileId = bestPhoto.file_id;
                     } else if (msg.text) {
                         userText = msg.text.trim();
                     }
@@ -851,9 +876,18 @@ async function pollUpdates() {
                         }
                     }
 
+                    let localPhotoPath = null;
+                    if (isPhoto && photoFileId) {
+                        const targetPhoto = path.join(rootDir, 'incoming_photo.jpg');
+                        localPhotoPath = await downloadTelegramPhoto(photoFileId, targetPhoto);
+                    }
+
                     showScreenToast(isEdit ? '✏️ Telegram -> Prompt Sửa' : '📱 Telegram -> PC Sync', previewClean);
                     recordSyncMessage(isEdit ? `[Sửa tin]: ${userText}` : userText);
-                    forwardToAntigravity(isEdit ? `[Điện thoại sửa prompt thành]: ${userText}` : `[Điện thoại gửi]: ${userText}`);
+                    const forwardPrompt = localPhotoPath
+                        ? `[Điện thoại gửi ảnh]: ${userText} (Đã tải ảnh về máy tại: ${localPhotoPath})`
+                        : (isEdit ? `[Điện thoại sửa prompt thành]: ${userText}` : `[Điện thoại gửi]: ${userText}`);
+                    forwardToAntigravity(forwardPrompt);
                 }
             }
         } catch (e) {
