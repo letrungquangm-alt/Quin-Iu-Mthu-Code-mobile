@@ -1,7 +1,10 @@
 /**
- * QuinloveRin Code - Fast Telegram Bridge v1.1 (.cjs)
- * Tốc độ cao, không trễ, tự động dọn dẹp bóng tiến trình khi AI trả lời xong.
- * Hỗ trợ Supergroup, Forum Topics, tiếng Việt UTF-8 chuẩn.
+ * QuinloveRin Code - Fast Telegram Bridge v1.2 (.cjs)
+ * KIẾN TRÚC 1 BÓNG TRẠNG THÁI DUY NHẤT (Single Living Status Bubble)
+ * - Cập nhật trạng thái in-place theo thời gian thực (real-time).
+ * - Không gửi dồn dập, không bao giờ kẹt bóng (1s).
+ * - Tự động xóa sạch bóng trạng thái khi phản hồi xong.
+ * - Hỗ trợ Multi-Bot Failover Pool chống Rate Limit 429.
  */
 
 const fs = require('fs');
@@ -17,7 +20,10 @@ if (!fs.existsSync(configPath)) {
 }
 
 const config = JSON.parse(fs.readFileSync(configPath, 'utf8').replace(/^\uFEFF/, ''));
-const botToken = config.BOT_TOKEN;
+const mainBotToken = config.BOT_TOKEN;
+const extraBotTokens = Array.isArray(config.EXTRA_BOT_TOKENS) ? config.EXTRA_BOT_TOKENS : [];
+const botPool = [mainBotToken, ...extraBotTokens].filter(t => t && t.length > 20);
+
 const allowedChatId = config.ALLOWED_CHAT_ID;
 const conversationId = '7f7131ce-dc72-490f-97bd-4a675f9dd0c7';
 const transcriptPath = path.join(
@@ -41,17 +47,23 @@ const langServer = path.join(
 );
 
 console.log('========================================================');
-console.log(' Fast Telegram Bridge v1.1 (.cjs) khởi động');
-console.log(' Bot Token:', botToken ? botToken.substring(0, 10) + '...' : 'NONE');
+console.log(' Fast Telegram Bridge v1.2 (Single Living Bubble) Start');
+console.log(' Bot Pool Size:', botPool.length, 'bots');
 console.log(' Conversation ID:', conversationId);
 console.log(' Transcript:', transcriptPath);
 console.log('========================================================');
 
-// --- TELEGRAM API HELPERS ---
+// --- TELEGRAM API HELPERS VỚI MULTI-BOT FAILOVER ---
 
-async function tgApi(method, data) {
+let currentBotIndex = 0;
+function getActiveBotToken() {
+    return botPool[currentBotIndex % botPool.length];
+}
+
+async function tgApi(method, data, tokenOverride = null) {
+    const token = tokenOverride || getActiveBotToken();
     try {
-        const res = await fetch(`https://api.telegram.org/bot${botToken}/${method}`, {
+        const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
@@ -59,12 +71,13 @@ async function tgApi(method, data) {
         const json = await res.json();
         if (!json.ok) {
             if (json.error_code === 429 && json.parameters && json.parameters.retry_after) {
-                const waitSec = json.parameters.retry_after;
-                console.warn(`[429 Rate Limit] Chờ ${waitSec}s trước khi gửi tiếp...`);
-                await new Promise(r => setTimeout(r, (waitSec + 1) * 1000));
+                console.warn(`[429 Rate Limit on Bot ${currentBotIndex}] Chuyển bot tiếp theo trong pool...`);
+                currentBotIndex = (currentBotIndex + 1) % botPool.length;
                 return tgApi(method, data);
             }
-            console.warn(`[API ${method} Fail]:`, json.description);
+            if (json.description && !json.description.includes('message to delete not found')) {
+                console.warn(`[API ${method} Fail]:`, json.description);
+            }
         }
         return json;
     } catch (e) {
@@ -84,7 +97,6 @@ async function sendMsg(chatId, text, threadId = null, parseMode = 'HTML') {
 
     const res = await tgApi('sendMessage', payload);
     if (!res.ok && parseMode) {
-        // Fallback gửi plain text nếu Telegram không parse được HTML
         delete payload.parse_mode;
         payload.text = text.replace(/<[^>]+>/g, '');
         const fallbackRes = await tgApi('sendMessage', payload);
@@ -120,20 +132,17 @@ async function deleteMsgs(chatId, messageIds) {
         return;
     }
 
-    // Chia nhóm tối đa 80 IDs mỗi đợt theo chuẩn Telegram (tối đa 100)
     for (let i = 0; i < validIds.length; i += 80) {
         const batch = validIds.slice(i, i + 80);
         const res = await tgApi('deleteMessages', { chat_id: chatId, message_ids: batch });
         if (!res.ok) {
             for (const mid of batch) {
                 await tgApi('deleteMessage', { chat_id: chatId, message_id: mid });
-                await new Promise(r => setTimeout(r, 30));
             }
         }
     }
 }
 
-// Chuyển Markdown sang HTML an toàn cho Telegram
 function escapeHtml(str) {
     return (str || '')
         .replace(/&/g, '&amp;')
@@ -170,7 +179,6 @@ function mdToTgHtml(text) {
     return text;
 }
 
-// Gửi câu trả lời dài an toàn (chia nhỏ nếu vượt quá 3800 ký tự)
 async function sendLongResponse(chatId, answerText, threadId = null) {
     if (!answerText) return;
 
@@ -189,7 +197,6 @@ async function sendLongResponse(chatId, answerText, threadId = null) {
         if ((currentChunk + '\n\n' + p).length > maxLen) {
             if (currentChunk) chunks.push(currentChunk.trim());
             if (p.length > maxLen) {
-                // Đoạn quá dài -> cắt từng dòng
                 const lines = p.split(/\r?\n/);
                 let lineChunk = '';
                 for (const l of lines) {
@@ -220,25 +227,16 @@ async function sendLongResponse(chatId, answerText, threadId = null) {
     }
 }
 
-// --- STATE MANAGEMENT ---
+// --- KIẾN TRÚC 1 BÓNG TRẠNG THÁI DUY NHẤT (Single Status Bubble) ---
 
 let activeChatId = allowedChatId || -1004457846636;
 let activeThreadId = null;
-let tempMsgIds = [];
 
-let promptReadingMsgId = null;
-let promptReadingStart = null;
-let promptReadingText = '';
-
-let mirrorThinkingMsgId = null;
-let mirrorThinkingStart = null;
-
-let activeWorkingMsgId = null;
-let activeWorkingTitle = '';
-let activeWorkingStart = null;
-
-let planningMsgId = null;
-let planningStart = null;
+let singleStatusMsgId = null;
+let promptStartTime = null;
+let promptTextSaved = '';
+let toolStartTime = null;
+let stepCount = 0;
 
 function forwardToAntigravity(text) {
     if (fs.existsSync(langServer)) {
@@ -291,116 +289,73 @@ async function processTranscript() {
         try {
             const entry = JSON.parse(line);
 
-            // 1. AI bắt đầu suy nghĩ (chưa gọi tool và chưa có content trả về)
+            // Giai đoạn 1: AI đang suy nghĩ (nếu chưa gọi tool)
             if (entry.thinking && !entry.content && (!entry.tool_calls || entry.tool_calls.length === 0)) {
-                if (promptReadingMsgId && promptReadingStart) {
-                    const rSec = Math.max(1, Math.round((Date.now() - promptReadingStart) / 1000));
-                    const safe = escapeHtml(promptReadingText);
-                    await editMsg(activeChatId, promptReadingMsgId, `📖 <b>[ĐÃ ĐỌC XONG PROMPT - ${rSec}s]</b>\n<blockquote><i>${safe}</i></blockquote>`);
-                    promptReadingMsgId = null;
-                }
-
-                if (!mirrorThinkingStart) {
-                    mirrorThinkingStart = Date.now();
-                    mirrorThinkingMsgId = await sendMsg(activeChatId, `🧠 <b>[AI ĐANG SUY NGHĨ (1s)...]</b>`, activeThreadId);
-                    if (mirrorThinkingMsgId) tempMsgIds.push(mirrorThinkingMsgId);
+                if (singleStatusMsgId) {
+                    const elapsed = promptStartTime ? Math.max(1, Math.round((Date.now() - promptStartTime) / 1000)) : 1;
+                    const safe = escapeHtml(promptTextSaved);
+                    await editMsg(
+                        activeChatId,
+                        singleStatusMsgId,
+                        `📖 <b>[ĐÃ ĐỌC PROMPT - ${elapsed}s]</b>\n<blockquote><i>${safe}</i></blockquote>\n🧠 <b>[AI ĐANG SUY NGHĨ...]</b>`
+                    );
                 }
             }
 
-            // 2. AI gọi tool thực thi
+            // Giai đoạn 2: AI thực hiện lệnh / công cụ (Tool Call)
             if (entry.tool_calls && entry.tool_calls.length > 0) {
-                if (promptReadingMsgId && promptReadingStart) {
-                    const rSec = Math.max(1, Math.round((Date.now() - promptReadingStart) / 1000));
-                    const safe = escapeHtml(promptReadingText);
-                    await editMsg(activeChatId, promptReadingMsgId, `📖 <b>[ĐÃ ĐỌC XONG PROMPT - ${rSec}s]</b>\n<blockquote><i>${safe}</i></blockquote>`);
-                    promptReadingMsgId = null;
-                }
-
-                if (mirrorThinkingMsgId && mirrorThinkingStart) {
-                    const tSec = Math.max(1, Math.round((Date.now() - mirrorThinkingStart) / 1000));
-                    await editMsg(activeChatId, mirrorThinkingMsgId, `🧠 <b>[AI ĐÃ SUY NGHĨ XONG - ${tSec}s]</b>`);
-                    mirrorThinkingMsgId = null;
-                    mirrorThinkingStart = null;
-                }
-
-                if (planningMsgId && planningStart) {
-                    const pSec = Math.max(1, Math.round((Date.now() - planningStart) / 1000));
-                    await editMsg(activeChatId, planningMsgId, `🧠 <b>[AI ĐÃ XỬ LÝ XONG - ${pSec}s]</b>`);
-                    planningMsgId = null;
-                    planningStart = null;
-                }
-
+                stepCount++;
+                toolStartTime = Date.now();
                 const tc = entry.tool_calls[0];
                 const toolName = tc.name;
                 const summary = tc.args && tc.args.toolSummary ? tc.args.toolSummary.replace(/^"|"$/g, '') : `Thực thi ${toolName}`;
 
-                activeWorkingStart = Date.now();
-                activeWorkingTitle = summary;
-                activeWorkingMsgId = await sendMsg(activeChatId, `⚡ <b>[MÁY TÍNH ĐANG THỰC HIỆN (1s)...]</b>\n${summary}`, activeThreadId);
-                if (activeWorkingMsgId) tempMsgIds.push(activeWorkingMsgId);
+                const elapsed = promptStartTime ? Math.max(1, Math.round((Date.now() - promptStartTime) / 1000)) : 1;
+                const safePrompt = escapeHtml(promptTextSaved);
+                const safeSummary = escapeHtml(summary);
+
+                if (singleStatusMsgId) {
+                    await editMsg(
+                        activeChatId,
+                        singleStatusMsgId,
+                        `📖 <b>[PROMPT - ${elapsed}s]</b>: <i>${safePrompt}</i>\n⚡ <b>[MÁY TÍNH ĐANG THỰC HIỆN]</b>\n▶ <code>${safeSummary}</code>`
+                    );
+                }
             }
 
-            // 3. Output kết quả lệnh máy tính
+            // Giai đoạn 3: Kết quả lệnh hoàn tất (Tool Output)
             if (entry.type === 'GENERIC' && entry.content) {
-                if (activeWorkingMsgId && activeWorkingStart) {
-                    const wSec = Math.max(1, Math.round((Date.now() - activeWorkingStart) / 1000));
-                    await editMsg(activeChatId, activeWorkingMsgId, `✅ <b>[MÁY TÍNH ĐÃ HOÀN TẤT - ${wSec}s]</b>\n${activeWorkingTitle}`);
-                    activeWorkingMsgId = null;
-                    activeWorkingStart = null;
-                }
-
-                const cStr = entry.content.toString();
-                const mOut = cStr.match(/Command output:\s*([\s\S]*)/);
-                if (mOut && mOut[1].trim().length > 5) {
-                    const outLines = mOut[1].trim().split(/\r?\n/);
-                    let shortOut = outLines.slice(0, 4).join('\n');
-                    if (outLines.length > 4) shortOut += `\n... [còn ${outLines.length - 4} dòng]`;
-                    const safeOut = escapeHtml(shortOut);
-                    const mid = await sendMsg(activeChatId, `📤 <b>[KẾT QUẢ OUTPUT]:</b>\n<pre><code class="language-powershell">${safeOut}</code></pre>`, activeThreadId);
-                    if (mid) tempMsgIds.push(mid);
-
-                    planningStart = Date.now();
-                    planningMsgId = await sendMsg(activeChatId, `🧠 <b>[AI ĐANG XỬ LÝ BƯỚC TIẾP THEO (1s)...]</b>`, activeThreadId);
-                    if (planningMsgId) tempMsgIds.push(planningMsgId);
+                const wSec = toolStartTime ? Math.max(1, Math.round((Date.now() - toolStartTime) / 1000)) : 1;
+                if (singleStatusMsgId) {
+                    await editMsg(
+                        activeChatId,
+                        singleStatusMsgId,
+                        `✅ <b>[MÁY TÍNH ĐÃ HOÀN TẤT - ${wSec}s]</b>\n🧠 <b>[AI ĐANG TỔNG HỢP CÂU TRẢ LỜI...]</b>`
+                    );
                 }
             }
 
-            // 4. MODEL PHẢN HỒI XONG -> GỬI ĐÁP ÁN & DỌN DẸP SẠCH TOÀN BỘ TIN NHẮN TẠM THỜI
+            // Giai đoạn 4: Phản hồi hoàn chỉnh -> Gửi đáp án và XÓA SẠCH BÓNG TRẠNG THÁI DUY NHẤT
             if (entry.type === 'PLANNER_RESPONSE' && entry.content && (!entry.tool_calls || entry.tool_calls.length === 0)) {
                 const answer = entry.content.toString().trim();
                 if (!answer) continue;
 
-                if (planningMsgId && planningStart) {
-                    const pSec = Math.max(1, Math.round((Date.now() - planningStart) / 1000));
-                    await editMsg(activeChatId, planningMsgId, `🧠 <b>[AI ĐÃ XỬ LÝ XONG - ${pSec}s]</b>`);
-                    planningMsgId = null;
-                    planningStart = null;
-                }
-                if (activeWorkingMsgId && activeWorkingStart) {
-                    const wSec = Math.max(1, Math.round((Date.now() - activeWorkingStart) / 1000));
-                    await editMsg(activeChatId, activeWorkingMsgId, `✅ <b>[MÁY TÍNH ĐÃ HOÀN TẤT - ${wSec}s]</b>\n${activeWorkingTitle}`);
-                    activeWorkingMsgId = null;
-                    activeWorkingStart = null;
-                }
-
                 console.log('[Bridge] Gửi câu trả lời hoàn chỉnh tới Telegram...');
                 await sendLongResponse(activeChatId, answer, activeThreadId);
 
-                // Gom nốt bóng đọc prompt nếu còn sót
-                if (promptReadingMsgId) {
-                    tempMsgIds.push(promptReadingMsgId);
-                    promptReadingMsgId = null;
-                }
+                // XÓA NGAY BÓNG TRẠNG THÁI (Khung chat sạch bong 100%, chỉ còn tin nhắn trả lời)
+                if (singleStatusMsgId) {
+                    const toDelete = singleStatusMsgId;
+                    singleStatusMsgId = null;
+                    promptStartTime = null;
+                    promptTextSaved = '';
+                    toolStartTime = null;
+                    stepCount = 0;
 
-                // DỌN SẠCH TẤT CẢ TIẾN TRÌNH TẠM THỜI (chỉ giữ lại câu trả lời sạch đẹp)
-                if (tempMsgIds.length > 0) {
-                    console.log(`[Bridge] Đang dọn dẹp ${tempMsgIds.length} tin nhắn tạm thời...`);
-                    const toDelete = [...tempMsgIds];
-                    tempMsgIds = [];
                     setTimeout(async () => {
-                        await deleteMsgs(activeChatId, toDelete);
-                        console.log('[Bridge] Đã dọn sạch bong tin nhắn tạm thời!');
-                    }, 350);
+                        await deleteMsgs(activeChatId, [toDelete]);
+                        console.log('[Bridge] Đã xóa bóng trạng thái in-place, chỉ giữ lại đáp án!');
+                    }, 250);
                 }
             }
         } catch (e) {
@@ -409,8 +364,8 @@ async function processTranscript() {
     }
 }
 
-// Quét transcript mỗi 150ms
-setInterval(processTranscript, 150);
+// Quét transcript mỗi 120ms siêu tốc
+setInterval(processTranscript, 120);
 
 // --- TELEGRAM POLLING LOOP ---
 
@@ -434,7 +389,6 @@ async function pollUpdates() {
                     const threadId = msg.message_thread_id || null;
                     const fromId = msg.from ? msg.from.id : 0;
 
-                    // Kiểm tra bảo mật
                     const isAllowed = allowedList.includes(Number(chatId)) || allowedList.includes(Number(fromId));
                     if (!isAllowed) {
                         console.log(`[Bridge Security] Chặn tin nhắn từ chatId=${chatId}, fromId=${fromId}`);
@@ -458,18 +412,23 @@ async function pollUpdates() {
 
                     console.log(`[Telegram Nhận Tin] (${chatId}, thread=${threadId}): ${userText.substring(0, 50)}`);
 
-                    // 1. Phản hồi tức thì bằng bóng đọc prompt (< 0.2s)
-                    promptReadingStart = Date.now();
-                    promptReadingText = userText;
+                    // 1. TẠO DUY NHẤT 1 BÓNG TRẠNG THÁI IN-PLACE (< 0.15s)
+                    promptStartTime = Date.now();
+                    promptTextSaved = userText;
 
                     const previewClean = userText.replace(/[<>]/g, '');
                     const previewSafe = escapeHtml(previewClean.length > 50 ? previewClean.substring(0, 50) + '...' : previewClean);
                     const promptLabel = isPhoto
-                        ? '📷 <b>[ĐÃ NHẬN ẢNH - ĐANG PHÂN TÍCH (1s)...]</b>'
-                        : '📖 <b>[ĐÃ NHẬN & ĐANG ĐỌC PROMPT (1s)...]</b>';
+                        ? '📷 <b>[ĐÃ NHẬN ẢNH - ĐANG PHÂN TÍCH...]</b>'
+                        : '📖 <b>[ĐÃ NHẬN & ĐANG ĐỌC PROMPT...]</b>';
 
-                    promptReadingMsgId = await sendMsg(chatId, `${promptLabel}\n<blockquote><i>${previewSafe}</i></blockquote>`, threadId);
-                    if (promptReadingMsgId) tempMsgIds.push(promptReadingMsgId);
+                    // Xóa bóng cũ nếu trước đó còn sót
+                    if (singleStatusMsgId) {
+                        await deleteMsgs(chatId, [singleStatusMsgId]);
+                        singleStatusMsgId = null;
+                    }
+
+                    singleStatusMsgId = await sendMsg(chatId, `${promptLabel}\n<blockquote><i>${previewSafe}</i></blockquote>`, threadId);
 
                     // 2. Chuyển prompt tới máy tính (Antigravity PC)
                     forwardToAntigravity(userText);
