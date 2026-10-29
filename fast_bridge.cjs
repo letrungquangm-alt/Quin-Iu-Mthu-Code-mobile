@@ -419,6 +419,7 @@ if (!activeChatId) activeChatId = -1004457846636;
 
 let promptStartTime = null;
 let promptTextSaved = '';
+let promptMsgId = null;
 let thinkingSent = false;
 let currentWorkingMsgId = null;
 let currentToolStartTime = null;
@@ -465,26 +466,29 @@ async function processTranscript() {
 
                 const previewClean = uText.replace(/[<>]/g, '');
                 const previewSafe = escapeHtml(previewClean.length > 55 ? previewClean.substring(0, 55) + '...' : previewClean);
-                const pid = await sendMsg(
-                    activeChatId,
-                    `📖 <b>[ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (1s)...]</b>\n<blockquote><i>${previewSafe}</i></blockquote>`,
-                    activeThreadId
-                );
-                if (pid) tempMsgIds.push(pid);
+                if (!promptMsgId) {
+                    promptMsgId = await sendMsg(
+                        activeChatId,
+                        `📖 <b>[ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (1s)...]</b>\n<blockquote><i>${previewSafe}</i></blockquote>`,
+                        activeThreadId
+                    );
+                    if (promptMsgId) tempMsgIds.push(promptMsgId);
+                }
             }
 
-            // Giai đoạn: AI đã có cách / đang suy nghĩ
+            // Giai đoạn: AI đã có cách / đang suy nghĩ -> SỬA TIN NHẮN (KHÔNG ĐỂ NẰM RIÊNG)
             if (entry.thinking && !entry.content && (!entry.tool_calls || entry.tool_calls.length === 0)) {
                 if (!thinkingSent) {
                     thinkingSent = true;
                     const elapsed = promptStartTime ? Math.max(1, Math.round((Date.now() - promptStartTime) / 1000)) : 1;
                     const safe = escapeHtml(promptTextSaved || 'Yêu cầu của bạn');
-                    const tid = await sendMsg(
-                        activeChatId,
-                        `💡 <b>[ĐÃ CÓ CÁCH, ĐỢI MÌNH CHÚT - ${elapsed}s]</b>\n<blockquote><i>${safe}</i></blockquote>`,
-                        activeThreadId
-                    );
-                    if (tid) tempMsgIds.push(tid);
+                    const text = `💡 <b>[ĐÃ CÓ CÁCH, ĐỢI MÌNH CHÚT - ${elapsed}s]</b>\n<blockquote><i>${safe}</i></blockquote>`;
+                    if (promptMsgId) {
+                        await editMsg(activeChatId, promptMsgId, text);
+                    } else {
+                        promptMsgId = await sendMsg(activeChatId, text, activeThreadId);
+                        if (promptMsgId) tempMsgIds.push(promptMsgId);
+                    }
                 }
             }
 
@@ -499,7 +503,7 @@ async function processTranscript() {
                 if (currentWorkingMsgId) tempMsgIds.push(currentWorkingMsgId);
             }
 
-            // Giai đoạn: Hoàn tất Tool Call
+            // Giai đoạn: Hoàn tất Tool Call -> SỬA BÓNG THÀNH "ĐÃ XONG YÊU CẦU CỦA BẠN, CHỜ CHÚT..."
             if (entry.type === 'GENERIC' && entry.content) {
                 const wSec = currentToolStartTime ? Math.max(1, Math.round((Date.now() - currentToolStartTime) / 1000)) : 1;
                 const safeTask = escapeHtml(currentToolSummary || 'Tác vụ');
@@ -511,6 +515,15 @@ async function processTranscript() {
                         `✅ <b>[ĐÃ HOÀN TẤT TRONG ${wSec}s]</b>: <code>${safeTask}</code>`
                     );
                     currentWorkingMsgId = null;
+                }
+
+                if (promptMsgId) {
+                    const elapsed = promptStartTime ? Math.max(1, Math.round((Date.now() - promptStartTime) / 1000)) : 1;
+                    await editMsg(
+                        activeChatId,
+                        promptMsgId,
+                        `⏳ <b>[ĐÃ XONG YÊU CẦU CỦA BẠN, CHỜ CHÚT TÔI ĐANG GỬI PHẢN HỒI YÊU CỦA BẠN (${elapsed}s)...]</b>`
+                    );
                 }
 
                 sendTyping(activeChatId, activeThreadId);
@@ -537,6 +550,7 @@ async function processTranscript() {
 
                 const toClean = [...tempMsgIds];
                 tempMsgIds = [];
+                promptMsgId = null;
                 promptStartTime = null;
                 promptTextSaved = '';
                 thinkingSent = false;
@@ -637,8 +651,8 @@ async function pollUpdates() {
                         ? '📷 <b>[ĐÃ NHẬN ẢNH VÀ ĐANG PHÂN TÍCH, VUI LÒNG ĐỢI (1s)...]</b>'
                         : '📖 <b>[ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (1s)...]</b>';
 
-                    const promptMid = await sendMsg(chatId, `${promptLabel}\n<blockquote><i>${previewSafe}</i></blockquote>`, threadId);
-                    if (promptMid) tempMsgIds.push(promptMid);
+                    promptMsgId = await sendMsg(chatId, `${promptLabel}\n<blockquote><i>${previewSafe}</i></blockquote>`, threadId || activeThreadId || 315);
+                    if (promptMsgId) tempMsgIds.push(promptMsgId);
 
                     // 2. Bật Popup Toast trên màn hình PC
                     showScreenToast('📱 Telegram -> PC Sync', previewClean);
