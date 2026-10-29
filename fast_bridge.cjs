@@ -505,6 +505,16 @@ let currentToolRunningFn = null;
 let currentToolFinishedFn = null;
 let lastWorkingBubbleText = '';
 
+async function moveCancelButtonTo(chatId, newMsgId, newText, threadId = 315) {
+    if (currentCancelMsgId && currentCancelMsgId !== newMsgId) {
+        await removeCancelButtonFrom(chatId, currentCancelMsgId);
+    }
+    currentCancelMsgId = newMsgId;
+    if (newMsgId && newText) {
+        lastBubbleTexts[newMsgId] = newText;
+    }
+}
+
 async function removeCancelButtonFrom(chatId, msgId) {
     if (!msgId) return;
     const prevText = lastBubbleTexts[msgId];
@@ -1124,8 +1134,23 @@ async function pollUpdates() {
                     thinkingSent = false;
                     currentPhase = 'READING';
 
+                    let localPhotoPath = null;
+                    if (isPhoto && photoFileId) {
+                        const targetPhoto = path.join(rootDir, 'incoming_photo.jpg');
+                        localPhotoPath = await downloadTelegramPhoto(photoFileId, targetPhoto);
+                    }
+
+                    // 👉 GỬI PROMPT SANG ANTIGRAVITY PC NGAY LẬP TỨC (SIÊU TỐC KHÔNG CHỜ TELEGRAM UI)
+                    const forwardPrompt = localPhotoPath
+                        ? `[Điện thoại gửi ảnh]: ${userText} (Đã tải ảnh về máy tại: ${localPhotoPath})`
+                        : (isEdit ? `[Điện thoại sửa prompt thành]: ${userText}` : `[Điện thoại gửi]: ${userText}`);
+                    forwardToAntigravity(forwardPrompt);
+                    console.log(`[Bridge Dispatch] Đã chuyển prompt sang PC thành công: ${userText.substring(0, 50)}`);
+
                     const previewClean = userText.replace(/[<>]/g, '');
                     const previewSafe = escapeHtml(previewClean.length > 55 ? previewClean.substring(0, 55) + '...' : previewClean);
+                    showScreenToast(isEdit ? '✏️ Telegram -> Prompt Sửa' : '📱 Telegram -> PC Sync', previewClean);
+                    recordSyncMessage(isEdit ? `[Sửa tin]: ${userText}` : userText);
 
                     const promptLabel = isEdit
                         ? '✏️ <b>[ĐÃ CẬP NHẬT PROMPT MỚI, KHỞI ĐỘNG LẠI (1s)...]</b>'
@@ -1138,30 +1163,23 @@ async function pollUpdates() {
                     if (isEdit && promptMsgId) {
                         await editMsg(chatId, promptMsgId, initialText, 'HTML', cancelKeyboard);
                         lastStatusText = initialText;
-                        await moveCancelButtonTo(chatId, promptMsgId, initialText, activeThreadId);
+                        lastBubbleTexts[promptMsgId] = initialText;
+                        currentCancelMsgId = promptMsgId;
                         startTicker();
                     } else {
+                        if (currentCancelMsgId) {
+                            await removeCancelButtonFrom(chatId, currentCancelMsgId);
+                            currentCancelMsgId = null;
+                        }
                         promptMsgId = await sendMsg(chatId, initialText, activeThreadId, 'HTML', cancelKeyboard);
                         if (promptMsgId) {
                             tempMsgIds.push(promptMsgId);
                             lastStatusText = initialText;
-                            await moveCancelButtonTo(chatId, promptMsgId, initialText, activeThreadId);
+                            lastBubbleTexts[promptMsgId] = initialText;
+                            currentCancelMsgId = promptMsgId;
                             startTicker();
                         }
                     }
-
-                    let localPhotoPath = null;
-                    if (isPhoto && photoFileId) {
-                        const targetPhoto = path.join(rootDir, 'incoming_photo.jpg');
-                        localPhotoPath = await downloadTelegramPhoto(photoFileId, targetPhoto);
-                    }
-
-                    showScreenToast(isEdit ? '✏️ Telegram -> Prompt Sửa' : '📱 Telegram -> PC Sync', previewClean);
-                    recordSyncMessage(isEdit ? `[Sửa tin]: ${userText}` : userText);
-                    const forwardPrompt = localPhotoPath
-                        ? `[Điện thoại gửi ảnh]: ${userText} (Đã tải ảnh về máy tại: ${localPhotoPath})`
-                        : (isEdit ? `[Điện thoại sửa prompt thành]: ${userText}` : `[Điện thoại gửi]: ${userText}`);
-                    forwardToAntigravity(forwardPrompt);
                 }
             }
         } catch (e) {
