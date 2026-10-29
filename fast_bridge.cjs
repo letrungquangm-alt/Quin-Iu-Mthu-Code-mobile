@@ -1,6 +1,10 @@
 /**
- * QuinloveRin Code - Fast Telegram Bridge v2.7 (.cjs)
+ * QuinloveRin Code - Fast Telegram Bridge v2.8 (.cjs)
  * - TỰ ĐỘNG GỠ WEBHOOK CLOUD KHI MÁY TÍNH BẬT (CHUYỂN GIAO MƯỢT MÀ VỀ PC).
+ * - ĐỒNG HỒ BẤM GIỜ NHẢY GIÂY LIVE LIÊN TỤC (1.5s/LẦN) XUYÊN SUỐT CÁC GIAI ĐOẠN:
+ *   + 📖 [ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (Xs)...]
+ *   + 💡 [ĐÃ CÓ CÁCH, ĐỢI MÌNH CHÚT - Xs]
+ *   + ⏳ [ĐÃ XONG YÊU CẦU CỦA BẠN, CHỜ CHÚT TÔI ĐANG GỬI PHẢN HỒI YÊU CẦU CỦA BẠN (Xs)...]
  * - MÀU SẮC TRỰC QUAN CHO CÔNG CỤ (Diff Syntax Highlighting):
  *   + 🟢 [TẠO FILE MỚI] (+ X dòng mã nguồn mới - Xanh lá)
  *   + 🟠 [SỬA FILE] (+ X dòng thêm, - Y dòng sửa, ! Ghi đè - Cam)
@@ -53,7 +57,7 @@ const langServer = path.join(
 );
 
 console.log('========================================================');
-console.log(' Fast Telegram Bridge v2.7 (Color-Coded Diff & Auto-PC Reconnect)');
+console.log(' Fast Telegram Bridge v2.8 (Live 1.5s Stopwatch & Color Diffs)');
 console.log(' Bot Token:', botToken ? botToken.substring(0, 10) + '...' : 'NONE');
 console.log(' Conversation ID:', conversationId);
 console.log(' Transcript:', transcriptPath);
@@ -76,7 +80,9 @@ async function tgApi(method, data) {
                 await new Promise(r => setTimeout(r, (waitSec + 1) * 1000));
                 return tgApi(method, data);
             }
-            if (json.description && !json.description.includes('message to delete not found')) {
+            if (json.description &&
+                !json.description.includes('message to delete not found') &&
+                !json.description.includes('message is not modified')) {
                 console.warn(`[API ${method} Fail]:`, json.description);
             }
         }
@@ -87,20 +93,21 @@ async function tgApi(method, data) {
     }
 }
 
-async function sendTyping(chatId, threadId = null) {
+async function sendTyping(chatId, threadId = 315) {
     const payload = { chat_id: chatId, action: 'typing' };
     if (threadId) payload.message_thread_id = threadId;
     await tgApi('sendChatAction', payload);
 }
 
-async function sendMsg(chatId, text, threadId = null, parseMode = 'HTML') {
+async function sendMsg(chatId, text, threadId = 315, parseMode = 'HTML') {
+    const targetThread = threadId || 315;
     const payload = {
         chat_id: chatId,
         text: text,
-        disable_web_page_preview: true
+        disable_web_page_preview: true,
+        message_thread_id: targetThread
     };
     if (parseMode) payload.parse_mode = parseMode;
-    if (threadId) payload.message_thread_id = threadId;
 
     const res = await tgApi('sendMessage', payload);
     if (!res.ok && parseMode) {
@@ -187,7 +194,7 @@ function mdToTgHtml(text) {
     return text;
 }
 
-async function sendLongResponse(chatId, answerText, totalSec, threadId = null) {
+async function sendLongResponse(chatId, answerText, totalSec, threadId = 315) {
     if (!answerText) return;
 
     const targetThreadId = threadId || activeThreadId || 315;
@@ -420,12 +427,67 @@ if (!activeChatId) activeChatId = -1004457846636;
 let promptStartTime = null;
 let promptTextSaved = '';
 let promptMsgId = null;
+let isPhotoSaved = false;
+let currentPhase = 'IDLE'; // 'IDLE' | 'READING' | 'THINKING' | 'PREPARING_RESPONSE'
+let tickerInterval = null;
+let lastStatusText = '';
+let isUpdatingStatus = false;
 let thinkingSent = false;
 let currentWorkingMsgId = null;
 let currentToolStartTime = null;
 let currentToolSummary = '';
 let typingInterval = null;
 let tempMsgIds = [];
+
+// --- LIVE TICKING STOPWATCH (EVERY 1.5 SECONDS) ---
+
+async function updateStatusBubble() {
+    if (!promptMsgId || !promptStartTime || currentPhase === 'IDLE' || isUpdatingStatus) return;
+
+    const elapsed = Math.max(1, Math.round((Date.now() - promptStartTime) / 1000));
+    let text = '';
+
+    if (currentPhase === 'READING') {
+        const promptLabel = isPhotoSaved
+            ? `📷 <b>[ĐÃ NHẬN ẢNH VÀ ĐANG PHÂN TÍCH, VUI LÒNG ĐỢI (${elapsed}s)...]</b>`
+            : `📖 <b>[ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (${elapsed}s)...]</b>`;
+        const previewClean = (promptTextSaved || '').replace(/[<>]/g, '');
+        const previewSafe = escapeHtml(previewClean.length > 55 ? previewClean.substring(0, 55) + '...' : previewClean);
+        text = `${promptLabel}\n<blockquote><i>${previewSafe}</i></blockquote>`;
+    } else if (currentPhase === 'THINKING') {
+        const safe = escapeHtml(promptTextSaved || 'Yêu cầu của bạn');
+        text = `💡 <b>[ĐÃ CÓ CÁCH, ĐỢI MÌNH CHÚT - ${elapsed}s]</b>\n<blockquote><i>${safe}</i></blockquote>`;
+    } else if (currentPhase === 'PREPARING_RESPONSE') {
+        text = `⏳ <b>[ĐÃ XONG YÊU CẦU CỦA BẠN, CHỜ CHÚT TÔI ĐANG GỬI PHẢN HỒI YÊU CẦU CỦA BẠN (${elapsed}s)...]</b>`;
+    } else {
+        return;
+    }
+
+    if (text === lastStatusText) return;
+
+    isUpdatingStatus = true;
+    try {
+        await editMsg(activeChatId, promptMsgId, text);
+        lastStatusText = text;
+    } catch (e) {
+        // Ignored
+    } finally {
+        isUpdatingStatus = false;
+    }
+}
+
+function startTicker() {
+    if (!tickerInterval) {
+        tickerInterval = setInterval(updateStatusBubble, 1500);
+    }
+}
+
+function stopTicker() {
+    if (tickerInterval) {
+        clearInterval(tickerInterval);
+        tickerInterval = null;
+    }
+}
 
 // --- TRANSCRIPT MIRROR WATCHER ---
 
@@ -462,32 +524,45 @@ async function processTranscript() {
                 const uText = entry.content.toString().trim();
                 promptStartTime = Date.now();
                 promptTextSaved = uText;
+                isPhotoSaved = false;
                 thinkingSent = false;
+                currentPhase = 'READING';
 
                 const previewClean = uText.replace(/[<>]/g, '');
                 const previewSafe = escapeHtml(previewClean.length > 55 ? previewClean.substring(0, 55) + '...' : previewClean);
+                const initialText = `📖 <b>[ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (1s)...]</b>\n<blockquote><i>${previewSafe}</i></blockquote>`;
+
                 if (!promptMsgId) {
                     promptMsgId = await sendMsg(
                         activeChatId,
-                        `📖 <b>[ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (1s)...]</b>\n<blockquote><i>${previewSafe}</i></blockquote>`,
+                        initialText,
                         activeThreadId
                     );
-                    if (promptMsgId) tempMsgIds.push(promptMsgId);
+                    if (promptMsgId) {
+                        tempMsgIds.push(promptMsgId);
+                        lastStatusText = initialText;
+                        startTicker();
+                    }
                 }
             }
 
-            // Giai đoạn: AI đã có cách / đang suy nghĩ -> SỬA TIN NHẮN (KHÔNG ĐỂ NẰM RIÊNG)
+            // Giai đoạn: AI đã có cách / đang suy nghĩ -> Chuyển pha THINKING & cập nhật trực tiếp
             if (entry.thinking && !entry.content && (!entry.tool_calls || entry.tool_calls.length === 0)) {
                 if (!thinkingSent) {
                     thinkingSent = true;
-                    const elapsed = promptStartTime ? Math.max(1, Math.round((Date.now() - promptStartTime) / 1000)) : 1;
-                    const safe = escapeHtml(promptTextSaved || 'Yêu cầu của bạn');
-                    const text = `💡 <b>[ĐÃ CÓ CÁCH, ĐỢI MÌNH CHÚT - ${elapsed}s]</b>\n<blockquote><i>${safe}</i></blockquote>`;
-                    if (promptMsgId) {
-                        await editMsg(activeChatId, promptMsgId, text);
-                    } else {
+                    currentPhase = 'THINKING';
+                    if (!promptMsgId) {
+                        const elapsed = promptStartTime ? Math.max(1, Math.round((Date.now() - promptStartTime) / 1000)) : 1;
+                        const safe = escapeHtml(promptTextSaved || 'Yêu cầu của bạn');
+                        const text = `💡 <b>[ĐÃ CÓ CÁCH, ĐỢI MÌNH CHÚT - ${elapsed}s]</b>\n<blockquote><i>${safe}</i></blockquote>`;
                         promptMsgId = await sendMsg(activeChatId, text, activeThreadId);
-                        if (promptMsgId) tempMsgIds.push(promptMsgId);
+                        if (promptMsgId) {
+                            tempMsgIds.push(promptMsgId);
+                            lastStatusText = text;
+                            startTicker();
+                        }
+                    } else {
+                        await updateStatusBubble();
                     }
                 }
             }
@@ -495,6 +570,7 @@ async function processTranscript() {
             // Giai đoạn: Tool Call (Phân loại màu sắc)
             if (entry.tool_calls && entry.tool_calls.length > 0) {
                 currentToolStartTime = Date.now();
+                currentPhase = 'THINKING'; // Duy trì trạng thái ticking trong suốt quá trình tool chạy
                 const tc = entry.tool_calls[0];
                 const { summary, bubbleText } = formatToolCall(tc);
                 currentToolSummary = summary;
@@ -503,7 +579,7 @@ async function processTranscript() {
                 if (currentWorkingMsgId) tempMsgIds.push(currentWorkingMsgId);
             }
 
-            // Giai đoạn: Hoàn tất Tool Call -> SỬA BÓNG THÀNH "ĐÃ XONG YÊU CẦU CỦA BẠN, CHỜ CHÚT..."
+            // Giai đoạn: Hoàn tất Tool Call -> SỬA BÓNG TIẾN TRÌNH THÀNH "ĐÃ XONG YÊU CẦU..."
             if (entry.type === 'GENERIC' && entry.content) {
                 const wSec = currentToolStartTime ? Math.max(1, Math.round((Date.now() - currentToolStartTime) / 1000)) : 1;
                 const safeTask = escapeHtml(currentToolSummary || 'Tác vụ');
@@ -517,13 +593,9 @@ async function processTranscript() {
                     currentWorkingMsgId = null;
                 }
 
+                currentPhase = 'PREPARING_RESPONSE';
                 if (promptMsgId) {
-                    const elapsed = promptStartTime ? Math.max(1, Math.round((Date.now() - promptStartTime) / 1000)) : 1;
-                    await editMsg(
-                        activeChatId,
-                        promptMsgId,
-                        `⏳ <b>[ĐÃ XONG YÊU CẦU CỦA BẠN, CHỜ CHÚT TÔI ĐANG GỬI PHẢN HỒI YÊU CỦA BẠN (${elapsed}s)...]</b>`
-                    );
+                    await updateStatusBubble();
                 }
 
                 sendTyping(activeChatId, activeThreadId);
@@ -539,6 +611,9 @@ async function processTranscript() {
                 const answer = entry.content.toString().trim();
                 if (!answer) continue;
 
+                currentPhase = 'IDLE';
+                stopTicker();
+
                 if (typingInterval) {
                     clearInterval(typingInterval);
                     typingInterval = null;
@@ -553,6 +628,8 @@ async function processTranscript() {
                 promptMsgId = null;
                 promptStartTime = null;
                 promptTextSaved = '';
+                lastStatusText = '';
+                isPhotoSaved = false;
                 thinkingSent = false;
                 currentWorkingMsgId = null;
 
@@ -604,7 +681,7 @@ async function pollUpdates() {
                     if (!update.message) continue;
                     const msg = update.message;
                     const chatId = msg.chat.id;
-                    const threadId = msg.message_thread_id || null;
+                    const threadId = msg.message_thread_id || 315;
                     const fromId = msg.from ? msg.from.id : 0;
 
                     // Bỏ qua tin nhắn từ Bot
@@ -617,7 +694,7 @@ async function pollUpdates() {
                     }
 
                     activeChatId = chatId;
-                    activeThreadId = threadId;
+                    activeThreadId = threadId || 315;
 
                     let userText = '';
                     let isPhoto = false;
@@ -635,13 +712,15 @@ async function pollUpdates() {
 
                     // Xử lý lệnh nhanh /pc hoặc /local
                     if (/^(?:\/pc|\/local|kết nối lại máy tính)$/i.test(userText)) {
-                        await sendMsg(chatId, `💻 <b>[MÁY TÍNH ĐANG TIẾP QUẢN TRỰC TIẾP]</b>\n──────────────────────\n🔗 <b>Mã đồng bộ:</b> <code>GM_6585_Mthu</code>\n🖥️ <b>Trạng thái:</b> SẴN SÀNG 100%\n✨ Toàn bộ lệnh gửi từ đây sẽ hiện trực tiếp trên màn hình máy tính!`, threadId);
+                        await sendMsg(chatId, `💻 <b>[MÁY TÍNH ĐANG TIẾP QUẢN TRỰC TIẾP]</b>\n──────────────────────\n🔗 <b>Mã đồng bộ:</b> <code>GM_6585_Mthu</code>\n🖥️ <b>Trạng thái:</b> SẴN SÀNG 100%\n✨ Toàn bộ lệnh gửi từ đây sẽ hiện trực tiếp trên màn hình máy tính!`, activeThreadId);
                         continue;
                     }
 
                     promptStartTime = Date.now();
                     promptTextSaved = userText;
+                    isPhotoSaved = isPhoto;
                     thinkingSent = false;
+                    currentPhase = 'READING';
 
                     const previewClean = userText.replace(/[<>]/g, '');
                     const previewSafe = escapeHtml(previewClean.length > 55 ? previewClean.substring(0, 55) + '...' : previewClean);
@@ -650,9 +729,14 @@ async function pollUpdates() {
                     const promptLabel = isPhoto
                         ? '📷 <b>[ĐÃ NHẬN ẢNH VÀ ĐANG PHÂN TÍCH, VUI LÒNG ĐỢI (1s)...]</b>'
                         : '📖 <b>[ĐÃ ĐỌC PROMPT VÀ ĐANG XỬ LÝ YÊU CẦU BẠN, VUI LÒNG ĐỢI (1s)...]</b>';
+                    const initialText = `${promptLabel}\n<blockquote><i>${previewSafe}</i></blockquote>`;
 
-                    promptMsgId = await sendMsg(chatId, `${promptLabel}\n<blockquote><i>${previewSafe}</i></blockquote>`, threadId || activeThreadId || 315);
-                    if (promptMsgId) tempMsgIds.push(promptMsgId);
+                    promptMsgId = await sendMsg(chatId, initialText, activeThreadId);
+                    if (promptMsgId) {
+                        tempMsgIds.push(promptMsgId);
+                        lastStatusText = initialText;
+                        startTicker();
+                    }
 
                     // 2. Bật Popup Toast trên màn hình PC
                     showScreenToast('📱 Telegram -> PC Sync', previewClean);
