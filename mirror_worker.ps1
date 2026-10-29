@@ -200,12 +200,8 @@ function Finish-PromptReadingStatus {
     if (Test-Path $syncBridgePath) {
         try {
             $br = Get-Content $syncBridgePath -Raw -Encoding UTF8 | ConvertFrom-Json
-            if ($br.promptReadingMsgId -and $br.promptReadingStart) {
-                $pStart = [DateTime]::Parse($br.promptReadingStart)
-                $readSec = [math]::Max(1, [int]([DateTime]::Now - $pStart).TotalSeconds)
-                $pPrev = if ($br.promptReadingPreview) { [System.Net.WebUtility]::HtmlEncode($br.promptReadingPreview) } else { "" }
+            if ($br.promptReadingMsgId) {
                 Delete-TgMessage -messageId ([int]$br.promptReadingMsgId)
-                
                 $br.promptReadingMsgId = $null
                 $br.promptReadingStart = $null
                 $br.promptReadingPreview = $null
@@ -309,47 +305,24 @@ function Stop-WorkingTracker {
     }
 }
 
-$global:lastTypingTime = $null
-
 while ($true) {
     try {
-        # Giữ trạng thái typing... liên tục trên Telegram mỗi 3.5s khi AI đang xử lý
-        if (Test-Path $syncBridgePath) {
-            try {
-                $brLive = Get-Content $syncBridgePath -Raw -Encoding UTF8 | ConvertFrom-Json
-                if ($brLive.isWorking -eq $true) {
-                    if (-not $global:lastTypingTime -or ([DateTime]::Now - $global:lastTypingTime).TotalSeconds -ge 3.5) {
-                        $global:lastTypingTime = [DateTime]::Now
-                        Send-TgChatAction -action "typing"
-                    }
+        # Chỉ đếm giây liên tục nếu là tin nhắn riêng (DM), trong Group tránh spam để không bị Telegram 429
+        $currTgTarget = Get-CurrentTgTarget
+        if ($currTgTarget.chatId -gt 0) {
+            if ($global:mirrorThinkingStart -and $global:mirrorThinkingMsgId) {
+                $currThinkSec = [math]::Max(1, [int]([DateTime]::Now - $global:mirrorThinkingStart).TotalSeconds)
+                if ($currThinkSec -ge ($global:lastMirrorSec + 3)) {
+                    $global:lastMirrorSec = $currThinkSec
+                    Edit-TgMessage -messageId $global:mirrorThinkingMsgId -text "🧠 <b>[AI ĐANG SUY NGHĨ (${currThinkSec}s)...]</b>$global:lastThinkingSnippet"
                 }
-            } catch {}
-        }
-
-        # 1. Đếm giây liên tục cho Thinking nếu AI đang suy nghĩ
-        if ($global:mirrorThinkingStart -and $global:mirrorThinkingMsgId) {
-            $currThinkSec = [math]::Max(1, [int]([DateTime]::Now - $global:mirrorThinkingStart).TotalSeconds)
-            if ($currThinkSec -ge ($global:lastMirrorSec + 2)) {
-                $global:lastMirrorSec = $currThinkSec
-                Edit-TgMessage -messageId $global:mirrorThinkingMsgId -text "🧠 <b>[AI ĐANG SUY NGHĨ (${currThinkSec}s)...]</b>$global:lastThinkingSnippet"
             }
-        }
-
-        # 2. Đếm giây liên tục cho tác vụ Working đang chạy ngầm trên máy tính (Cập nhật 2s/lần)
-        if ($global:activeWorkingStart -and $global:activeWorkingMsgId) {
-            $currSec = [math]::Max(1, [int]([DateTime]::Now - $global:activeWorkingStart).TotalSeconds)
-            if ($currSec -ge ($global:lastWorkingSec + 2)) {
-                $global:lastWorkingSec = $currSec
-                Edit-TgMessage -messageId $global:activeWorkingMsgId -text "⚡ <b>[MÁY TÍNH ĐANG THỰC HIỆN (${currSec}s)...]</b>`n$($global:activeWorkingTitle)"
-            }
-        }
-
-        # 3. Đếm giây liên tục cho khoảng lặng giữa các bước (Planning / Processing)
-        if ($global:planningTrackerStart -and $global:planningTrackerMsgId) {
-            $currPlanSec = [math]::Max(1, [int]([DateTime]::Now - $global:planningTrackerStart).TotalSeconds)
-            if ($currPlanSec -ge ($global:lastPlanningSec + 2)) {
-                $global:lastPlanningSec = $currPlanSec
-                Edit-TgMessage -messageId $global:planningTrackerMsgId -text "🧠 <b>[AI ĐANG XỬ LÝ BƯỚC TIẾP THEO (${currPlanSec}s)...]</b>"
+            if ($global:activeWorkingStart -and $global:activeWorkingMsgId) {
+                $currSec = [math]::Max(1, [int]([DateTime]::Now - $global:activeWorkingStart).TotalSeconds)
+                if ($currSec -ge ($global:lastWorkingSec + 3)) {
+                    $global:lastWorkingSec = $currSec
+                    Edit-TgMessage -messageId $global:activeWorkingMsgId -text "⚡ <b>[MÁY TÍNH ĐANG THỰC HIỆN (${currSec}s)...]</b>`n$($global:activeWorkingTitle)"
+                }
             }
         }
 
@@ -554,12 +527,6 @@ while ($true) {
                                     Write-Host "[MIRROR] Output captured" -ForegroundColor DarkGreen
                                     $mid = Send-TgLiveStatus -text $outMsg
                                     if ($mid) { $tempWorkingMsgIds.Add($mid) }
-
-                                    # BẮT ĐẦU ĐẾM GIÂY CHO KHOẢNG LẶNG TIẾP THEO (KHÔNG ĐỂ TRỐNG GIÂY NÀO)
-                                    $global:planningTrackerStart = [DateTime]::Now
-                                    $global:lastPlanningSec = 1
-                                    $global:planningTrackerMsgId = Send-TgLiveStatus -text "🧠 <b>[AI ĐANG XỬ LÝ BƯỚC TIẾP THEO (1s)...]</b>"
-                                    if ($global:planningTrackerMsgId) { $tempWorkingMsgIds.Add($global:planningTrackerMsgId) }
                                 }
                             }
                         }

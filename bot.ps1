@@ -1210,6 +1210,7 @@ function Execute-UserPrompt {
         $global:promptReadingPreview = $preview
         $global:lastReadingSec = 1
         $safePrev = [System.Net.WebUtility]::HtmlEncode($preview)
+        $global:promptReadingMsgId = Send-TelegramMessage -chatId $chatId -text "📖 <b>[ĐÃ NHẬN & ĐANG ĐỌC PROMPT (1s)...]</b>`n<blockquote expandable><i>`"$safePrev`"</i></blockquote>" -messageThreadId $messageThreadId
         Send-TelegramAction -chatId $chatId -action "typing" -messageThreadId $messageThreadId
 
         if (Test-Path $syncBridgePath) {
@@ -1863,6 +1864,16 @@ while ($true) {
                 $msg = $item.message
                 $chatId = [int64]$msg.chat.id
                 $threadId = if ($msg.message_thread_id) { [int]$msg.message_thread_id } else { 0 }
+
+                # Cập nhật ngay lập tức activeChatId & activeThreadId vào sync_bridge.json
+                if (Test-Path $syncBridgePath) {
+                    try {
+                        $br = Get-Content $syncBridgePath -Raw -Encoding UTF8 | ConvertFrom-Json
+                        $br | Add-Member -NotePropertyName "activeChatId" -NotePropertyValue $chatId -Force
+                        $br | Add-Member -NotePropertyName "activeThreadId" -NotePropertyValue $threadId -Force
+                        $br | ConvertTo-Json -Depth 5 | Set-Content $syncBridgePath -Encoding UTF8
+                    } catch {}
+                }
 
                 $fromId = if ($msg.from) { [int64]$msg.from.id } else { 0 }
                 if ($chatId -ne $allowedChatId -and $fromId -ne $allowedChatId) {
