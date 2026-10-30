@@ -161,6 +161,55 @@ async function handleTelegramUpdate(update, env, ctx) {
             await editTg(botToken, chatId, msgId, pinScreen);
             return;
         }
+
+        // Bấm nút "Bàn giao Cloud 24/7" tại Sảnh
+        if (cbData === "hub_cloud") {
+            try {
+                // 1. Tạo topic riêng cho Cloud 24/7
+                const topicRes = await fetch(`https://api.telegram.org/bot${botToken}/createForumTopic`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chat_id: chatId,
+                        name: '☁️ Cloud 24/7 (Groq LPU)',
+                        icon_color: 7322096
+                    })
+                });
+                const tData = await topicRes.json();
+                let newCloudTopicId = tData && tData.ok ? tData.result.message_thread_id : null;
+
+                if (newCloudTopicId) {
+                    const welcomeCloud = `☁️ <b>[CỬA SỔ CLOUDFLARE 24/7 ĐÃ SẴN SÀNG PHỤC VỤ]</b>\n──────────────────────\n⚡ <b>Động cơ:</b> Groq LPU siêu tốc (Qwen 3.8 27B / GPT-OSS 120B)\n🌐 <b>Máy chủ:</b> Cloudflare Edge 24/7 (Độc lập 100%)\n🔒 <b>Topic độc lập:</b> #${newCloudTopicId}\n\n👉 <b>Bro hãy chat, yêu cầu code tại đây!</b>\n• Khi muốn máy tính ở nhà tiếp quản lại: Gõ <code>/pc</code> hoặc <code>ket noi pc</code>.\n• Khi muốn đóng topic này: Gõ <code>/dongtopic</code>.`;
+                    await sendTg(botToken, chatId, welcomeCloud, newCloudTopicId);
+
+                    const boardText = `☁️ <b>[CLOUDFLARE WORKER 24/7 ĐANG HOẠT ĐỘNG]</b>\n──────────────────────\n🖥️ <b>Máy tính:</b> Đang ở chế độ Chờ.\n🌐 <b>Cửa sổ Cloud:</b> Đã sinh Topic riêng để phục vụ bro!\n\n👇 <i>Bro bấm nút bên dưới để vào làm việc ngay:</i>`;
+                    const jumpMarkup = {
+                        inline_keyboard: [
+                            [{ text: `🚀 Vào Cửa Sổ Cloud Ngay (#${newCloudTopicId})`, url: `https://t.me/c/4457846636/${newCloudTopicId}` }],
+                            [{ text: '🔄 Làm Mới Sảnh', callback_data: 'hub_refresh_menu' }]
+                        ]
+                    };
+                    await editTg(botToken, chatId, msgId, boardText, jumpMarkup);
+                }
+            } catch (e) {
+                console.error('[Worker hub_cloud error]:', e);
+            }
+            return;
+        }
+
+        // Bấm nút "Làm mới Menu Sảnh"
+        if (cbData === "hub_refresh_menu") {
+            const menuText = `🏛️ <b>BẢNG ĐIỀU KHIỂN SẢNH LOBBY (CLOUD 24/7)</b>\n──────────────────────\n<i>Hệ thống QuinloveRin Code đang trực chiến 24/7 trên Cloudflare Edge!</i>\n\nBro hãy chọn một thao tác bên dưới để bắt đầu:`;
+            const menuMarkup = {
+                inline_keyboard: [
+                    [{ text: '🚀 Tạo Dự Án Mới (New Project)', callback_data: 'hub_create_proj' }],
+                    [{ text: '🌐 Nối Máy Phụ (Connect Net)', callback_data: 'hub_connect_net' }],
+                    [{ text: '☁️ Bàn Giao Cloud 24/7', callback_data: 'hub_cloud' }]
+                ]
+            };
+            await editTg(botToken, chatId, msgId, menuText, menuMarkup);
+            return;
+        }
         return;
     }
 

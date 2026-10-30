@@ -188,19 +188,45 @@ async function setCloudWebhook(enable = true) {
 
 // --- HANDLE DISCONNECT & CLOUD HANDOVER ---
 
-async function handleDisconnectCloud() {
+async function handleDisconnectCloud(targetChatId = null, targetThreadId = null) {
+    const chatId = targetChatId || activeChatId;
     console.log('[Bridge Disconnect] Bàn giao cho Cloudflare Worker 24/7...');
     isCloudStandby = true;
     stopTicker();
-    await clearAllCancelButtons(activeChatId, tempMsgIds);
+    await clearAllCancelButtons(chatId, tempMsgIds);
     tempMsgIds = [];
     promptMsgId = null;
     currentWorkingMsgId = null;
 
-    const handoverText = `☁️ <b>[ĐÃ BÀN GIAO CHO CLOUDFLARE WORKER 24/7]</b>\n──────────────────────\n🖥️ <b>Máy tính:</b> Đã ngưng tiếp nhận lệnh trực tiếp (Chế độ Chờ)\n🌐 <b>Cloudflare Worker (Groq LPU 24/7):</b> ĐÃ TIẾP QUẢN TOÀN DIỆN!\n\n✨ Bro có thể chat, yêu cầu code qua Groq LPU siêu tốc ngay cả khi máy tính tắt nguồn!\n\n👉 Khi muốn kết nối lại máy tính, chỉ cần gõ <code>/pc</code> hoặc <code>ket noi pc</code>.`;
-    await sendMsg(activeChatId, handoverText, activeThreadId, 'HTML', { inline_keyboard: [] });
+    let cloudTopicId = null;
+
+    // 1. TẠO TOPIC RIÊNG BIỆT CHO CLOUD ĐỂ KHÔNG BAO GIỜ CODE BÊN SẢNH LOBBY
+    try {
+        const topicRes = await tgApiRaw('createForumTopic', {
+            chat_id: chatId,
+            name: '☁️ Cloud 24/7 (Groq LPU)',
+            icon_color: 7322096 // Màu xanh da trời Cloud
+        });
+        if (topicRes && topicRes.ok && topicRes.result) {
+            cloudTopicId = topicRes.result.message_thread_id;
+            console.log(`[Bridge Disconnect] Đã sinh Topic riêng cho Cloud: #${cloudTopicId}`);
+        }
+    } catch (e) {
+        console.error('[Create Cloud Topic Error]:', e.message);
+    }
+
+    const destinationThread = cloudTopicId || (!lobby.isLobby(targetThreadId) ? targetThreadId : null);
+
+    const handoverText = `☁️ <b>[CỬA SỔ CLOUDFLARE 24/7 ĐÃ SẴN SÀNG PHỤC VỤ]</b>\n──────────────────────\n🖥️ <b>Máy tính:</b> Đã ngưng tiếp nhận lệnh trực tiếp (Chế độ Chờ)\n🌐 <b>Cloudflare Worker (Groq LPU):</b> ĐÃ TIẾP QUẢN TOÀN DIỆN!\n🔒 <b>Topic độc lập:</b> #${destinationThread || 'Cloud'}\n\n✨ Bro hãy chat, yêu cầu code qua Groq LPU siêu tốc ngay tại đây, kể cả khi máy tính tắt nguồn!\n\n👉 <b>Lệnh hữu ích:</b>\n• <code>/pc</code> hoặc <code>ket noi pc</code>: Gọi máy tính ở nhà tiếp quản lại.\n• <code>/dongtopic</code>: Đóng topic Cloud này khi hoàn tất.`;
+
+    // Tuyệt đối CHỈ gửi tin nhắn này vào Topic riêng của Cloud, KHÔNG BAO GIỜ gửi vào Sảnh Lobby!
+    if (destinationThread && !lobby.isLobby(destinationThread)) {
+        await sendMsg(chatId, handoverText, destinationThread, 'HTML', { inline_keyboard: [] });
+    }
 
     await setCloudWebhook(true);
+
+    return cloudTopicId;
 }
 
 // --- HANDLE CANCEL ACTION ---
