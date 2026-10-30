@@ -20,3 +20,6 @@ bridge_state.json
 incoming_photo.jpg
 *.jpg
 *.png
+
+keys.json
+.env

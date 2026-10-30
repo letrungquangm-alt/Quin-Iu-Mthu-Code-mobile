@@ -35,6 +35,7 @@ const { takeScreenshot, sendScreenshot } = require('./lib/screen.cjs');
 const { sendScreenVideo, recordScreen } = require('./lib/recorder.cjs');
 const { checkInstalledBrowsers, getBrowserInstallMarkup, installBrowserAsync } = require('./lib/installer.cjs');
 const { openWebOrApp, getActiveWindowsSummary, URL_SHORTCUTS, APP_SHORTCUTS } = require('./lib/launcher.cjs');
+const { classifyUserIntent } = require('./lib/intent.cjs');
 
 const { createTranscriptWatcher } = require('./lib/transcript.cjs');
 const { formatToolCall } = require('./lib/formatter.cjs');
@@ -847,174 +848,99 @@ async function pollUpdates() {
                         continue;
                     }
 
-                    // Lọc tin nhắn đàm thoại / câu hỏi / prompt thông thường để không bị nhầm thành lệnh điều khiển PC
-                    const cleanTrimmed = userText.trim();
-                    const words = cleanTrimmed.split(/\s+/);
-                    const isConversational = words.length > 5 || /(?:nhưng|tại sao|sao|vì sao|tôi|mình|phải|k đc|ko đc|không được|không bật|thế nào|làm sao|được không|chưa|hồi nãy|vừa nãy|lỗi|hỏi|cho tôi|giúp|code|hướng dẫn|sửa|tạo|\?)/i.test(cleanTrimmed);
+                    // 🧠 BỘ PHÂN LOẠI Ý ĐỊNH BẰNG AI (GEMINI INTENT CLASSIFIER)
+                    const intent = await classifyUserIntent(userText);
 
-                    // 🎥 LỆNH QUAY VIDEO MÀN HÌNH MÁY TÍNH / TRÌNH DUYỆT (RECORDING)
-                    const isRecordCmd = !isConversational && (
-                        /^(?:\/record|\/quay|\/video)(?:\s+(\d+))?$/i.test(cleanTrimmed) ||
-                        /^(?:hãy\s+)?quay\s+(?:lại\s+)?màn hình(?:\s+(\d+)\s*s)?$/i.test(cleanTrimmed)
-                    );
-                    if (isRecordCmd) {
-                        const secMatch = cleanTrimmed.match(/(\d+)\s*s/i) || cleanTrimmed.match(/(?:\/record|\/quay|\/video)\s+(\d+)/i);
-                        const sec = secMatch ? parseInt(secMatch[1], 10) : 4;
-                        const safeSec = Math.min(10, Math.max(2, sec));
-                        await sendMsg(chatId, `🎥 <b>[ĐANG QUAY VIDEO MÀN HÌNH PC ${safeSec}s...]</b>\n<i>Đang chụp chuỗi khung hình thực tế & ghép thành video MP4 H.264...</i>`, threadId);
-                        const winSummary = getActiveWindowsSummary();
-                        const caption = `🎥 <b>[VIDEO QUAY MÀN HÌNH MÁY TÍNH THỰC TẾ]</b>\n──────────────────────\n⏱️ <b>Thời lượng:</b> ${safeSec} giây\n🕒 <b>Thời gian:</b> ${new Date().toLocaleTimeString('vi-VN')}\n📋 <b>Cửa sổ:</b> ${winSummary}\n\n💡 <i>Video MP4 chạy mượt trực tiếp trên Telegram!</i>`;
-                        const recRes = await sendScreenVideo(botToken, chatId, threadId, caption, safeSec);
-                        if (!recRes.ok) {
-                            await sendMsg(chatId, `⚠️ Không thể gửi video quay màn hình: ${recRes.error || recRes.description}`, threadId);
-                        }
-                        continue;
-                    }
-
-                    // 🛠️ LỆNH TỰ ĐỘNG CÀI TRÌNH DUYỆT (CHROME / BRAVE / FIREFOX)
-                    const installBrMatch = !isConversational && (
-                        cleanTrimmed.match(/^(?:cài|cài đặt|install)\s+(?:trình duyệt\s+)?(chrome|brave|firefox|edge)(?:\s+(?:ổ\s+)?([a-zA-Z]))?$/i)
-                        || cleanTrimmed.match(/^(?:\/install_browser|\/cai_browser)\s+(chrome|brave|firefox|edge)(?:\s+([a-zA-Z]))?$/i)
-                    );
-                    if (installBrMatch) {
-                        const br = installBrMatch[1].toLowerCase();
-                        const drive = (installBrMatch[2] || 'D').toUpperCase();
-                        await sendMsg(
-                            chatId,
-                            `⏳ <b>[BẮT ĐẦU CÀI ĐẶT ${br.toUpperCase()}]</b>\n──────────────────────\n📁 Nơi cài: <b>Ổ ${drive}: (D:\\Browsers\\${br})</b>\n⚡ Đang thực thi cài đặt ngầm qua winget...\n<i>(Quá trình mất 30s - 1 phút, bot sẽ báo ngay khi xong!)</i>`,
-                            threadId
-                        );
-                        installBrowserAsync(br, drive).then(async (res) => {
-                            if (res.ok) {
-                                await sendMsg(
-                                    chatId,
-                                    `✅ <b>[CÀI ĐẶT ${br.toUpperCase()} THÀNH CÔNG!]</b>\n🚀 Trình duyệt đã được cài vào <b>${drive}:\\Browsers\\${br}</b> an toàn!\n👉 Gõ <code>mở ${br}</code> hoặc <code>mở youtube</code> là mở ngay!`,
-                                    threadId
-                                );
-                                openWebOrApp('https://www.google.com', br);
+                    if (intent.type === 'action') {
+                        // 1. Mở Antigravity
+                        if (intent.action === 'focus_antigravity') {
+                            const launchResult = launchOrFocusAntigravity();
+                            if (launchResult === 'NOT_FOUND') {
+                                await sendMsg(chatId, `⚠️ <b>[CHƯA CÀI ANTIGRAVITY TRÊN MÁY TÍNH NÀY]</b>\n──────────────────────\nℹ️ Gõ <code>/download_antigravity</code> để tải chính thức!`, threadId);
                             } else {
-                                await sendMsg(
-                                    chatId,
-                                    `⚠️ <b>[CÀI ĐẶT ${br.toUpperCase()} THẤT BẠI]</b>\nLỗi: <code>${escapeHtml(res.error || 'winget error')}</code>`,
-                                    threadId
-                                );
+                                const actionDesc = launchResult === 'LAUNCHED' 
+                                    ? 'Đã khởi chạy ứng dụng Antigravity IDE mới trên PC!' 
+                                    : launchResult === 'FOCUSED'
+                                    ? 'Đã khôi phục (restore) và đưa cửa sổ Antigravity lên phía trước màn hình!'
+                                    : 'Đã kích hoạt và đưa cửa sổ Antigravity lên phía trước màn hình!';
+                                await sendMsg(chatId, `🖥️ <b>[ĐÃ MỞ CỬA SỔ ANTIGRAVITY TRÊN PC]</b>\n──────────────────────\n✅ <b>${actionDesc}</b>\n⚡ Cầu nối IPC đã đồng bộ hóa 100% với Antigravity PC.`, threadId);
+                                if (intent.screenshot) {
+                                    setTimeout(async () => {
+                                        try {
+                                            await sendScreenshot(botToken, chatId, threadId, `📸 <b>[ẢNH CHỤP CỬA SỔ ANTIGRAVITY TRÊN PC]</b>\n──────────────────────\n✅ ${actionDesc}`);
+                                        } catch (e) {}
+                                    }, 2500);
+                                }
                             }
-                        });
-                        continue;
-                    }
-
-                    // 📸 LỆNH CHỤP / ĐỌC MÀN HÌNH MÁY TÍNH TỪ XA
-                    const isScreenShotCmd = !isConversational && (
-                        /^(?:\/screen|\/screenshot|\/chup|\/snap)$/i.test(cleanTrimmed) ||
-                        /^(?:hãy\s+)?(?:chụp|chụp lại|xem)\s+(?:lại\s+)?(?:ảnh\s+)?màn hình(?:\s+pc|\s+máy tính)?$/i.test(cleanTrimmed)
-                    );
-                    if (isScreenShotCmd) {
-                        await sendMsg(chatId, `📸 <b>[ĐANG CHỤP MÀN HÌNH MÁY TÍNH...]</b>\n<i>Đang chụp ảnh thực tế từ màn hình PC của bro...</i>`, threadId);
-                        const winSummary = getActiveWindowsSummary();
-                        const caption = `🖥️ <b>[ẢNH CHỤP MÀN HÌNH MÁY TÍNH THỰC TẾ]</b>\n──────────────────────\n⏱️ <b>Thời gian:</b> ${new Date().toLocaleTimeString('vi-VN')}\n\n📋 <b>Các cửa sổ đang mở:</b>\n${winSummary}\n\n💡 <i>Gõ <code>mở youtube</code>, <code>mở fb</code>, <code>mở drive</code>, <code>/app</code> để điều khiển từ xa!</i>`;
-                        const shotRes = await sendScreenshot(botToken, chatId, threadId, caption);
-                        if (!shotRes.ok) {
-                            await sendMsg(chatId, `⚠️ Không thể gửi ảnh màn hình: ${shotRes.error || shotRes.description}`, threadId);
-                        }
-                        continue;
-                    }
-
-                    // 🌐 LỆNH MỞ TRÌNH DUYỆT / WEB / YOUTUBE / FB / DRIVE / APP BẤT KỲ TRÊN PC
-                    const KNOWN_WEB_KEYS = 'youtube|yt|facebook|fb|drive|gg drive|google drive|docs|google docs|sheets|google sheets|gmail|mail|github|git|chatgpt|zalo|google|gg';
-                    const KNOWN_APP_KEYS = 'vscode|vs code|code|notepad|ghi chú|calculator|calc|máy tính|taskmgr|task manager|explorer|thư mục|discord|spotify|telegram';
-
-                    const wantsVideo = !isConversational && /(?:và quay|quay lại|quay video|record|quay clip)/i.test(cleanTrimmed);
-                    const wantsShot = !isConversational && /(?:và chụp|chụp lại|xem màn hình|xem ảnh)/i.test(cleanTrimmed);
-                    const cleanOpenText = cleanTrimmed.replace(/(?:\s+(?:và\s+)?(?:quay lại|quay video|quay clip|quay|record|chụp lại|chụp|xem ảnh|xem hình)).*$/i, '').trim();
-
-                    const isGenericBrowser = !isConversational && /^(?:hãy\s+)?(?:mở|bật)\s+(?:trình duyệt|browser)$/i.test(cleanOpenText);
-                    const webMatch = !isConversational && (
-                        cleanOpenText.match(new RegExp(`^(?:hãy\\s+)?(?:mở|bật|chạy|start|open)\\s+(?:trang\\s+|web\\s+|trình duyệt\\s+|app\\s+|ứng dụng\\s+)?(${KNOWN_WEB_KEYS}|${KNOWN_APP_KEYS}|https?:\\/\\/[^\\s]+|www\\.[^\\s]+)(?:\\s+(?:trên|bằng|qua)\\s+(chrome|edge|msedge|brave|firefox))?(?:\\s+(?:profile|acc|tài khoản)\\s*(\\w+))?$`, 'i'))
-                        || cleanOpenText.match(/^(?:\/open|\/web|\/url|\/browser)\s+([^\s]+)(?:\s+([^\s]+))?$/i)
-                    );
-
-                    if (isGenericBrowser || (webMatch && !/^(?:antigravity|ide)$/i.test(webMatch[1].trim()))) {
-                        const rawTarget = isGenericBrowser ? 'google' : (webMatch[1] || 'google').trim();
-                        const browser = (webMatch && webMatch[2]) ? webMatch[2].toLowerCase() : 'default';
-                        const profile = (webMatch && webMatch[3]) ? webMatch[3] : null;
-
-                        // Kiểm tra nếu người dùng yêu cầu trình duyệt cụ thể nhưng chưa có trên máy
-                        const brInstalled = checkInstalledBrowsers();
-                        if (browser !== 'default' && !brInstalled[browser]) {
-                            await sendMsg(
-                                chatId,
-                                `⚠️ <b>[CHƯA CÓ TRÌNH DUYỆT ${browser.toUpperCase()} TRÊN MÁY]</b>\n──────────────────────\nℹ️ Hệ thống phát hiện máy tính chưa cài đặt trình duyệt <b>${browser}</b>.\n\n👉 <b>Bro có muốn tự động cài ${browser} không?</b>\nChọn nơi cài đặt bên dưới (khuyên dùng ổ D: ở quán net để tránh đóng băng):`,
-                                threadId,
-                                'HTML',
-                                getBrowserInstallMarkup(browser)
-                            );
                             continue;
                         }
 
-                        const result = openWebOrApp(rawTarget, browser, profile);
-                        await sendMsg(
-                            chatId,
-                            `🌐 <b>[ĐÃ MỞ YÊU CẦU TRÊN MÁY TÍNH]</b>\n──────────────────────\n✅ ${result.desc}`,
-                            threadId
-                        );
-
-                        // CHỈ CHỤP HOẶC QUAY NẾU NGƯỜI DÙNG THỰC SỰ YÊU CẦU!
-                        if (wantsVideo || wantsShot) {
-                            setTimeout(async () => {
-                                try {
-                                    if (wantsVideo) {
-                                        const shotCaption = `🎥 <b>[VIDEO QUAY MÀN HÌNH SAU KHI MỞ]</b>\n──────────────────────\n👉 Đã mở: <b>${rawTarget}</b>\n⏱️ <b>Thời gian:</b> ${new Date().toLocaleTimeString('vi-VN')}`;
-                                        await sendScreenVideo(botToken, chatId, threadId, shotCaption, 4);
-                                    } else if (wantsShot) {
-                                        const shotCaption = `📸 <b>[KẾT QUẢ MÀN HÌNH SAU KHI MỞ]</b>\n──────────────────────\n👉 Đã mở: <b>${rawTarget}</b>\n⏱️ <b>Thời gian:</b> ${new Date().toLocaleTimeString('vi-VN')}`;
-                                        await sendScreenshot(botToken, chatId, threadId, shotCaption);
-                                    }
-                                } catch (e) {}
-                            }, 3500);
+                        // 2. Chụp màn hình
+                        if (intent.action === 'screenshot') {
+                            await sendMsg(chatId, `📸 <b>[ĐANG CHỤP MÀN HÌNH MÁY TÍNH...]</b>\n<i>Đang chụp ảnh thực tế từ màn hình PC của bro...</i>`, threadId);
+                            const winSummary = getActiveWindowsSummary();
+                            const caption = `🖥️ <b>[ẢNH CHỤP MÀN HÌNH MÁY TÍNH THỰC TẾ]</b>\n──────────────────────\n⏱️ <b>Thời gian:</b> ${new Date().toLocaleTimeString('vi-VN')}\n\n📋 <b>Các cửa sổ đang mở:</b>\n${winSummary}`;
+                            await sendScreenshot(botToken, chatId, threadId, caption);
+                            continue;
                         }
 
-                        continue;
-                    }
+                        // 3. Quay video màn hình
+                        if (intent.action === 'record') {
+                            const sec = Math.min(10, Math.max(2, intent.record_sec || 4));
+                            await sendMsg(chatId, `🎥 <b>[ĐANG QUAY VIDEO MÀN HÌNH PC ${sec}s...]</b>\n<i>Đang chụp chuỗi khung hình thực tế & ghép thành video MP4 H.264...</i>`, threadId);
+                            const winSummary = getActiveWindowsSummary();
+                            const caption = `🎥 <b>[VIDEO QUAY MÀN HÌNH MÁY TÍNH THỰC TẾ]</b>\n──────────────────────\n⏱️ <b>Thời lượng:</b> ${sec} giây\n🕒 <b>Thời gian:</b> ${new Date().toLocaleTimeString('vi-VN')}\n📋 <b>Cửa sổ:</b> ${winSummary}`;
+                            await sendScreenVideo(botToken, chatId, threadId, caption, sec);
+                            continue;
+                        }
 
-                    // 🖥️ LỆNH BẬT / MỞ CỬA SỔ ANTIGRAVITY TRÊN MÁY TÍNH
-                    const isAntigravityCmd = !isConversational && (
-                        /^(?:\/antigravity|\/open_antigravity|\/app|\/ide|antigravity)$/i.test(cleanTrimmed) ||
-                        /^(?:hãy\s+)?(?:bật|mở|khởi động|khôi phục|focus|show)\s+(?:cửa sổ\s+)?(?:antigravity|ide)(?:\s+(?:và\s+)?(?:chụp|chụp lại|xem ảnh))?$/i.test(cleanTrimmed)
-                    );
+                        // 4. Cài đặt trình duyệt
+                        if (intent.action === 'install_browser') {
+                            const br = (intent.target || 'chrome').toLowerCase();
+                            const drive = (intent.drive || 'D').toUpperCase();
+                            await sendMsg(chatId, `⏳ <b>[BẮT ĐẦU CÀI ĐẶT ${br.toUpperCase()}]</b>\n──────────────────────\n📁 Nơi cài: <b>Ổ ${drive}: (D:\\Browsers\\${br})</b>\n⚡ Đang thực thi cài đặt ngầm qua winget...`, threadId);
+                            installBrowserAsync(br, drive).then(async (res) => {
+                                if (res.ok) {
+                                    await sendMsg(chatId, `✅ <b>[CÀI ĐẶT ${br.toUpperCase()} THÀNH CÔNG!]</b>\n🚀 Đã cài vào <b>${drive}:\\Browsers\\${br}</b> an toàn!`, threadId);
+                                    openWebOrApp('https://www.google.com', br);
+                                } else {
+                                    await sendMsg(chatId, `⚠️ <b>[CÀI ĐẶT ${br.toUpperCase()} THẤT BẠI]</b>\nLỗi: <code>${escapeHtml(res.error || 'winget error')}</code>`, threadId);
+                                }
+                            });
+                            continue;
+                        }
 
-                    if (isAntigravityCmd) {
-                        const launchResult = launchOrFocusAntigravity();
-                        const wantsAgyShot = /(?:chụp|chụp lại|xem ảnh)/i.test(cleanTrimmed);
+                        // 5. Mở Web / Ứng dụng
+                        if (intent.action === 'open_web') {
+                            const rawTarget = intent.target || 'google';
+                            const browser = intent.browser || 'default';
+                            const profile = intent.profile || null;
 
-                        if (launchResult === 'NOT_FOUND') {
-                            await sendMsg(
-                                chatId,
-                                `⚠️ <b>[CHƯA CÀI ANTIGRAVITY TRÊN MÁY TÍNH NÀY]</b>\n──────────────────────\nℹ️ Máy tính hiện tại chưa cài đặt ứng dụng Antigravity IDE (hoặc bro đang dùng ở máy mới / quán net).\n\n💡 <b>Bro có thể làm gì?</b>\n1️⃣ <b>Dùng Remote CMD độc lập:</b> Gõ <code>/cmd &lt;lệnh&gt;</code> để chạy lệnh shell/git trực tiếp trên máy mà không cần mở giao diện IDE!\n2️⃣ <b>Tải Antigravity:</b> Gõ <code>/download_antigravity</code> để mở trang tải chính thức trên PC!`,
-                                threadId
-                            );
-                        } else {
-                            const actionDesc = launchResult === 'LAUNCHED' 
-                                ? 'Đã khởi chạy ứng dụng Antigravity IDE mới trên PC!' 
-                                : launchResult === 'FOCUSED'
-                                ? 'Đã khôi phục (restore) và đưa cửa sổ Antigravity lên phía trước màn hình!'
-                                : 'Đã kích hoạt và đưa cửa sổ Antigravity lên phía trước màn hình!';
-                            await sendMsg(
-                                chatId,
-                                `🖥️ <b>[ĐÃ MỞ CỬA SỔ ANTIGRAVITY TRÊN PC]</b>\n──────────────────────\n✅ <b>${actionDesc}</b>\n⚡ Cầu nối IPC đã đồng bộ hóa 100% với Antigravity PC.`,
-                                threadId
-                            );
+                            const brInstalled = checkInstalledBrowsers();
+                            if (browser !== 'default' && !brInstalled[browser]) {
+                                await sendMsg(chatId, `⚠️ <b>[CHƯA CÓ TRÌNH DUYỆT ${browser.toUpperCase()} TRÊN MÁY]</b>\n──────────────────────\nℹ️ Chưa cài đặt trình duyệt <b>${browser}</b>.\n\n👉 <b>Bro có muốn tự động cài không?</b>`, threadId, 'HTML', getBrowserInstallMarkup(browser));
+                                continue;
+                            }
 
-                            // TUYỆT ĐỐI KHÔNG TỰ ĐỘNG CHỤP MÀN HÌNH NẾU NGƯỜI DÙNG KHÔNG YÊU CẦU!
-                            if (wantsAgyShot) {
+                            const result = openWebOrApp(rawTarget, browser, profile);
+                            await sendMsg(chatId, `🌐 <b>[ĐÃ MỞ YÊU CẦU TRÊN MÁY TÍNH]</b>\n──────────────────────\n✅ ${result.desc}`, threadId);
+
+                            if (intent.record) {
+                                const sec = Math.min(10, Math.max(2, intent.record_sec || 4));
                                 setTimeout(async () => {
                                     try {
-                                        const shotCaption = `📸 <b>[ẢNH CHỤP CỬA SỔ ANTIGRAVITY TRÊN PC]</b>\n──────────────────────\n✅ ${actionDesc}\n⏱️ ${new Date().toLocaleTimeString('vi-VN')}`;
-                                        await sendScreenshot(botToken, chatId, threadId, shotCaption);
+                                        await sendScreenVideo(botToken, chatId, threadId, `🎥 <b>[VIDEO QUAY MÀN HÌNH SAU KHI MỞ]</b>\n──────────────────────\n👉 Đã mở: <b>${rawTarget}</b>`, sec);
                                     } catch (e) {}
-                                }, 2500);
+                                }, 3500);
+                            } else if (intent.screenshot) {
+                                setTimeout(async () => {
+                                    try {
+                                        await sendScreenshot(botToken, chatId, threadId, `📸 <b>[KẾT QUẢ MÀN HÌNH SAU KHI MỞ]</b>\n──────────────────────\n👉 Đã mở: <b>${rawTarget}</b>`);
+                                    } catch (e) {}
+                                }, 3500);
                             }
+                            continue;
                         }
-                        continue;
                     }
 
                     // 🌐 LỆNH TẢI ANTIGRAVITY IDE CHO MÁY MỚI
