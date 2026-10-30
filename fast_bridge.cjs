@@ -797,6 +797,46 @@ async function pollUpdates() {
                         continue;
                     }
 
+                    // 📸 LỆNH CHỤP / ĐỌC MÀN HÌNH MÁY TÍNH TỪ XA
+                    if (/^(?:\/screen|\/screenshot|\/chup|\/snap|chụp màn hình|xem màn hình|đọc màn hình|màn hình đâu|chụp ảnh màn hình)(?:\s.*)?$/i.test(userText.trim())) {
+                        await sendMsg(chatId, `📸 <b>[ĐANG CHỤP MÀN HÌNH MÁY TÍNH...]</b>\n<i>Đang chụp ảnh thực tế từ màn hình PC của bro...</i>`, threadId);
+                        const winSummary = getActiveWindowsSummary();
+                        const caption = `🖥️ <b>[ẢNH CHỤP MÀN HÌNH MÁY TÍNH THỰC TẾ]</b>\n──────────────────────\n⏱️ <b>Thời gian:</b> ${new Date().toLocaleTimeString('vi-VN')}\n\n📋 <b>Các cửa sổ đang mở:</b>\n${winSummary}\n\n💡 <i>Gõ <code>mở youtube</code>, <code>mở fb</code>, <code>mở drive</code>, <code>/app</code> để điều khiển từ xa!</i>`;
+                        const shotRes = await sendScreenshot(botToken, chatId, threadId, caption);
+                        if (!shotRes.ok) {
+                            await sendMsg(chatId, `⚠️ Không thể gửi ảnh màn hình: ${shotRes.error || shotRes.description}`, threadId);
+                        }
+                        continue;
+                    }
+
+                    // 🌐 LỆNH MỞ TRÌNH DUYỆT / WEB / YOUTUBE / FB / DRIVE / APP BẤT KỲ TRÊN PC
+                    const isGenericBrowser = /^(?:mở|bật)\s+(?:trình duyệt|browser)$/i.test(userText.trim());
+                    const webMatch = userText.trim().match(/^(?:mở|bật|chạy|start|open)\s+(?:trang\s+|web\s+|trình duyệt\s+|app\s+|ứng dụng\s+)?([a-zA-Z0-9_\-\.\:\/ ]+?)(?:\s+(?:trên|bằng|qua)\s+(chrome|edge|msedge|brave|firefox))?(?:\s+(?:profile|acc|tài khoản)\s*(\w+))?$/i)
+                        || userText.trim().match(/^(?:\/open|\/web|\/url|\/browser)\s+([^\s]+)(?:\s+([^\s]+))?$/i);
+
+                    if (isGenericBrowser || (webMatch && !/^(?:antigravity|ide)$/i.test(webMatch[1].trim()))) {
+                        const rawTarget = isGenericBrowser ? 'google' : (webMatch[1] || 'google').trim();
+                        const browser = (webMatch && webMatch[2]) ? webMatch[2] : 'default';
+                        const profile = (webMatch && webMatch[3]) ? webMatch[3] : null;
+
+                        const result = openWebOrApp(rawTarget, browser, profile);
+                        await sendMsg(
+                            chatId,
+                            `🌐 <b>[ĐÃ MỞ YÊU CẦU TRÊN MÁY TÍNH]</b>\n──────────────────────\n✅ ${result.desc}\n📸 <i>Đang tự động chụp lại màn hình sau 2.5s để bro xem kết quả trực tiếp...</i>`,
+                            threadId
+                        );
+
+                        // Tự động chụp và gửi ảnh màn hình sau 2.5s
+                        setTimeout(async () => {
+                            try {
+                                const shotCaption = `📸 <b>[KẾT QUẢ MÀN HÌNH SAU KHI MỞ]</b>\n──────────────────────\n👉 Đã mở: <b>${rawTarget}</b>\n⏱️ <b>Thời gian:</b> ${new Date().toLocaleTimeString('vi-VN')}`;
+                                await sendScreenshot(botToken, chatId, threadId, shotCaption);
+                            } catch (e) {}
+                        }, 2500);
+
+                        continue;
+                    }
+
                     // 🖥️ LỆNH BẬT / MỞ CỬA SỔ ANTIGRAVITY TRÊN MÁY TÍNH
                     if (/(?:bật|mở|khởi động|chạy|hiển thị|open|focus|show).*(?:antigravity|ide|app|cửa sổ)|^(\/antigravity|\/open_antigravity|\/open|\/app|\/ide|antigravity)$/i.test(userText.trim())) {
                         const launchResult = launchOrFocusAntigravity();
@@ -814,9 +854,16 @@ async function pollUpdates() {
                                 : 'Đã kích hoạt và đưa cửa sổ Antigravity lên phía trước màn hình!';
                             await sendMsg(
                                 chatId,
-                                `🖥️ <b>[ĐÃ MỞ CỬA SỔ ANTIGRAVITY TRÊN PC]</b>\n──────────────────────\n✅ <b>${actionDesc}</b>\n⚡ Cầu nối IPC đã đồng bộ hóa 100% với Antigravity PC.\n🚀 Bro gửi prompt hoặc yêu cầu code là AI nhận ngay lập tức!`,
+                                `🖥️ <b>[ĐÃ MỞ CỬA SỔ ANTIGRAVITY TRÊN PC]</b>\n──────────────────────\n✅ <b>${actionDesc}</b>\n⚡ Cầu nối IPC đã đồng bộ hóa 100% với Antigravity PC.\n📸 <i>Đang chụp ảnh màn hình sau 2.5s để gửi cho bro xem...</i>`,
                                 threadId
                             );
+
+                            setTimeout(async () => {
+                                try {
+                                    const shotCaption = `📸 <b>[ẢNH CHỤP CỬA SỔ ANTIGRAVITY TRÊN PC]</b>\n──────────────────────\n✅ ${actionDesc}\n⏱️ ${new Date().toLocaleTimeString('vi-VN')}`;
+                                    await sendScreenshot(botToken, chatId, threadId, shotCaption);
+                                } catch (e) {}
+                            }, 2500);
                         }
                         continue;
                     }
