@@ -847,10 +847,18 @@ async function pollUpdates() {
                         continue;
                     }
 
+                    // Lọc tin nhắn đàm thoại / câu hỏi / prompt thông thường để không bị nhầm thành lệnh điều khiển PC
+                    const cleanTrimmed = userText.trim();
+                    const words = cleanTrimmed.split(/\s+/);
+                    const isConversational = words.length > 5 || /(?:nhưng|tại sao|sao|vì sao|tôi|mình|phải|k đc|ko đc|không được|không bật|thế nào|làm sao|được không|chưa|hồi nãy|vừa nãy|lỗi|hỏi|cho tôi|giúp|code|hướng dẫn|sửa|tạo|\?)/i.test(cleanTrimmed);
+
                     // 🎥 LỆNH QUAY VIDEO MÀN HÌNH MÁY TÍNH / TRÌNH DUYỆT (RECORDING)
-                    const isRecordReq = /(?:quay|ghi|record|clip).*(?:màn hình|pc|video|trình duyệt|web|xem|\d+\s*s)|^(\/record|\/quay|\/video|record|quay)$/i.test(userText.trim());
-                    if (isRecordReq) {
-                        const secMatch = userText.match(/(\d+)\s*s/i) || userText.match(/(?:\/record|\/quay|\/video)\s+(\d+)/i);
+                    const isRecordCmd = !isConversational && (
+                        /^(?:\/record|\/quay|\/video)(?:\s+(\d+))?$/i.test(cleanTrimmed) ||
+                        /^(?:hãy\s+)?quay\s+(?:lại\s+)?màn hình(?:\s+(\d+)\s*s)?$/i.test(cleanTrimmed)
+                    );
+                    if (isRecordCmd) {
+                        const secMatch = cleanTrimmed.match(/(\d+)\s*s/i) || cleanTrimmed.match(/(?:\/record|\/quay|\/video)\s+(\d+)/i);
                         const sec = secMatch ? parseInt(secMatch[1], 10) : 4;
                         const safeSec = Math.min(10, Math.max(2, sec));
                         await sendMsg(chatId, `🎥 <b>[ĐANG QUAY VIDEO MÀN HÌNH PC ${safeSec}s...]</b>\n<i>Đang chụp chuỗi khung hình thực tế & ghép thành video MP4 H.264...</i>`, threadId);
@@ -864,8 +872,10 @@ async function pollUpdates() {
                     }
 
                     // 🛠️ LỆNH TỰ ĐỘNG CÀI TRÌNH DUYỆT (CHROME / BRAVE / FIREFOX)
-                    const installBrMatch = userText.trim().match(/^(?:cài|cài đặt|install)\s+(?:trình duyệt\s+)?(chrome|brave|firefox|edge)(?:\s+(?:ổ\s+)?([a-zA-Z]))?$/i)
-                        || userText.trim().match(/^(?:\/install_browser|\/cai_browser)\s+(chrome|brave|firefox|edge)(?:\s+([a-zA-Z]))?$/i);
+                    const installBrMatch = !isConversational && (
+                        cleanTrimmed.match(/^(?:cài|cài đặt|install)\s+(?:trình duyệt\s+)?(chrome|brave|firefox|edge)(?:\s+(?:ổ\s+)?([a-zA-Z]))?$/i)
+                        || cleanTrimmed.match(/^(?:\/install_browser|\/cai_browser)\s+(chrome|brave|firefox|edge)(?:\s+([a-zA-Z]))?$/i)
+                    );
                     if (installBrMatch) {
                         const br = installBrMatch[1].toLowerCase();
                         const drive = (installBrMatch[2] || 'D').toUpperCase();
@@ -878,15 +888,10 @@ async function pollUpdates() {
                             if (res.ok) {
                                 await sendMsg(
                                     chatId,
-                                    `✅ <b>[CÀI ĐẶT ${br.toUpperCase()} THÀNH CÔNG!]</b>\n🚀 Trình duyệt đã được cài vào <b>${drive}:\\Browsers\\${br}</b> an toàn!\n👉 Gõ <code>mở ${br}</code> hoặc <code>mở youtube</code> là mở ngay!\n📸 <i>Đang mở thử và chụp màn hình gửi bro...</i>`,
+                                    `✅ <b>[CÀI ĐẶT ${br.toUpperCase()} THÀNH CÔNG!]</b>\n🚀 Trình duyệt đã được cài vào <b>${drive}:\\Browsers\\${br}</b> an toàn!\n👉 Gõ <code>mở ${br}</code> hoặc <code>mở youtube</code> là mở ngay!`,
                                     threadId
                                 );
                                 openWebOrApp('https://www.google.com', br);
-                                setTimeout(async () => {
-                                    try {
-                                        await sendScreenshot(botToken, chatId, threadId, `📸 <b>[MÀN HÌNH SAU KHI CÀI ${br.toUpperCase()}]</b>`);
-                                    } catch (e) {}
-                                }, 3000);
                             } else {
                                 await sendMsg(
                                     chatId,
@@ -899,7 +904,11 @@ async function pollUpdates() {
                     }
 
                     // 📸 LỆNH CHỤP / ĐỌC MÀN HÌNH MÁY TÍNH TỪ XA
-                    if (/^(?:\/screen|\/screenshot|\/chup|\/snap|chụp màn hình|xem màn hình|đọc màn hình|màn hình đâu|chụp ảnh màn hình)(?:\s.*)?$/i.test(userText.trim())) {
+                    const isScreenShotCmd = !isConversational && (
+                        /^(?:\/screen|\/screenshot|\/chup|\/snap)$/i.test(cleanTrimmed) ||
+                        /^(?:hãy\s+)?(?:chụp|chụp lại|xem)\s+(?:lại\s+)?(?:ảnh\s+)?màn hình(?:\s+pc|\s+máy tính)?$/i.test(cleanTrimmed)
+                    );
+                    if (isScreenShotCmd) {
                         await sendMsg(chatId, `📸 <b>[ĐANG CHỤP MÀN HÌNH MÁY TÍNH...]</b>\n<i>Đang chụp ảnh thực tế từ màn hình PC của bro...</i>`, threadId);
                         const winSummary = getActiveWindowsSummary();
                         const caption = `🖥️ <b>[ẢNH CHỤP MÀN HÌNH MÁY TÍNH THỰC TẾ]</b>\n──────────────────────\n⏱️ <b>Thời gian:</b> ${new Date().toLocaleTimeString('vi-VN')}\n\n📋 <b>Các cửa sổ đang mở:</b>\n${winSummary}\n\n💡 <i>Gõ <code>mở youtube</code>, <code>mở fb</code>, <code>mở drive</code>, <code>/app</code> để điều khiển từ xa!</i>`;
@@ -911,12 +920,18 @@ async function pollUpdates() {
                     }
 
                     // 🌐 LỆNH MỞ TRÌNH DUYỆT / WEB / YOUTUBE / FB / DRIVE / APP BẤT KỲ TRÊN PC
-                    const wantsVideo = /(?:và quay|quay lại|quay video|record|quay clip)/i.test(userText);
-                    const cleanOpenText = userText.trim().replace(/(?:\s+(?:và\s+)?(?:quay lại|quay video|quay clip|quay|record)).*$/i, '').trim();
+                    const KNOWN_WEB_KEYS = 'youtube|yt|facebook|fb|drive|gg drive|google drive|docs|google docs|sheets|google sheets|gmail|mail|github|git|chatgpt|zalo|google|gg';
+                    const KNOWN_APP_KEYS = 'vscode|vs code|code|notepad|ghi chú|calculator|calc|máy tính|taskmgr|task manager|explorer|thư mục|discord|spotify|telegram';
 
-                    const isGenericBrowser = /^(?:mở|bật)\s+(?:trình duyệt|browser)$/i.test(cleanOpenText);
-                    const webMatch = cleanOpenText.match(/^(?:mở|bật|chạy|start|open)\s+(?:trang\s+|web\s+|trình duyệt\s+|app\s+|ứng dụng\s+)?([a-zA-Z0-9_\-\.\:\/ ]+?)(?:\s+(?:trên|bằng|qua)\s+(chrome|edge|msedge|brave|firefox))?(?:\s+(?:profile|acc|tài khoản)\s*(\w+))?$/i)
-                        || cleanOpenText.match(/^(?:\/open|\/web|\/url|\/browser)\s+([^\s]+)(?:\s+([^\s]+))?$/i);
+                    const wantsVideo = !isConversational && /(?:và quay|quay lại|quay video|record|quay clip)/i.test(cleanTrimmed);
+                    const wantsShot = !isConversational && /(?:và chụp|chụp lại|xem màn hình|xem ảnh)/i.test(cleanTrimmed);
+                    const cleanOpenText = cleanTrimmed.replace(/(?:\s+(?:và\s+)?(?:quay lại|quay video|quay clip|quay|record|chụp lại|chụp|xem ảnh|xem hình)).*$/i, '').trim();
+
+                    const isGenericBrowser = !isConversational && /^(?:hãy\s+)?(?:mở|bật)\s+(?:trình duyệt|browser)$/i.test(cleanOpenText);
+                    const webMatch = !isConversational && (
+                        cleanOpenText.match(new RegExp(`^(?:hãy\\s+)?(?:mở|bật|chạy|start|open)\\s+(?:trang\\s+|web\\s+|trình duyệt\\s+|app\\s+|ứng dụng\\s+)?(${KNOWN_WEB_KEYS}|${KNOWN_APP_KEYS}|https?:\\/\\/[^\\s]+|www\\.[^\\s]+)(?:\\s+(?:trên|bằng|qua)\\s+(chrome|edge|msedge|brave|firefox))?(?:\\s+(?:profile|acc|tài khoản)\\s*(\\w+))?$`, 'i'))
+                        || cleanOpenText.match(/^(?:\/open|\/web|\/url|\/browser)\s+([^\s]+)(?:\s+([^\s]+))?$/i)
+                    );
 
                     if (isGenericBrowser || (webMatch && !/^(?:antigravity|ide)$/i.test(webMatch[1].trim()))) {
                         const rawTarget = isGenericBrowser ? 'google' : (webMatch[1] || 'google').trim();
@@ -936,35 +951,41 @@ async function pollUpdates() {
                             continue;
                         }
 
-                        // Kiểm tra nếu người dùng muốn kèm quay video
-                        const wantsVideo = /(?:và quay|quay lại|quay video|record|quay clip)/i.test(userText);
-
                         const result = openWebOrApp(rawTarget, browser, profile);
                         await sendMsg(
                             chatId,
-                            `🌐 <b>[ĐÃ MỞ YÊU CẦU TRÊN MÁY TÍNH]</b>\n──────────────────────\n✅ ${result.desc}\n📸 <i>Đang tự động chụp lại màn hình sau 3.5s để bro xem kết quả trực tiếp...</i>`,
+                            `🌐 <b>[ĐÃ MỞ YÊU CẦU TRÊN MÁY TÍNH]</b>\n──────────────────────\n✅ ${result.desc}`,
                             threadId
                         );
 
-                        // Tự động chụp hoặc quay video màn hình sau 3.5s
-                        setTimeout(async () => {
-                            try {
-                                if (wantsVideo) {
-                                    const shotCaption = `🎥 <b>[VIDEO QUAY MÀN HÌNH SAU KHI MỞ]</b>\n──────────────────────\n👉 Đã mở: <b>${rawTarget}</b>\n⏱️ <b>Thời gian:</b> ${new Date().toLocaleTimeString('vi-VN')}`;
-                                    await sendScreenVideo(botToken, chatId, threadId, shotCaption, 4);
-                                } else {
-                                    const shotCaption = `📸 <b>[KẾT QUẢ MÀN HÌNH SAU KHI MỞ]</b>\n──────────────────────\n👉 Đã mở: <b>${rawTarget}</b>\n⏱️ <b>Thời gian:</b> ${new Date().toLocaleTimeString('vi-VN')}`;
-                                    await sendScreenshot(botToken, chatId, threadId, shotCaption);
-                                }
-                            } catch (e) {}
-                        }, 3500);
+                        // CHỈ CHỤP HOẶC QUAY NẾU NGƯỜI DÙNG THỰC SỰ YÊU CẦU!
+                        if (wantsVideo || wantsShot) {
+                            setTimeout(async () => {
+                                try {
+                                    if (wantsVideo) {
+                                        const shotCaption = `🎥 <b>[VIDEO QUAY MÀN HÌNH SAU KHI MỞ]</b>\n──────────────────────\n👉 Đã mở: <b>${rawTarget}</b>\n⏱️ <b>Thời gian:</b> ${new Date().toLocaleTimeString('vi-VN')}`;
+                                        await sendScreenVideo(botToken, chatId, threadId, shotCaption, 4);
+                                    } else if (wantsShot) {
+                                        const shotCaption = `📸 <b>[KẾT QUẢ MÀN HÌNH SAU KHI MỞ]</b>\n──────────────────────\n👉 Đã mở: <b>${rawTarget}</b>\n⏱️ <b>Thời gian:</b> ${new Date().toLocaleTimeString('vi-VN')}`;
+                                        await sendScreenshot(botToken, chatId, threadId, shotCaption);
+                                    }
+                                } catch (e) {}
+                            }, 3500);
+                        }
 
                         continue;
                     }
 
                     // 🖥️ LỆNH BẬT / MỞ CỬA SỔ ANTIGRAVITY TRÊN MÁY TÍNH
-                    if (/(?:bật|mở|khởi động|chạy|hiển thị|open|focus|show).*(?:antigravity|ide|app|cửa sổ)|^(\/antigravity|\/open_antigravity|\/open|\/app|\/ide|antigravity)$/i.test(userText.trim())) {
+                    const isAntigravityCmd = !isConversational && (
+                        /^(?:\/antigravity|\/open_antigravity|\/app|\/ide|antigravity)$/i.test(cleanTrimmed) ||
+                        /^(?:hãy\s+)?(?:bật|mở|khởi động|khôi phục|focus|show)\s+(?:cửa sổ\s+)?(?:antigravity|ide)(?:\s+(?:và\s+)?(?:chụp|chụp lại|xem ảnh))?$/i.test(cleanTrimmed)
+                    );
+
+                    if (isAntigravityCmd) {
                         const launchResult = launchOrFocusAntigravity();
+                        const wantsAgyShot = /(?:chụp|chụp lại|xem ảnh)/i.test(cleanTrimmed);
+
                         if (launchResult === 'NOT_FOUND') {
                             await sendMsg(
                                 chatId,
@@ -979,16 +1000,19 @@ async function pollUpdates() {
                                 : 'Đã kích hoạt và đưa cửa sổ Antigravity lên phía trước màn hình!';
                             await sendMsg(
                                 chatId,
-                                `🖥️ <b>[ĐÃ MỞ CỬA SỔ ANTIGRAVITY TRÊN PC]</b>\n──────────────────────\n✅ <b>${actionDesc}</b>\n⚡ Cầu nối IPC đã đồng bộ hóa 100% với Antigravity PC.\n📸 <i>Đang chụp ảnh màn hình sau 2.5s để gửi cho bro xem...</i>`,
+                                `🖥️ <b>[ĐÃ MỞ CỬA SỔ ANTIGRAVITY TRÊN PC]</b>\n──────────────────────\n✅ <b>${actionDesc}</b>\n⚡ Cầu nối IPC đã đồng bộ hóa 100% với Antigravity PC.`,
                                 threadId
                             );
 
-                            setTimeout(async () => {
-                                try {
-                                    const shotCaption = `📸 <b>[ẢNH CHỤP CỬA SỔ ANTIGRAVITY TRÊN PC]</b>\n──────────────────────\n✅ ${actionDesc}\n⏱️ ${new Date().toLocaleTimeString('vi-VN')}`;
-                                    await sendScreenshot(botToken, chatId, threadId, shotCaption);
-                                } catch (e) {}
-                            }, 2500);
+                            // TUYỆT ĐỐI KHÔNG TỰ ĐỘNG CHỤP MÀN HÌNH NẾU NGƯỜI DÙNG KHÔNG YÊU CẦU!
+                            if (wantsAgyShot) {
+                                setTimeout(async () => {
+                                    try {
+                                        const shotCaption = `📸 <b>[ẢNH CHỤP CỬA SỔ ANTIGRAVITY TRÊN PC]</b>\n──────────────────────\n✅ ${actionDesc}\n⏱️ ${new Date().toLocaleTimeString('vi-VN')}`;
+                                        await sendScreenshot(botToken, chatId, threadId, shotCaption);
+                                    } catch (e) {}
+                                }, 2500);
+                            }
                         }
                         continue;
                     }
