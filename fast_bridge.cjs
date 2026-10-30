@@ -855,6 +855,34 @@ async function pollUpdates() {
                         continue;
                     }
 
+                    // 🔒 LỆNH KẾT THÚC QUYỀN QUẢN TRỊ REPO: /ketthucrepo
+                    if (/^(?:\/ketthucrepo|\/endrepo|\/dongrepo)$/i.test(userText.trim())) {
+                        if (threadId !== null && lobby.isRegisteredTopic(threadId)) {
+                            lobby.revokeAdminState();
+                            await lobby.updateControlBoard(
+                                { tgApiRaw, editMsg },
+                                chatId,
+                                lobby.getMainMenuText(),
+                                lobby.getMainMenuMarkup()
+                            );
+                            await sendMsg(
+                                chatId,
+                                `🔒 <b>[ĐÃ KẾT THÚC QUYỀN QUẢN TRỊ REPO]</b>\n──────────────────────\n✅ Đã khóa lại quyền hạn quản trị repo thành công!\n🏛️ Bảng điều khiển Sảnh Lobby đã trở về trạng thái chuẩn (đã ẩn dòng Quyền hạn).\n\n👉 Khi cần mở lại toàn quyền, bro hãy vào Sảnh bấm 7 lần và nhập mật khẩu nhé!`,
+                                threadId,
+                                'HTML'
+                            );
+                            forwardToAntigravity(conversationId, `[KẾT THÚC QUYỀN REPO]: Người dùng đã phát lệnh /ketthucrepo tại Topic #${threadId}. Quyền quản trị repo đã được thu hồi và khóa lại.`);
+                        } else {
+                            await sendMsg(
+                                chatId,
+                                `⚠️ <b>[LỆNH KHÔNG HỢP LỆ TẠI ĐÂY]</b>\n──────────────────────\nLệnh <code>/ketthucrepo</code> chỉ có hiệu lực khi gửi trong chính Topic dự án được sinh ra!`,
+                                threadId,
+                                'HTML'
+                            );
+                        }
+                        continue;
+                    }
+
                     // 🧠 BỘ PHÂN LOẠI Ý ĐỊNH BẰNG AI (GEMINI INTENT CLASSIFIER)
                     const intent = await classifyUserIntent(userText);
 

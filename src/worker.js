@@ -219,7 +219,7 @@ async function handleTelegramUpdate(update, env, ctx) {
         if (authState.enteredPass) {
             // Cả hai đã hoàn tất!
             adminAuthStates.delete(userId);
-            await sendTg(botToken, chatId, `👑 <b>[SUPER ADMIN TOÀN QUYỀN ĐÃ MỞ KHÓA 100%]</b>\n──────────────────────\n🔑 Mã PIN: <code>2726</code> (Trí nhớ dự án đã nạp)\n🛡️ Mật mã quản trị: <b>Chính xác!</b>\n🚀 Bro có thể điều hành và phát triển dự án từ xa ngay trên Cloud 24/7!`, threadId);
+            await sendTg(botToken, chatId, `👑 <b>[TOÀN QUYỀN QUẢN TRỊ ĐÃ MỞ KHÓA 100%]</b>\n──────────────────────\n🔑 Mã PIN: <code>2726</code> (Trí nhớ dự án đã nạp)\n🛡️ Mật mã quản trị: <b>Chính xác!</b>\n🚀 Bro có thể điều hành và phát triển dự án từ xa ngay trên Cloud 24/7!`, threadId);
             return;
         } else {
             authState.step = "AWAIT_PASS";
@@ -235,7 +235,7 @@ async function handleTelegramUpdate(update, env, ctx) {
         if (authState.enteredPin) {
             // Cả hai đã hoàn tất!
             adminAuthStates.delete(userId);
-            await sendTg(botToken, chatId, `👑 <b>[SUPER ADMIN TOÀN QUYỀN ĐÃ MỞ KHÓA 100%]</b>\n──────────────────────\n🔑 Mật mã quản trị: <b>Chính xác!</b>\n🧠 Mã PIN 2726: <b>Đã đồng bộ trí nhớ dự án!</b>\n🚀 Bro có thể điều hành và phát triển dự án từ xa ngay trên Cloud 24/7!`, threadId);
+            await sendTg(botToken, chatId, `👑 <b>[TOÀN QUYỀN QUẢN TRỊ ĐÃ MỞ KHÓA 100%]</b>\n──────────────────────\n🔑 Mật mã quản trị: <b>Chính xác!</b>\n🧠 Mã PIN 2726: <b>Đã đồng bộ trí nhớ dự án!</b>\n🚀 Bro có thể điều hành và phát triển dự án từ xa ngay trên Cloud 24/7!`, threadId);
             return;
         } else {
             authState.step = "AWAIT_PIN";
@@ -256,6 +256,11 @@ async function handleTelegramUpdate(update, env, ctx) {
 
     if (["/cancel", "/stop"].includes(text)) {
         await sendTg(botToken, chatId, "🛑 <b>[ĐÃ DỪNG TOÀN BỘ TÁC VỤ CLOUD]</b>", threadId);
+        return;
+    }
+
+    if (["/ketthucrepo", "/endrepo", "/dongrepo"].includes(text)) {
+        await sendTg(botToken, chatId, "🔒 <b>[ĐÃ KẾT THÚC QUYỀN QUẢN TRỊ REPO]</b>\n──────────────────────\n✅ Đã khóa lại quyền hạn quản trị repo thành công trên Cloud!", threadId);
         return;
     }
 
