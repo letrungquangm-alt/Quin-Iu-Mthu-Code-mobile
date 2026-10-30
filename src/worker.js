@@ -176,7 +176,7 @@ async function handleTelegramUpdate(update, env, ctx) {
     if (!chatId || !text) return;
 
     // 1. KIỂM TRA MÃ 3 SỐ XÁC THỰC CONNECT NET (Nhập từ Sảnh Lobby)
-    if (/^\d{3}$/.test(text) && threadId === null) {
+    if (/^\d{3}$/.test(text) && (threadId === null || threadId === 3562)) {
         const cmdCode = text;
         const reg = netRegistrations.get(cmdCode);
         if (reg) {
