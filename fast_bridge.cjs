@@ -165,42 +165,30 @@ function formatStopwatch(sec) {
 function startTicker() {}
 function stopTicker() {}
 
-// --- HUGGING FACE GRADIO CLOUD HANDOVER HELPERS ---
+// --- CLOUDFLARE WORKER 24/7 CLOUD HANDOVER HELPERS ---
+const CLOUD_WORKER_URL = 'https://quin-iu-mthu-code-mobile.letrungquangm.workers.dev';
 
-async function callGradioApi(fnName, dataArr) {
+async function setCloudWebhook(enable = true) {
     try {
-        const resp = await fetch('https://trungm-quinloverin.hf.space/gradio_api/call/' + fnName, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ data: dataArr }),
-            signal: AbortSignal.timeout(4000)
-        });
-        if (!resp.ok) return null;
-        const j = await resp.json();
-        if (!j.event_id) return null;
-        const streamResp = await fetch('https://trungm-quinloverin.hf.space/gradio_api/call/' + fnName + '/' + j.event_id, {
-            signal: AbortSignal.timeout(4000)
-        });
-        const text = await streamResp.text();
-        const match = text.match(/data:\s*\[(.*?)\]/);
-        return match ? JSON.parse('[' + match[1] + ']')[0] : null;
+        if (enable) {
+            const res = await tgApiRaw('setWebhook', { url: CLOUD_WORKER_URL });
+            console.log('[Cloud Handover] Đã kích hoạt Webhook tới Cloudflare Worker 24/7:', res && res.ok ? 'OK' : JSON.stringify(res));
+            return res && res.ok;
+        } else {
+            const res = await tgApiRaw('deleteWebhook');
+            console.log('[PC Local] Đã gỡ Webhook, PC tiếp quản Telegram trực tiếp:', res && res.ok ? 'OK' : JSON.stringify(res));
+            return res && res.ok;
+        }
     } catch (e) {
-        return null;
+        console.error('[Cloud Handover Error]:', e.message);
+        return false;
     }
-}
-
-async function checkHfMode() {
-    return await callGradioApi('get_mode', []);
-}
-
-async function setHfMode(mode) {
-    return await callGradioApi('set_mode', [mode]);
 }
 
 // --- HANDLE DISCONNECT & CLOUD HANDOVER ---
 
 async function handleDisconnectCloud() {
-    console.log('[Bridge Disconnect] Bàn giao cho Cloud 24/7');
+    console.log('[Bridge Disconnect] Bàn giao cho Cloudflare Worker 24/7...');
     isCloudStandby = true;
     stopTicker();
     await clearAllCancelButtons(activeChatId, tempMsgIds);
@@ -208,14 +196,10 @@ async function handleDisconnectCloud() {
     promptMsgId = null;
     currentWorkingMsgId = null;
 
-    const handoverText = `☁️ <b>[ĐÃ NGẮT KẾT NỐI VỚI PC - BÀN GIAO CHO HUGGING FACE CLOUD 24/7]</b>\n──────────────────────\n🖥️ <b>Máy tính:</b> Đã ngưng tiếp nhận lệnh trực tiếp (Chế độ Chờ)\n🌐 <b>Hugging Face Cloud (Gemini 3.5 Flash):</b> ĐÃ TIẾP QUẢN 24/7!\n\n✨ Giờ bro có thể chat, yêu cầu code hoặc commit file ngay cả khi máy tính tắt nguồn!\n\n👉 Khi muốn kết nối lại máy tính, chỉ cần gõ <code>/pc</code> hoặc nhập mã PIN <code>2726</code>.`;
+    const handoverText = `☁️ <b>[ĐÃ BÀN GIAO CHO CLOUDFLARE WORKER 24/7]</b>\n──────────────────────\n🖥️ <b>Máy tính:</b> Đã ngưng tiếp nhận lệnh trực tiếp (Chế độ Chờ)\n🌐 <b>Cloudflare Worker (Groq LPU 24/7):</b> ĐÃ TIẾP QUẢN TOÀN DIỆN!\n\n✨ Bro có thể chat, yêu cầu code qua Groq LPU siêu tốc ngay cả khi máy tính tắt nguồn!\n\n👉 Khi muốn kết nối lại máy tính, chỉ cần gõ <code>/pc</code> hoặc <code>ket noi pc</code>.`;
     await sendMsg(activeChatId, handoverText, activeThreadId, 'HTML', { inline_keyboard: [] });
 
-    try {
-        await tgApiRaw('deleteWebhook');
-        await setHfMode('cloud');
-        console.log('[Bridge Disconnect] Đã gỡ webhook và kích hoạt Hugging Face tiếp quản 24/7!');
-    } catch (e) {}
+    await setCloudWebhook(true);
 }
 
 // --- HANDLE CANCEL ACTION ---
@@ -509,15 +493,16 @@ async function pollUpdates() {
                 if (fs.existsSync(wakeSignal)) {
                     try { fs.unlinkSync(wakeSignal); } catch (e) {}
                     isCloudStandby = false;
+                    await setCloudWebhook(false);
                     console.log('[Bridge Wakeup] ⚡ Đã nhận tín hiệu cưỡng chế kết nối lại từ PC! Tiếp quản Telegram ngay lập tức!');
                     await sendMsg(activeChatId, '🖥️ <b>[PC LOCAL BRIDGE - SẴN SÀNG]</b>\n──────────────────────\nPC đã thức tỉnh và tiếp quản kết nối Telegram thành công!', activeThreadId);
                 } else {
                     try {
-                        const hfMode = await checkHfMode();
-                        if (hfMode === 'pc') {
+                        const whInfo = await tgApiRaw('getWebhookInfo');
+                        if (whInfo && whInfo.result && !whInfo.result.url) {
                             isCloudStandby = false;
-                            console.log('[Bridge Wakeup] ⚡ Hugging Face đã bàn giao lại cho PC! Tiếp quản Telegram ngay lập tức!');
-                            await sendMsg(activeChatId, '🖥️ <b>[PC LOCAL BRIDGE - TIẾP QUẢN THÀNH CÔNG]</b>\n──────────────────────\nPC đã nhận lệnh bàn giao từ Cloud và kết nối sẵn sàng 100%!', activeThreadId);
+                            console.log('[Bridge Wakeup] ⚡ Cloudflare đã nhường quyền cho PC! Tiếp quản Telegram ngay lập tức!');
+                            await sendMsg(activeChatId, '🖥️ <b>[PC LOCAL BRIDGE - TIẾP QUẢN THÀNH CÔNG]</b>\n──────────────────────\nPC đã tiếp quản kết nối từ Cloudflare và sẵn sàng 100%!', activeThreadId);
                             continue;
                         }
                     } catch (e) {}
@@ -1190,16 +1175,15 @@ async function pollUpdates() {
     }
 }
 
-// --- TỰ ĐỘNG BÀN GIAO CHO CLOUD 24/7 KHI TẮT MÁY / TẮT TIẾN TRÌNH ---
+// --- TỰ ĐỘNG BÀN GIAO CHO CLOUDFLARE WORKER 24/7 KHI TẮT MÁY / TẮT TIẾN TRÌNH ---
 let isShuttingDown = false;
 async function restoreCloudOnExit(reason) {
     if (isShuttingDown) return;
     isShuttingDown = true;
-    console.log(`[Bridge Exit] Tiến trình kết thúc (${reason}), tự động chuyển giao cho Hugging Face Cloud 24/7...`);
+    console.log(`[Bridge Exit] Tiến trình kết thúc (${reason}), tự động chuyển giao cho Cloudflare Worker 24/7...`);
     try {
-        await tgApiRaw('deleteWebhook');
-        await setHfMode('cloud');
-        console.log('[Bridge Exit] Đã bàn giao Hugging Face Cloud thành công!');
+        await setCloudWebhook(true);
+        console.log('[Bridge Exit] Đã bàn giao Cloudflare Worker 24/7 thành công!');
     } catch (e) {
         console.error('[Bridge Exit Error]:', e.message);
     }
@@ -1209,15 +1193,7 @@ process.on('SIGINT', async () => { await restoreCloudOnExit('SIGINT'); process.e
 process.on('SIGTERM', async () => { await restoreCloudOnExit('SIGTERM'); process.exit(0); });
 process.on('beforeExit', async () => { await restoreCloudOnExit('beforeExit'); });
 
-// Khởi động: Đặt Hugging Face sang chế độ 'pc' và bắt đầu gửi nhịp tim định kỳ
-setHfMode('pc').catch(() => {});
-
-setInterval(async () => {
-    if (!isCloudStandby) {
-        try {
-            await setHfMode('heartbeat');
-        } catch (e) {}
-    }
-}, 25000);
+// Khởi động: Gỡ Webhook để PC tiếp quản trực tiếp
+setCloudWebhook(false).catch(() => {});
 
 pollUpdates();
