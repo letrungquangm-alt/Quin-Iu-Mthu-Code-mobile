@@ -17,7 +17,7 @@ if (fs.existsSync(configPath)) {
 }
 
 if (!botToken) {
-    botToken = process.env.BOT_TOKEN || '9295576468:AAEWszGzGSvgYDeNBFh4zZBhuxkOzixfz4o';
+    botToken = process.env.BOT_TOKEN || '9295576468:AAEDkx2sZBzfxGSnOMFprvhwHIOQ4pD_xmQ';
 }
 
 const syncBridgePath = path.join(rootDir, 'sync_bridge.json');

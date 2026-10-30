@@ -7,7 +7,7 @@
 ## 2. Telegram Ecosystem Routing
 - Supergroup: `QuinloveRin Code` (`chat_id: -1004457846636`)
 - Forum Topic: Topic `315` (`🚀 Dự Án: Quin-Iu-Mthu`)
-- Bot: `@gm_iu_mthu_code_bot` (`9295576468:AAEWszGzGSvgYDeNBFh4zZBhuxkOzixfz4o`)
+- Bot: `@gm_iu_mthu_code_bot` (`9295576468:AAEDkx2sZBzfxGSnOMFprvhwHIOQ4pD_xmQ`)
 - Local Bridge: `fast_bridge.cjs` daemon running on PC.
 - Cloud Fallback: Vercel serverless webhook automatically dropped when PC runs (`deleteWebhook`).
 

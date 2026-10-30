@@ -3,7 +3,7 @@
 :: QuinloveRin Code - Fast Webhook Cloud Switcher
 :: ========================================================
 
-set "BOT_TOKEN=9295576468:AAEWszGzGSvgYDeNBFh4zZBhuxkOzixfz4o"
+set "BOT_TOKEN=9295576468:AAEDkx2sZBzfxGSnOMFprvhwHIOQ4pD_xmQ"
 set "WEBHOOK_URL=https://quiniumthucode.vercel.app/api/webhook"
 
 if "%~1"=="pc" (
