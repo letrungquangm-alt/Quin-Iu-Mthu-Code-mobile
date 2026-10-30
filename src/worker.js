@@ -264,6 +264,23 @@ async function handleTelegramUpdate(update, env, ctx) {
         return;
     }
 
+    // 🔒 LỆNH ĐÓNG TOPIC TRÊN CLOUD: /dongtopic
+    if (["/dongtopic", "/closetopic", "/dong_topic"].includes(text)) {
+        if (threadId === null || threadId === 3562) {
+            await sendTg(botToken, chatId, "⚠️ <b>[KHÔNG THỂ ĐÓNG SẢNH LOBBY]</b>\n──────────────────────\nSảnh Lobby là kênh điều khiển trung tâm, tuyệt đối không thể đóng!", threadId);
+        } else {
+            await sendTg(botToken, chatId, `🔒 <b>[TOPIC ĐÃ ĐƯỢC ĐÓNG]</b>\n──────────────────────\nTopic #${threadId} này đã được đóng lại theo lệnh <code>/dongtopic</code>.\n👉 Bro có thể quay lại Sảnh Lobby bất cứ lúc nào!`, threadId);
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/closeForumTopic`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ chat_id: chatId, message_thread_id: threadId })
+                });
+            } catch (e) {}
+        }
+        return;
+    }
+
     // 4. XỬ LÝ PROMPT LẬP TRÌNH BÌNH THƯỜNG TRONG TOPIC DỰ ÁN
     const ghToken = (env && env.GITHUB_TOKEN) ? env.GITHUB_TOKEN : DEFAULT_GH_TOKEN;
     const ghOwner = (env && env.GITHUB_OWNER) ? env.GITHUB_OWNER : "letrungquangm-alt";

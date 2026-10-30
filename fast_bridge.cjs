@@ -883,6 +883,35 @@ async function pollUpdates() {
                         continue;
                     }
 
+                    // 🔒 LỆNH ĐÓNG TOPIC: /dongtopic (SẢNH TUYỆT ĐỐI KHÔNG ĐƯỢC ĐÓNG)
+                    if (/^(?:\/dongtopic|\/closetopic|\/dong_topic)$/i.test(userText.trim())) {
+                        if (threadId === null || lobby.isLobby(threadId)) {
+                            await sendMsg(
+                                chatId,
+                                `⚠️ <b>[KHÔNG THỂ ĐÓNG SẢNH LOBBY]</b>\n──────────────────────\nSảnh Lobby là kênh điều khiển trung tâm, tuyệt đối không thể đóng!`,
+                                threadId,
+                                'HTML'
+                            );
+                        } else {
+                            await sendMsg(
+                                chatId,
+                                `🔒 <b>[TOPIC ĐÃ ĐƯỢC ĐÓNG]</b>\n──────────────────────\nTopic #${threadId} này đã được đóng lại theo lệnh <code>/dongtopic</code>.\n👉 Bro có thể quay lại Sảnh Lobby bất cứ lúc nào!`,
+                                threadId,
+                                'HTML'
+                            );
+                            try {
+                                await tgApiRaw('closeForumTopic', {
+                                    chat_id: chatId,
+                                    message_thread_id: threadId
+                                });
+                            } catch (e) {
+                                console.error('[closeForumTopic Error]:', e.message);
+                            }
+                            forwardToAntigravity(conversationId, `[ĐÓNG TOPIC]: Người dùng đã phát lệnh /dongtopic đóng Topic #${threadId}.`);
+                        }
+                        continue;
+                    }
+
                     // 🧠 BỘ PHÂN LOẠI Ý ĐỊNH BẰNG AI (GEMINI INTENT CLASSIFIER)
                     const intent = await classifyUserIntent(userText);
 
