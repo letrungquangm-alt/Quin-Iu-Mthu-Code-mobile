@@ -942,11 +942,11 @@ async function pollUpdates() {
                         const result = openWebOrApp(rawTarget, browser, profile);
                         await sendMsg(
                             chatId,
-                            `🌐 <b>[ĐÃ MỞ YÊU CẦU TRÊN MÁY TÍNH]</b>\n──────────────────────\n✅ ${result.desc}\n📸 <i>Đang tự động chụp lại màn hình sau 2.5s để bro xem kết quả trực tiếp...</i>`,
+                            `🌐 <b>[ĐÃ MỞ YÊU CẦU TRÊN MÁY TÍNH]</b>\n──────────────────────\n✅ ${result.desc}\n📸 <i>Đang tự động chụp lại màn hình sau 3.5s để bro xem kết quả trực tiếp...</i>`,
                             threadId
                         );
 
-                        // Tự động chụp hoặc quay video màn hình sau 2.5s
+                        // Tự động chụp hoặc quay video màn hình sau 3.5s
                         setTimeout(async () => {
                             try {
                                 if (wantsVideo) {
@@ -957,7 +957,7 @@ async function pollUpdates() {
                                     await sendScreenshot(botToken, chatId, threadId, shotCaption);
                                 }
                             } catch (e) {}
-                        }, 2500);
+                        }, 3500);
 
                         continue;
                     }
