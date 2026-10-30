@@ -281,6 +281,20 @@ async function handleTelegramUpdate(update, env, ctx) {
         return;
     }
 
+    // 🏛️ SẢNH LOBBY TRÊN CLOUD: XÓA TIN NHẮN & TUYỆT ĐỐI KHÔNG CHẠY CODE TẠI ĐÂY
+    if (threadId === null || threadId === 3562) {
+        if (msg.message_id) {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/deleteMessage`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ chat_id: chatId, message_id: msg.message_id })
+                });
+            } catch (e) {}
+        }
+        return;
+    }
+
     // 4. XỬ LÝ PROMPT LẬP TRÌNH BÌNH THƯỜNG TRONG TOPIC DỰ ÁN
     const ghToken = (env && env.GITHUB_TOKEN) ? env.GITHUB_TOKEN : DEFAULT_GH_TOKEN;
     const ghOwner = (env && env.GITHUB_OWNER) ? env.GITHUB_OWNER : "letrungquangm-alt";

@@ -281,6 +281,14 @@ async function handleCancelAction(source = 'button') {
 // --- REMOTE CMD CONTROLLER (ĐIỀU KHIỂN TERMINAL TỪ XA CHO MÁY MỚI / QUÁN NET) ---
 
 function executeRemoteCmd(chatId, threadId, command, isBackground = false) {
+    if (!lobby.isSuperAdmin()) {
+        return sendMsg(
+            chatId,
+            `👑 <b>[YÊU CẦU MẬT KHẨU QUẢN TRỊ]</b>\n──────────────────────\n⚠️ <b>Nghiêm cấm thực thi lệnh terminal hoặc chỉnh sửa repo Mthu Code Mobile khi chưa có quyền quản trị!</b>\n\n👉 Bro hãy vào Sảnh Lobby bấm 7 lần và nhập Mật khẩu Quản trị để mở khóa nhé!`,
+            threadId,
+            'HTML'
+        );
+    }
     if (!command || !command.trim()) {
         return sendMsg(chatId, '⚠️ Vui lòng nhập lệnh sau <code>/cmd</code> (Ví dụ: <code>/cmd dir</code> hoặc <code>/cmd git status</code>)', threadId);
     }
@@ -793,6 +801,26 @@ async function pollUpdates() {
                     activeChatId = chatId;
                     activeThreadId = threadId;
 
+                    // 🏛️ NẾU TIN NHẮN TẠI SẢNH LOBBY (threadId === null || lobby.isLobby(threadId)):
+                    // 1. NGAY LẬP TỨC XÓA BẤT KỲ TIN NHẮN NÀO XUẤT HIỆN TẠI SẢNH (chữ, ảnh, sticker, voice, file...)
+                    // 2. TUYỆT ĐỐI KHÔNG COI ĐÓ LÀ PROMPT ĐỂ THỰC HIỆN CODE!
+                    if (threadId === null || lobby.isLobby(threadId)) {
+                        if (msg.message_id) {
+                            try {
+                                await tgApiRaw('deleteMessage', { chat_id: chatId, message_id: msg.message_id });
+                            } catch (e) {}
+                        }
+                        const lobbyText = (msg.text || msg.caption || '').trim();
+                        await lobby.handleLobbyTextMessage(msg, lobbyText, {
+                            sendMsg,
+                            editMsg,
+                            tgApiRaw,
+                            forwardToAntigravity,
+                            conversationId
+                        });
+                        continue;
+                    }
+
                     let userText = '';
                     let isPhoto = false;
                     let photoFileId = null;
@@ -812,19 +840,6 @@ async function pollUpdates() {
                     if (!userText && !isPhoto) continue;
 
                     console.log(`[Telegram Nhận Tin] (chat=${chatId}, thread=${threadId}): ${userText.substring(0, 60)}`);
-
-                    // 👉 NẾU TIN NHẮN TẠI SẢNH LOBBY (threadId === null):
-                    // BÀN GIAO 100% CHO LIB/LOBBY.CJS - TUYỆT ĐỐI KHÔNG CHẠY CODE TẠI ĐÂY!
-                    if (threadId === null || lobby.isLobby(threadId)) {
-                        await lobby.handleLobbyTextMessage(msg, userText, {
-                            sendMsg,
-                            editMsg,
-                            tgApiRaw,
-                            forwardToAntigravity,
-                            conversationId
-                        });
-                        continue;
-                    }
 
                     // 👉 XỬ LÝ NẾU ĐANG CHỜ SỬA PROMPT TRONG HÀNG ĐỢI (TẠI CÁC TOPIC DỰ ÁN)
                     if (waitingForEditQueueId) {
@@ -1128,6 +1143,18 @@ async function pollUpdates() {
                     const previewSafe = escapeHtml(previewClean.length > 55 ? previewClean.substring(0, 55) + '...' : previewClean);
                     showScreenToast(isEdit ? '✏️ Telegram -> Prompt Sửa' : '📱 Telegram -> PC Sync', previewClean);
                     recordSyncMessage(syncBridgePath, conversationId, 'phone', isEdit ? `[Sửa tin]: ${userText}` : userText);
+
+                    // 🔒 BẢO VỆ REPO: Nghiêm cấm tạo cửa sổ code / bypass hoặc chỉnh sửa repo Mthu Code Mobile nếu chưa có mật khẩu quản trị
+                    const isProtectedRepoAction = /(?:sửa|edit|thay đổi|update|chỉnh sửa|commit|push|pull|tạo file|xóa file|ghi đè)\s+(?:code|file|repo|mã nguồn)?\s*(?:mthu|fast_bridge|lobby|worker|config\.json|của bot|của hệ thống|máy chủ)/i.test(userText);
+                    if (isProtectedRepoAction && !lobby.isSuperAdmin()) {
+                        await sendMsg(
+                            chatId,
+                            `👑 <b>[YÊU CẦU MẬT KHẨU QUẢN TRỊ]</b>\n──────────────────────\n⚠️ <b>Nghiêm cấm hành vi tạo cửa sổ để code / bypass hoặc chỉnh sửa repo Mthu Code Mobile khi chưa có quyền quản trị!</b>\n\n👉 Để mở khóa toàn quyền, bro hãy vào Sảnh Lobby bấm <b>7 lần liên tục</b> và nhập <b>Mật khẩu Quản trị</b> nhé!`,
+                            threadId,
+                            'HTML'
+                        );
+                        continue;
+                    }
 
                     // Nếu máy tính đang bận: Đưa vào hàng đợi
                     if (currentPhase !== 'IDLE' && currentPhase !== 'CANCELED') {
