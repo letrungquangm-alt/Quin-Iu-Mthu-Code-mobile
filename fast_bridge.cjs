@@ -911,9 +911,12 @@ async function pollUpdates() {
                     }
 
                     // 🌐 LỆNH MỞ TRÌNH DUYỆT / WEB / YOUTUBE / FB / DRIVE / APP BẤT KỲ TRÊN PC
-                    const isGenericBrowser = /^(?:mở|bật)\s+(?:trình duyệt|browser)$/i.test(userText.trim());
-                    const webMatch = userText.trim().match(/^(?:mở|bật|chạy|start|open)\s+(?:trang\s+|web\s+|trình duyệt\s+|app\s+|ứng dụng\s+)?([a-zA-Z0-9_\-\.\:\/ ]+?)(?:\s+(?:trên|bằng|qua)\s+(chrome|edge|msedge|brave|firefox))?(?:\s+(?:profile|acc|tài khoản)\s*(\w+))?$/i)
-                        || userText.trim().match(/^(?:\/open|\/web|\/url|\/browser)\s+([^\s]+)(?:\s+([^\s]+))?$/i);
+                    const wantsVideo = /(?:và quay|quay lại|quay video|record|quay clip)/i.test(userText);
+                    const cleanOpenText = userText.trim().replace(/(?:\s+(?:và\s+)?(?:quay lại|quay video|quay clip|quay|record)).*$/i, '').trim();
+
+                    const isGenericBrowser = /^(?:mở|bật)\s+(?:trình duyệt|browser)$/i.test(cleanOpenText);
+                    const webMatch = cleanOpenText.match(/^(?:mở|bật|chạy|start|open)\s+(?:trang\s+|web\s+|trình duyệt\s+|app\s+|ứng dụng\s+)?([a-zA-Z0-9_\-\.\:\/ ]+?)(?:\s+(?:trên|bằng|qua)\s+(chrome|edge|msedge|brave|firefox))?(?:\s+(?:profile|acc|tài khoản)\s*(\w+))?$/i)
+                        || cleanOpenText.match(/^(?:\/open|\/web|\/url|\/browser)\s+([^\s]+)(?:\s+([^\s]+))?$/i);
 
                     if (isGenericBrowser || (webMatch && !/^(?:antigravity|ide)$/i.test(webMatch[1].trim()))) {
                         const rawTarget = isGenericBrowser ? 'google' : (webMatch[1] || 'google').trim();
