@@ -594,6 +594,7 @@ async function pollUpdates() {
                         // XỬ LÝ TOÀN BỘ SỰ KIỆN NÚT BẤM SẢNH LOBBY QUA LIB/LOBBY.CJS
                         const lobbyHandled = await lobby.handleLobbyCallback(cb, {
                             sendMsg,
+                            editMsg,
                             tgApiRaw,
                             forwardToAntigravity,
                             handleDisconnectCloud,
@@ -635,8 +636,12 @@ async function pollUpdates() {
                             currentPin = '';
                             pinFailedCount = 0;
                             await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: 'Đã hủy xác thực' });
-                            const cancelText = `☁️ <b>[ĐÃ HỦY NHẬP MÃ ĐỒNG BỘ]</b>\n──────────────────────\nBro đã hủy bàn phím nhập mã. Hệ thống duy trì chế độ Vercel Cloud 24/7 bình thường.\n\n👉 Khi cần kết nối lại, gõ <code>/pc</code> hoặc <code>/ketnoi</code>.`;
-                            await editMsg(chatId, cb.message.message_id, cancelText, 'HTML', { inline_keyboard: [] }, true);
+                            if (cbThreadId === null) {
+                                await editMsg(chatId, cb.message.message_id, lobby.getMainMenuText(), 'HTML', lobby.getMainMenuMarkup(), true);
+                            } else {
+                                const cancelText = `☁️ <b>[ĐÃ HỦY NHẬP MÃ ĐỒNG BỘ]</b>\n──────────────────────\nBro đã hủy bàn phím nhập mã. Hệ thống duy trì chế độ Vercel Cloud 24/7 bình thường.\n\n👉 Khi cần kết nối lại, gõ <code>/pc</code> hoặc <code>/ketnoi</code>.`;
+                                await editMsg(chatId, cb.message.message_id, cancelText, 'HTML', { inline_keyboard: [] }, true);
+                            }
                             continue;
                         }
 
@@ -660,7 +665,8 @@ async function pollUpdates() {
                                 launchOrFocusAntigravity();
                                 await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: '✅ Mã chính xác! Đang kết nối...' });
                                 const successText = `⚡ <b>[ĐÃ KẾT NỐI QUA MÃ PIN ${verifiedCode} THÀNH CÔNG!]</b>\n──────────────────────\n🖥️ <b>Cửa sổ Antigravity PC:</b> SẴN SÀNG 100%\n🚀 <b>Kênh làm việc:</b> Topic ${activeThreadId}\n🔗 <b>Mã định danh:</b> <code>GM_${verifiedCode}_Mthu</code>\n✨ Đã cưỡng chế kết nối máy tính thành công! Bro gửi yêu cầu code hoặc ảnh ngay bây giờ nhé!`;
-                                await editMsg(chatId, cb.message.message_id, successText, 'HTML', { inline_keyboard: [] }, true);
+                                const successMarkup = (cbThreadId === null) ? { inline_keyboard: [[{ text: '🏛️ Trở về Menu Sảnh', callback_data: 'hub_refresh_menu' }]] } : { inline_keyboard: [] };
+                                await editMsg(chatId, cb.message.message_id, successText, 'HTML', successMarkup, true);
                                 forwardToAntigravity(conversationId, `[LỆNH CƯỠNG CHẾ KẾT NỐI LẠI]: Người dùng đã nhập đúng mã PIN ${verifiedCode} qua bàn phím PIN. Đồng bộ tức thì với cửa sổ Antigravity PC.`);
                                 continue;
                             } else {
@@ -812,6 +818,7 @@ async function pollUpdates() {
                     if (threadId === null) {
                         await lobby.handleLobbyTextMessage(msg, userText, {
                             sendMsg,
+                            editMsg,
                             tgApiRaw,
                             forwardToAntigravity,
                             conversationId

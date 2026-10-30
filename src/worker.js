@@ -434,7 +434,7 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 
 Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Cyan
-Write-Host " 🚀 QUINLOVERIN NET ONBOARDING (GM-TELE ĐẦU NÃO)          " -ForegroundColor Yellow
+Write-Host " 🚀 QUINLOVERIN NET ONBOARDING (GM-TELE)                  " -ForegroundColor Yellow
 Write-Host " Kết nối máy net / máy mới thẳng với Cloudflare & Telegram " -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host ""
@@ -466,7 +466,7 @@ $regBody = @{
 try {
     $resp = Invoke-RestMethod -Uri "$workerUrl/net/register" -Method POST -Body $regBody -ContentType "application/json" -TimeoutSec 15
     Write-Host "==========================================================" -ForegroundColor Yellow
-    Write-Host " 📡 ĐÃ GỬI THÔNG TIN VỀ GM-TELE (ĐẦU NÃO)" -ForegroundColor Green
+    Write-Host " 📡 ĐÃ GỬI THÔNG TIN VỀ GM-TELE" -ForegroundColor Green
     Write-Host " 👉 Bro hãy vào Sảnh (Lobby) bấm nút [Connect Net]" -ForegroundColor Cyan
     Write-Host "    và nhập mã này: " -NoNewline
     Write-Host "[$cmdCode]" -ForegroundColor Green
