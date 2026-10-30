@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { execFile, spawn } = require('child_process');
+const { execFile, spawn, exec } = require('child_process');
 
 const {
     botToken,
@@ -27,7 +27,8 @@ const {
 const {
     forwardToAntigravity,
     showScreenToast,
-    recordSyncMessage
+    recordSyncMessage,
+    launchOrFocusAntigravity
 } = require('./lib/ipc.cjs');
 
 const { createTranscriptWatcher } = require('./lib/transcript.cjs');
@@ -41,7 +42,8 @@ const {
     getPrompt,
     getNextPrompt,
     updatePrompt,
-    getQueueListMarkup
+    getQueueListMarkup,
+    clearQueue
 } = require('./lib/queue.cjs');
 
 const lobby = require('./lib/lobby.cjs');
@@ -157,6 +159,38 @@ function formatStopwatch(sec) {
 function startTicker() {}
 function stopTicker() {}
 
+// --- HUGGING FACE GRADIO CLOUD HANDOVER HELPERS ---
+
+async function callGradioApi(fnName, dataArr) {
+    try {
+        const resp = await fetch('https://trungm-quinloverin.hf.space/gradio_api/call/' + fnName, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data: dataArr }),
+            signal: AbortSignal.timeout(4000)
+        });
+        if (!resp.ok) return null;
+        const j = await resp.json();
+        if (!j.event_id) return null;
+        const streamResp = await fetch('https://trungm-quinloverin.hf.space/gradio_api/call/' + fnName + '/' + j.event_id, {
+            signal: AbortSignal.timeout(4000)
+        });
+        const text = await streamResp.text();
+        const match = text.match(/data:\s*\[(.*?)\]/);
+        return match ? JSON.parse('[' + match[1] + ']')[0] : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+async function checkHfMode() {
+    return await callGradioApi('get_mode', []);
+}
+
+async function setHfMode(mode) {
+    return await callGradioApi('set_mode', [mode]);
+}
+
 // --- HANDLE DISCONNECT & CLOUD HANDOVER ---
 
 async function handleDisconnectCloud() {
@@ -168,37 +202,47 @@ async function handleDisconnectCloud() {
     promptMsgId = null;
     currentWorkingMsgId = null;
 
-    const handoverText = `☁️ <b>[ĐÃ NGẮT KẾT NỐI VỚI PC - BÀN GIAO CHO HUGGING FACE CLOUD 24/7]</b>\n──────────────────────\n🖥️ <b>Máy tính:</b> Đã ngưng tiếp nhận lệnh trực tiếp (Chế độ Chờ)\n🌐 <b>Hugging Face Cloud (Gemini 3.8 Flash):</b> ĐÃ TIẾP QUẢN 24/7!\n\n✨ Giờ bro có thể chat, yêu cầu code hoặc commit file ngay cả khi máy tính tắt nguồn!\n\n👉 Khi muốn kết nối lại máy tính, chỉ cần gõ <code>/pc</code> hoặc nhập mã PIN <code>2726</code>.`;
+    const handoverText = `☁️ <b>[ĐÃ NGẮT KẾT NỐI VỚI PC - BÀN GIAO CHO HUGGING FACE CLOUD 24/7]</b>\n──────────────────────\n🖥️ <b>Máy tính:</b> Đã ngưng tiếp nhận lệnh trực tiếp (Chế độ Chờ)\n🌐 <b>Hugging Face Cloud (Gemini 3.5 Flash):</b> ĐÃ TIẾP QUẢN 24/7!\n\n✨ Giờ bro có thể chat, yêu cầu code hoặc commit file ngay cả khi máy tính tắt nguồn!\n\n👉 Khi muốn kết nối lại máy tính, chỉ cần gõ <code>/pc</code> hoặc nhập mã PIN <code>2726</code>.`;
     await sendMsg(activeChatId, handoverText, activeThreadId, 'HTML', { inline_keyboard: [] });
 
     try {
         await tgApiRaw('deleteWebhook');
-        await fetch('https://trungm-quinloverin.hf.space/force-cloud').catch(() => {});
+        await setHfMode('cloud');
         console.log('[Bridge Disconnect] Đã gỡ webhook và kích hoạt Hugging Face tiếp quản 24/7!');
     } catch (e) {}
 }
 
 // --- HANDLE CANCEL ACTION ---
 
-async function handleCancelAction(source = 'button') {
-    console.log(`[Bridge Action] Hủy tác vụ (${source})`);
-    currentPhase = 'CANCELED';
+async function handleEmergencyCancel(chatId, threadId, source = '/cancel') {
+    console.log(`[Bridge Action] 🛑 KÍCH HOẠT LỆNH HỦY KHẨN CẤP /CANCEL (${source})`);
+    
+    // 1. Dọn sạch hàng đợi (Queue)
+    const clearedQueueCount = clearQueue();
+    
+    // 2. Chuyển trạng thái về IDLE ngay lập tức để sẵn sàng nhận lệnh mới
+    currentPhase = 'IDLE';
     stopTicker();
 
+    // 3. Tua nhanh transcript watcher để bỏ qua mọi phản hồi cũ
     if (transcriptWatcher) {
         transcriptWatcher.fastForward();
     }
 
-    await clearAllCancelButtons(activeChatId, tempMsgIds);
+    // 4. Xóa toàn bộ nút bấm hủy cũ trên Telegram
+    await clearAllCancelButtons(chatId || activeChatId, tempMsgIds);
 
+    // 5. Gửi tín hiệu cancel cho worker ngầm BAT
     sendViaBat({
         action: 'cancel',
-        chat_id: activeChatId,
-        message_thread_id: activeThreadId
+        chat_id: chatId || activeChatId,
+        message_thread_id: threadId || activeThreadId
     });
 
-    forwardToAntigravity(conversationId, `[LỆNH HỦY TỪ ĐIỆN THOẠI]: Người dùng đã yêu cầu dừng/hủy tác vụ hiện tại. Ngừng ngay lập tức mọi hoạt động.`);
+    // 6. Phát tín hiệu ưu tiên tối cao vào Antigravity PC
+    forwardToAntigravity(conversationId, `[LỆNH HỦY KHẨN CẤP /CANCEL TỪ ĐIỆN THOẠI]: Người dùng đã phát lệnh /cancel ưu tiên tối cao nhất! Hãy dừng ngay lập tức mọi tác vụ, hủy bỏ toàn bộ tiến trình ngầm và chuyển sang trạng thái IDLE sẵn sàng đón yêu cầu mới.`);
 
+    // 7. Dọn dẹp toàn bộ biến tạm
     const toClean = [...tempMsgIds];
     tempMsgIds = [];
     promptMsgId = null;
@@ -213,8 +257,70 @@ async function handleCancelAction(source = 'button') {
     lastWorkingBubbleText = '';
 
     if (toClean.length > 0) {
-        runCountdownCleanup(activeChatId, activeThreadId, toClean);
+        runCountdownCleanup(chatId || activeChatId, threadId || activeThreadId, toClean);
     }
+
+    // 8. Bắn phản hồi xác nhận khẩn cấp về Telegram Topic
+    const targetChat = chatId || activeChatId;
+    const targetThread = threadId || activeThreadId;
+    const cancelNotice = `🛑 <b>[LỆNH ƯU TIÊN CAO NHẤT: /CANCEL]</b>\n──────────────────────\n✅ <b>ĐÃ CƯỠNG CHẾ DỪNG TOÀN BỘ THÀNH CÔNG!</b>\n\n• 🛑 <b>Tác vụ đang chạy:</b> Đã ngắt ngay lập tức.\n• 🧹 <b>Hàng đợi (Queue):</b> Đã dọn sạch (${clearedQueueCount} prompt chờ).\n• 🔄 <b>Tiến trình máy tính:</b> Đã reset về trạng thái <b>SẴN SÀNG (IDLE)</b>.\n• ⚡ <b>AI Cầu Nối:</b> Đã ngắt lệnh chờ, bro gửi yêu cầu mới được ngay!`;
+
+    await sendMsg(targetChat, cancelNotice, targetThread, 'HTML');
+}
+
+async function handleCancelAction(source = 'button') {
+    return await handleEmergencyCancel(activeChatId, activeThreadId, source);
+}
+
+// --- REMOTE CMD CONTROLLER (ĐIỀU KHIỂN TERMINAL TỪ XA CHO MÁY MỚI / QUÁN NET) ---
+
+function executeRemoteCmd(chatId, threadId, command, isBackground = false) {
+    if (!command || !command.trim()) {
+        return sendMsg(chatId, '⚠️ Vui lòng nhập lệnh sau <code>/cmd</code> (Ví dụ: <code>/cmd dir</code> hoặc <code>/cmd git status</code>)', threadId);
+    }
+    const cleanCmd = command.trim();
+    console.log(`[Remote CMD] Thực thi (${isBackground ? 'Background' : 'Sync'}): ${cleanCmd}`);
+
+    if (isBackground) {
+        try {
+            const child = spawn('cmd.exe', ['/c', cleanCmd], {
+                cwd: rootDir,
+                detached: true,
+                stdio: 'ignore'
+            });
+            child.unref();
+            return sendMsg(
+                chatId,
+                `⚡ <b>[ĐÃ KHỞI CHẠY TIẾN TRÌNH NGẦM]</b>\n──────────────────────\n💻 <b>Lệnh:</b> <code>${escapeHtml(cleanCmd)}</code>\n🆔 <b>PID:</b> <code>${child.pid || 'Active'}</code>\n📂 <b>Thư mục:</b> <code>${escapeHtml(rootDir)}</code>\n<i>Tiến trình đang chạy ngầm độc lập, không chặn các lệnh khác!</i>`,
+                threadId
+            );
+        } catch (e) {
+            return sendMsg(chatId, `❌ Lỗi khởi chạy tiến trình ngầm: ${escapeHtml(e.message)}`, threadId);
+        }
+    }
+
+    sendTyping(chatId, threadId);
+    const startTime = Date.now();
+    exec(cleanCmd, { cwd: rootDir, timeout: 30000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        let output = (stdout || '').trim();
+        if (stderr && stderr.trim()) {
+            output += (output ? '\n' : '') + '[STDERR]: ' + stderr.trim();
+        }
+        if (!output && err) {
+            output = '[LỖI]: ' + err.message;
+        }
+        if (!output) {
+            output = '(Lệnh đã thực thi thành công nhưng không có dữ liệu trả về)';
+        }
+
+        if (output.length > 3500) {
+            output = output.substring(0, 3500) + '\n... [Đã cắt ngắn bớt nội dung vượt quá giới hạn]';
+        }
+
+        const reply = `💻 <b>[CMD OUTPUT]</b> (⏱️ ${elapsed}s)\n<pre><code>${escapeHtml(output)}</code></pre>`;
+        sendMsg(chatId, reply, threadId, 'HTML');
+    });
 }
 
 // --- START PROMPT EXECUTION HELPER ---
@@ -385,8 +491,25 @@ async function pollUpdates() {
         try {
             // 👉 KIỂM TRA CHẾ ĐỘ CLOUD STANDBY
             if (isCloudStandby) {
-                await new Promise(r => setTimeout(r, 4000));
-                continue;
+                const wakeSignal = path.join(rootDir, 'wake_pc.signal');
+                if (fs.existsSync(wakeSignal)) {
+                    try { fs.unlinkSync(wakeSignal); } catch (e) {}
+                    isCloudStandby = false;
+                    console.log('[Bridge Wakeup] ⚡ Đã nhận tín hiệu cưỡng chế kết nối lại từ PC! Tiếp quản Telegram ngay lập tức!');
+                    await sendMsg(activeChatId, '🖥️ <b>[PC LOCAL BRIDGE - SẴN SÀNG]</b>\n──────────────────────\nPC đã thức tỉnh và tiếp quản kết nối Telegram thành công!', activeThreadId);
+                } else {
+                    try {
+                        const hfMode = await checkHfMode();
+                        if (hfMode === 'pc') {
+                            isCloudStandby = false;
+                            console.log('[Bridge Wakeup] ⚡ Hugging Face đã bàn giao lại cho PC! Tiếp quản Telegram ngay lập tức!');
+                            await sendMsg(activeChatId, '🖥️ <b>[PC LOCAL BRIDGE - TIẾP QUẢN THÀNH CÔNG]</b>\n──────────────────────\nPC đã nhận lệnh bàn giao từ Cloud và kết nối sẵn sàng 100%!', activeThreadId);
+                            continue;
+                        }
+                    } catch (e) {}
+                    await new Promise(r => setTimeout(r, 2000));
+                    continue;
+                }
             }
 
             const res = await tgApiRaw('getUpdates', { offset: pollOffset, timeout: 8 });
@@ -483,6 +606,7 @@ async function pollUpdates() {
                                 tempMsgIds = [];
                                 promptMsgId = null;
                                 activeThreadId = (cb.message && cb.message.message_thread_id) || activeThreadId || 1160;
+                                launchOrFocusAntigravity();
                                 await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: '✅ Mã chính xác! Đang kết nối...' });
                                 const successText = `⚡ <b>[ĐÃ KẾT NỐI QUA MÃ PIN ${verifiedCode} THÀNH CÔNG!]</b>\n──────────────────────\n🖥️ <b>Cửa sổ Antigravity PC:</b> SẴN SÀNG 100%\n🚀 <b>Kênh làm việc:</b> Topic ${activeThreadId}\n🔗 <b>Mã định danh:</b> <code>GM_${verifiedCode}_Mthu</code>\n✨ Đã cưỡng chế kết nối máy tính thành công! Bro gửi yêu cầu code hoặc ảnh ngay bây giờ nhé!`;
                                 await editMsg(chatId, cb.message.message_id, successText, 'HTML', { inline_keyboard: [] }, true);
@@ -667,9 +791,39 @@ async function pollUpdates() {
                         continue;
                     }
 
-                    // Xử lý lệnh hủy nhanh
-                    if (/^(?:\/cancel|stop|hủy|dừng|dừng lại)$/i.test(userText)) {
-                        await handleCancelAction(isEdit ? 'Edit message to STOP' : 'Text STOP');
+                    // 🛑 LỆNH ƯU TIÊN CAO NHẤT: /CANCEL (HỦY TOÀN BỘ TIẾN TRÌNH & HÀNG ĐỢI)
+                    if (/^(?:\/cancel|\/cancel_all|\/stop|\/kill|\/abort|hủy|dừng|dừng lại)(?:\s.*)?$/i.test(userText.trim())) {
+                        await handleEmergencyCancel(chatId, threadId, isEdit ? 'Edit message to /cancel' : userText.trim());
+                        continue;
+                    }
+
+                    // 🖥️ LỆNH BẬT / MỞ CỬA SỔ ANTIGRAVITY TRÊN MÁY TÍNH
+                    if (/^(?:\/antigravity|\/open_antigravity|\/open|\/app|bật antigravity|mở antigravity|bật app|mở app)(?:\s.*)?$/i.test(userText.trim())) {
+                        const launchResult = launchOrFocusAntigravity();
+                        const actionDesc = launchResult === 'LAUNCHED' 
+                            ? 'Đã khởi chạy ứng dụng Antigravity IDE mới trên PC!' 
+                            : 'Đã kích hoạt và đưa cửa sổ Antigravity lên phía trước màn hình!';
+                        await sendMsg(
+                            chatId,
+                            `🖥️ <b>[ĐÃ MỞ CỬA SỔ ANTIGRAVITY TRÊN PC]</b>\n──────────────────────\n✅ <b>${actionDesc}</b>\n⚡ Cầu nối IPC đã đồng bộ hóa 100% với Antigravity PC.\n🚀 Bro gửi prompt hoặc yêu cầu code là AI nhận ngay lập tức!`,
+                            threadId
+                        );
+                        continue;
+                    }
+
+                    // 💻 LỆNH ĐIỀU KHIỂN REMOTE CMD / TERMINAL TRÊN MÁY TÍNH (CHO QUÁN NET / PC MỚI)
+                    const cmdMatch = userText.trim().match(/^(?:\/cmd|\/sh|\/exec|\/terminal)(?:\s+([\s\S]+))?$/i);
+                    if (cmdMatch) {
+                        const commandToRun = cmdMatch[1];
+                        executeRemoteCmd(chatId, threadId, commandToRun, false);
+                        continue;
+                    }
+
+                    // ⚡ LỆNH SINH TIẾN TRÌNH CMD CHẠY NGẦM (SPAWN SUB-PROCESS)
+                    const spawnMatch = userText.trim().match(/^(?:\/spawn|\/cmd_bg|\/bg)(?:\s+([\s\S]+))?$/i);
+                    if (spawnMatch) {
+                        const commandToRun = spawnMatch[1];
+                        executeRemoteCmd(chatId, threadId, commandToRun, true);
                         continue;
                     }
 
@@ -679,6 +833,7 @@ async function pollUpdates() {
                         if (lobby.verifyProjectPin(code, threadId)) {
                             waitingForPairCode = false;
                             isCloudStandby = false;
+                            launchOrFocusAntigravity();
                             forwardToAntigravity(conversationId, `[LỆNH CƯỠNG CHẾ KẾT NỐI LẠI]: Người dùng đã nhập đúng mã PIN ${code} từ Telegram. Đồng bộ tức thì với cửa sổ Antigravity PC.`);
                             await sendMsg(
                                 chatId,
@@ -717,6 +872,7 @@ async function pollUpdates() {
                             stopTicker();
                             tempMsgIds = [];
                             promptMsgId = null;
+                            launchOrFocusAntigravity();
 
                             forwardToAntigravity(conversationId, `[LỆNH CƯỠNG CHẾ KẾT NỐI LẠI]: Người dùng yêu cầu đồng bộ tức thì qua mã PIN ${providedCode}. Cửa sổ Antigravity PC đã kết nối sẵn sàng 100%.`);
 
@@ -805,7 +961,7 @@ async function restoreCloudOnExit(reason) {
     console.log(`[Bridge Exit] Tiến trình kết thúc (${reason}), tự động chuyển giao cho Hugging Face Cloud 24/7...`);
     try {
         await tgApiRaw('deleteWebhook');
-        await fetch('https://trungm-quinloverin.hf.space/force-cloud').catch(() => {});
+        await setHfMode('cloud');
         console.log('[Bridge Exit] Đã bàn giao Hugging Face Cloud thành công!');
     } catch (e) {
         console.error('[Bridge Exit Error]:', e.message);
@@ -816,10 +972,14 @@ process.on('SIGINT', async () => { await restoreCloudOnExit('SIGINT'); process.e
 process.on('SIGTERM', async () => { await restoreCloudOnExit('SIGTERM'); process.exit(0); });
 process.on('beforeExit', async () => { await restoreCloudOnExit('beforeExit'); });
 
-// Gửi nhịp tim định kỳ tới Hugging Face Space để báo PC vẫn đang online
-setInterval(() => {
+// Khởi động: Đặt Hugging Face sang chế độ 'pc' và bắt đầu gửi nhịp tim định kỳ
+setHfMode('pc').catch(() => {});
+
+setInterval(async () => {
     if (!isCloudStandby) {
-        fetch('https://trungm-quinloverin.hf.space/heartbeat').catch(() => {});
+        try {
+            await setHfMode('heartbeat');
+        } catch (e) {}
     }
 }, 25000);
 
