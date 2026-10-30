@@ -59,8 +59,43 @@ if ($hasNode) {
 
 Write-Host ""
 
-# --- BƯỚC 3: KIỂM TRA ANTIGRAVITY ---
-Write-Host "🔍 [Bước 3/4] Đang kiểm tra Antigravity IDE..." -ForegroundColor Green
+# --- BƯỚC 3: KIỂM TRA TRÌNH DUYỆT (CHROME, EDGE, BRAVE, FIREFOX) ---
+Write-Host "🌐 [Bước 3/5] Đang kiểm tra các trình duyệt web trên máy..." -ForegroundColor Green
+$chromePaths = @("$env:ProgramFiles\Google\Chrome\Application\chrome.exe", "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe", "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe", "D:\Browsers\Chrome\chrome.exe")
+$hasChrome = $false
+foreach ($cp in $chromePaths) { if (Test-Path $cp) { $hasChrome = $true; break } }
+
+$edgePaths = @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe", "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe")
+$hasEdge = $false
+foreach ($ep in $edgePaths) { if (Test-Path $ep) { $hasEdge = $true; break } }
+
+if ($hasChrome) {
+    Write-Host "   ✅ Đã tìm thấy Google Chrome" -ForegroundColor Green
+} elseif ($hasEdge) {
+    Write-Host "   ✅ Đã tìm thấy Microsoft Edge" -ForegroundColor Green
+} else {
+    Write-Host "   ⚠️ Máy này CHƯA CÀI Chrome hoặc Edge!" -ForegroundColor Yellow
+}
+
+if (-not $hasChrome) {
+    $installChrome = Read-Host "   👉 Máy chưa có Google Chrome. Bro có muốn tự động cài Chrome không? (Y/n) [Mặc định Y]"
+    if ($installChrome -ne 'n' -and $installChrome -ne 'N') {
+        $brTargetDrive = Read-Host "   👉 Chọn ổ đĩa cài đặt Chrome ([D] để chống đóng băng ở quán net | [C] Mặc định) [Mặc định D]"
+        $locParam = if ($brTargetDrive -eq 'C' -or $brTargetDrive -eq 'c') { "" } else { '--location "D:\Browsers\Chrome"' }
+        Write-Host "   ⏳ Đang cài đặt Google Chrome qua winget..." -ForegroundColor Yellow
+        try {
+            Invoke-Expression "winget install --id Google.Chrome -e $locParam --accept-source-agreements --accept-package-agreements --silent"
+            Write-Host "   ✅ Cài đặt Google Chrome thành công!" -ForegroundColor Green
+        } catch {
+            Write-Host "   ⚠️ Không thể cài Chrome tự động qua winget." -ForegroundColor Yellow
+        }
+    }
+}
+
+Write-Host ""
+
+# --- BƯỚC 4: KIỂM TRA ANTIGRAVITY ---
+Write-Host "🔍 [Bước 4/5] Đang kiểm tra Antigravity IDE..." -ForegroundColor Green
 $antigravityPath = "$env:LOCALAPPDATA\Programs\antigravity\Antigravity.exe"
 if (Test-Path $antigravityPath) {
     Write-Host "   ✅ Đã tìm thấy Antigravity IDE tại: $antigravityPath" -ForegroundColor Green
@@ -77,7 +112,7 @@ if (Test-Path $antigravityPath) {
 Write-Host ""
 
 # --- BƯỚC 4: HỎI USER Ổ ĐĨA & THƯ MỤC CÀI ĐẶT ---
-Write-Host "📂 [Bước 4/4] Chọn ổ đĩa & thư mục cài đặt dự án..." -ForegroundColor Green
+Write-Host "📂 [Bước 5/5] Chọn ổ đĩa & thư mục cài đặt dự án..." -ForegroundColor Green
 Write-Host "   Các ổ đĩa khả dụng trên máy này:" -ForegroundColor Cyan
 $volumes = Get-Volume | Where-Object { $_.DriveLetter -and $_.DriveType -eq 'Fixed' }
 $defaultDrive = "D:"

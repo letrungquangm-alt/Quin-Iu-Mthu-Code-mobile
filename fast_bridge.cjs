@@ -31,6 +31,11 @@ const {
     launchOrFocusAntigravity
 } = require('./lib/ipc.cjs');
 
+const { takeScreenshot, sendScreenshot } = require('./lib/screen.cjs');
+const { sendScreenVideo, recordScreen } = require('./lib/recorder.cjs');
+const { checkInstalledBrowsers, getBrowserInstallMarkup, installBrowserAsync } = require('./lib/installer.cjs');
+const { openWebOrApp, getActiveWindowsSummary, URL_SHORTCUTS, APP_SHORTCUTS } = require('./lib/launcher.cjs');
+
 const { createTranscriptWatcher } = require('./lib/transcript.cjs');
 const { formatToolCall } = require('./lib/formatter.cjs');
 const { getPinDisplay, getKeypadMarkup } = require('./lib/numpad.cjs');
@@ -535,6 +540,51 @@ async function pollUpdates() {
                         const chatId = cb.message && cb.message.chat ? cb.message.chat.id : activeChatId;
                         const cbThreadId = (cb.message && cb.message.message_thread_id) ? cb.message.message_thread_id : null;
                         activeChatId = chatId;
+
+                        // K. XỬ LÝ CÀI ĐẶT TRÌNH DUYỆT TỰ ĐỘNG
+                        if (cbData.startsWith('inst_br:')) {
+                            const parts = cbData.split(':');
+                            const brName = parts[1] || 'chrome';
+                            const drive = parts[2] || 'D';
+                            await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: `⏳ Đang cài ${brName} vào ổ ${drive}:...` });
+                            await editMsg(
+                                chatId,
+                                cb.message.message_id,
+                                `⏳ <b>[ĐANG TỰ ĐỘNG CÀI ĐẶT ${brName.toUpperCase()}]</b>\n──────────────────────\n📁 Nơi cài: <b>Ổ ${drive}: (D:\\Browsers\\${brName})</b>\n⚡ Hệ thống đang chạy trình cài đặt ngầm qua winget...\n<i>(Quá trình mất 30s - 1 phút, bot sẽ thông báo ngay khi hoàn tất!)</i>`,
+                                'HTML',
+                                { inline_keyboard: [] },
+                                true
+                            );
+
+                            installBrowserAsync(brName, drive).then(async (res) => {
+                                if (res.ok) {
+                                    await sendMsg(
+                                        chatId,
+                                        `✅ <b>[CÀI ĐẶT ${brName.toUpperCase()} THÀNH CÔNG!]</b>\n──────────────────────\n🚀 Trình duyệt đã được cài vào <b>${drive}:\\Browsers\\${brName}</b> an toàn!\n👉 Giờ bro có thể gõ <code>mở ${brName}</code> hoặc <code>mở youtube</code> là mở ngay lập tức!\n📸 <i>Đang mở trình duyệt mới và chụp lại màn hình...</i>`,
+                                        cbThreadId
+                                    );
+                                    openWebOrApp('https://www.google.com', brName);
+                                    setTimeout(async () => {
+                                        try {
+                                            await sendScreenshot(botToken, chatId, cbThreadId, `📸 <b>[MÀN HÌNH SAU KHI CÀI ${brName.toUpperCase()}]</b>`);
+                                        } catch (e) {}
+                                    }, 3000);
+                                } else {
+                                    await sendMsg(
+                                        chatId,
+                                        `⚠️ <b>[CÀI ĐẶT ${brName.toUpperCase()} THẤT BẠI]</b>\nLỗi: <code>${escapeHtml(res.error || 'winget failed')}</code>\nBro có thể dùng lệnh <code>/cmd winget install ${brName}</code> để kiểm tra thêm!`,
+                                        cbThreadId
+                                    );
+                                }
+                            });
+                            continue;
+                        }
+
+                        if (cbData === 'inst_cancel') {
+                            await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: 'Đã hủy cài đặt trình duyệt' });
+                            await editMsg(chatId, cb.message.message_id, `❌ <i>Đã hủy cài đặt trình duyệt.</i>`, 'HTML', { inline_keyboard: [] }, true);
+                            continue;
+                        }
                         activeThreadId = cbThreadId;
 
                         const isAllowed = allowedList.includes(Number(chatId)) || allowedList.includes(Number(fromId));
@@ -797,6 +847,56 @@ async function pollUpdates() {
                         continue;
                     }
 
+                    // 🎥 LỆNH QUAY VIDEO MÀN HÌNH MÁY TÍNH / TRÌNH DUYỆT (RECORDING)
+                    const recordMatch = userText.trim().match(/^(?:\/record|\/quay|\/video|quay màn hình|ghi màn hình|quay video|record|quay clip|quay trình duyệt)(?:\s+(\d+))?$/i);
+                    if (recordMatch) {
+                        const sec = parseInt(recordMatch[1] || '4', 10);
+                        const safeSec = Math.min(10, Math.max(2, sec));
+                        await sendMsg(chatId, `🎥 <b>[ĐANG QUAY VIDEO MÀN HÌNH PC ${safeSec}s...]</b>\n<i>Đang chụp chuỗi khung hình thực tế & ghép thành video MP4 H.264...</i>`, threadId);
+                        const winSummary = getActiveWindowsSummary();
+                        const caption = `🎥 <b>[VIDEO QUAY MÀN HÌNH MÁY TÍNH THỰC TẾ]</b>\n──────────────────────\n⏱️ <b>Thời lượng:</b> ${safeSec} giây\n🕒 <b>Thời gian:</b> ${new Date().toLocaleTimeString('vi-VN')}\n📋 <b>Cửa sổ:</b> ${winSummary}\n\n💡 <i>Video MP4 chạy mượt trực tiếp trên Telegram!</i>`;
+                        const recRes = await sendScreenVideo(botToken, chatId, threadId, caption, safeSec);
+                        if (!recRes.ok) {
+                            await sendMsg(chatId, `⚠️ Không thể gửi video quay màn hình: ${recRes.error || recRes.description}`, threadId);
+                        }
+                        continue;
+                    }
+
+                    // 🛠️ LỆNH TỰ ĐỘNG CÀI TRÌNH DUYỆT (CHROME / BRAVE / FIREFOX)
+                    const installBrMatch = userText.trim().match(/^(?:cài|cài đặt|install)\s+(?:trình duyệt\s+)?(chrome|brave|firefox|edge)(?:\s+(?:ổ\s+)?([a-zA-Z]))?$/i)
+                        || userText.trim().match(/^(?:\/install_browser|\/cai_browser)\s+(chrome|brave|firefox|edge)(?:\s+([a-zA-Z]))?$/i);
+                    if (installBrMatch) {
+                        const br = installBrMatch[1].toLowerCase();
+                        const drive = (installBrMatch[2] || 'D').toUpperCase();
+                        await sendMsg(
+                            chatId,
+                            `⏳ <b>[BẮT ĐẦU CÀI ĐẶT ${br.toUpperCase()}]</b>\n──────────────────────\n📁 Nơi cài: <b>Ổ ${drive}: (D:\\Browsers\\${br})</b>\n⚡ Đang thực thi cài đặt ngầm qua winget...\n<i>(Quá trình mất 30s - 1 phút, bot sẽ báo ngay khi xong!)</i>`,
+                            threadId
+                        );
+                        installBrowserAsync(br, drive).then(async (res) => {
+                            if (res.ok) {
+                                await sendMsg(
+                                    chatId,
+                                    `✅ <b>[CÀI ĐẶT ${br.toUpperCase()} THÀNH CÔNG!]</b>\n🚀 Trình duyệt đã được cài vào <b>${drive}:\\Browsers\\${br}</b> an toàn!\n👉 Gõ <code>mở ${br}</code> hoặc <code>mở youtube</code> là mở ngay!\n📸 <i>Đang mở thử và chụp màn hình gửi bro...</i>`,
+                                    threadId
+                                );
+                                openWebOrApp('https://www.google.com', br);
+                                setTimeout(async () => {
+                                    try {
+                                        await sendScreenshot(botToken, chatId, threadId, `📸 <b>[MÀN HÌNH SAU KHI CÀI ${br.toUpperCase()}]</b>`);
+                                    } catch (e) {}
+                                }, 3000);
+                            } else {
+                                await sendMsg(
+                                    chatId,
+                                    `⚠️ <b>[CÀI ĐẶT ${br.toUpperCase()} THẤT BẠI]</b>\nLỗi: <code>${escapeHtml(res.error || 'winget error')}</code>`,
+                                    threadId
+                                );
+                            }
+                        });
+                        continue;
+                    }
+
                     // 📸 LỆNH CHỤP / ĐỌC MÀN HÌNH MÁY TÍNH TỪ XA
                     if (/^(?:\/screen|\/screenshot|\/chup|\/snap|chụp màn hình|xem màn hình|đọc màn hình|màn hình đâu|chụp ảnh màn hình)(?:\s.*)?$/i.test(userText.trim())) {
                         await sendMsg(chatId, `📸 <b>[ĐANG CHỤP MÀN HÌNH MÁY TÍNH...]</b>\n<i>Đang chụp ảnh thực tế từ màn hình PC của bro...</i>`, threadId);
@@ -816,8 +916,24 @@ async function pollUpdates() {
 
                     if (isGenericBrowser || (webMatch && !/^(?:antigravity|ide)$/i.test(webMatch[1].trim()))) {
                         const rawTarget = isGenericBrowser ? 'google' : (webMatch[1] || 'google').trim();
-                        const browser = (webMatch && webMatch[2]) ? webMatch[2] : 'default';
+                        const browser = (webMatch && webMatch[2]) ? webMatch[2].toLowerCase() : 'default';
                         const profile = (webMatch && webMatch[3]) ? webMatch[3] : null;
+
+                        // Kiểm tra nếu người dùng yêu cầu trình duyệt cụ thể nhưng chưa có trên máy
+                        const brInstalled = checkInstalledBrowsers();
+                        if (browser !== 'default' && !brInstalled[browser]) {
+                            await sendMsg(
+                                chatId,
+                                `⚠️ <b>[CHƯA CÓ TRÌNH DUYỆT ${browser.toUpperCase()} TRÊN MÁY]</b>\n──────────────────────\nℹ️ Hệ thống phát hiện máy tính chưa cài đặt trình duyệt <b>${browser}</b>.\n\n👉 <b>Bro có muốn tự động cài ${browser} không?</b>\nChọn nơi cài đặt bên dưới (khuyên dùng ổ D: ở quán net để tránh đóng băng):`,
+                                threadId,
+                                'HTML',
+                                getBrowserInstallMarkup(browser)
+                            );
+                            continue;
+                        }
+
+                        // Kiểm tra nếu người dùng muốn kèm quay video
+                        const wantsVideo = /(?:và quay|quay lại|quay video|record|quay clip)/i.test(userText);
 
                         const result = openWebOrApp(rawTarget, browser, profile);
                         await sendMsg(
@@ -826,11 +942,16 @@ async function pollUpdates() {
                             threadId
                         );
 
-                        // Tự động chụp và gửi ảnh màn hình sau 2.5s
+                        // Tự động chụp hoặc quay video màn hình sau 2.5s
                         setTimeout(async () => {
                             try {
-                                const shotCaption = `📸 <b>[KẾT QUẢ MÀN HÌNH SAU KHI MỞ]</b>\n──────────────────────\n👉 Đã mở: <b>${rawTarget}</b>\n⏱️ <b>Thời gian:</b> ${new Date().toLocaleTimeString('vi-VN')}`;
-                                await sendScreenshot(botToken, chatId, threadId, shotCaption);
+                                if (wantsVideo) {
+                                    const shotCaption = `🎥 <b>[VIDEO QUAY MÀN HÌNH SAU KHI MỞ]</b>\n──────────────────────\n👉 Đã mở: <b>${rawTarget}</b>\n⏱️ <b>Thời gian:</b> ${new Date().toLocaleTimeString('vi-VN')}`;
+                                    await sendScreenVideo(botToken, chatId, threadId, shotCaption, 4);
+                                } else {
+                                    const shotCaption = `📸 <b>[KẾT QUẢ MÀN HÌNH SAU KHI MỞ]</b>\n──────────────────────\n👉 Đã mở: <b>${rawTarget}</b>\n⏱️ <b>Thời gian:</b> ${new Date().toLocaleTimeString('vi-VN')}`;
+                                    await sendScreenshot(botToken, chatId, threadId, shotCaption);
+                                }
                             } catch (e) {}
                         }, 2500);
 
