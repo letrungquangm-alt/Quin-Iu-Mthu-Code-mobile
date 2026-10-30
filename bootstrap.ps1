@@ -1,12 +1,12 @@
 # ========================================================
-# QUINLOVERIN DIRECT CMD CONNECTOR - PROTOCOL gm_xxx-yyy_mthu
+# QUINLOVERIN NET ONBOARDING - PROTOCOL gm_xxx-yyy_mthu
 # ========================================================
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
 Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Cyan
-Write-Host " 🚀 QUINLOVERIN DIRECT CMD CONNECTOR (GIAO THỨC MÁY PHỤ)   " -ForegroundColor Yellow
+Write-Host " 🚀 QUINLOVERIN NET ONBOARDING (GM-TELE ĐẦU NÃO)          " -ForegroundColor Yellow
 Write-Host " Kết nối máy net / máy mới thẳng với Cloudflare & Telegram " -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host ""
@@ -15,8 +15,6 @@ $workerUrl = "https://quin-iu-mthu-code-mobile.letrungquangm.workers.dev"
 
 # 1. Khởi tạo mã CMD ngẫu nhiên 3 số
 $cmdCode = (Get-Random -Minimum 100 -Maximum 999).ToString()
-Write-Host "🔢 Mã ngẫu nhiên từ CMD: " -NoNewline
-Write-Host "[$cmdCode]" -ForegroundColor Green
 
 # 2. Đăng ký lệnh 'quinloverin' toàn cục vào máy
 $binDir = "$env:USERPROFILE\.quinloverin"
@@ -27,32 +25,50 @@ $currentPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
 if ($currentPath -notlike "*$binDir*") {
     [System.Environment]::SetEnvironmentVariable("Path", "$currentPath;$binDir", "User")
     $env:Path += ";$binDir"
-    Write-Host "✨ Đã ghim lệnh 'quinloverin' vào CMD hệ thống!" -ForegroundColor Gray
+    Write-Host "✨ Đã ghim lệnh 'quinloverin' vào hệ thống!" -ForegroundColor Gray
 }
 
-# 3. Gửi Handshake bắt tay với Cloudflare
-Write-Host "📡 Đang gửi tín hiệu kết nối lên Telegram qua Cloud..." -ForegroundColor Yellow
-$handshakeBody = @{
+# 3. Gửi thông tin về Cloudflare để sẵn sàng cho Lobby
+$regBody = @{
     cmd_code = $cmdCode
     hostname = $env:COMPUTERNAME
     drive = (Get-Location).Drive.Name + ":"
 } | ConvertTo-Json
 
 try {
-    $resp = Invoke-RestMethod -Uri "$workerUrl/net/handshake" -Method POST -Body $handshakeBody -ContentType "application/json" -TimeoutSec 15
-    $sessionId = $resp.session_id
-    $teleCode = $resp.tele_code
+    $resp = Invoke-RestMethod -Uri "$workerUrl/net/register" -Method POST -Body $regBody -ContentType "application/json" -TimeoutSec 15
+    Write-Host "==========================================================" -ForegroundColor Yellow
+    Write-Host " 📡 ĐÃ GỬI THÔNG TIN VỀ GM-TELE (ĐẦU NÃO)" -ForegroundColor Green
+    Write-Host " 👉 Bro hãy vào Sảnh (Lobby) bấm nút [Connect Net]" -ForegroundColor Cyan
+    Write-Host "    và nhập mã này: " -NoNewline
+    Write-Host "[$cmdCode]" -ForegroundColor Green
+    Write-Host "==========================================================" -ForegroundColor Yellow
+    Write-Host ""
 
-    Write-Host ""
-    Write-Host "==========================================================" -ForegroundColor Green
-    Write-Host " ✅ ĐÃ BẮT TAY KẾT NỐI VỚI TELEGRAM THÀNH CÔNG!" -ForegroundColor Green
-    Write-Host " 📱 Mã Telegram trả về: " -NoNewline
-    Write-Host "[$teleCode]" -ForegroundColor Cyan
-    Write-Host " 🔑 MÃ GHÉP ĐÔI HOÀN CHỈNH: " -NoNewline
-    Write-Host "$sessionId" -ForegroundColor Yellow
-    Write-Host "==========================================================" -ForegroundColor Green
-    Write-Host "✨ Điện thoại đã nhận được thông báo xác thực phiên $sessionId!" -ForegroundColor Gray
-    Write-Host ""
+    # Chờ user nhập mã 3 số từ tin nhắn riêng của Bot gửi về
+    $inputTele = Read-Host "🔑 Nhập mã 3 chữ số từ Telegram gửi riêng về để kết nối"
+    $inputTele = $inputTele.Trim()
+
+    # Gửi xác thực
+    $verifyBody = @{
+        cmd_code = $cmdCode
+        tele_code = $inputTele
+    } | ConvertTo-Json
+
+    $vResp = Invoke-RestMethod -Uri "$workerUrl/net/verify" -Method POST -Body $verifyBody -ContentType "application/json" -TimeoutSec 15
+    if ($vResp.ok) {
+        $sessionId = $vResp.session_id
+        Write-Host ""
+        Write-Host "==========================================================" -ForegroundColor Green
+        Write-Host " ✅ XÁC THỰC THÀNH CÔNG RỰC RỠ!" -ForegroundColor Green
+        Write-Host " 🔑 MÃ LIÊN KẾT PHIÊN: " -NoNewline
+        Write-Host "$sessionId" -ForegroundColor Yellow
+        Write-Host " 🌐 Đã liên kết với Topic dự án trên Telegram qua Cloud 24/7!" -ForegroundColor Cyan
+        Write-Host "==========================================================" -ForegroundColor Green
+        Write-Host ""
+    } else {
+        Write-Host "❌ Mã xác thực không chính xác!" -ForegroundColor Red
+    }
 } catch {
-    Write-Host "❌ Lỗi kết nối Cloudflare: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "❌ Lỗi kết nối Cloud: $($_.Exception.Message)" -ForegroundColor Red
 }
