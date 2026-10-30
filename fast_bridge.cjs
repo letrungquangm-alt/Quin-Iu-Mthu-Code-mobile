@@ -36,6 +36,7 @@ const { sendScreenVideo, recordScreen } = require('./lib/recorder.cjs');
 const { checkInstalledBrowsers, getBrowserInstallMarkup, installBrowserAsync } = require('./lib/installer.cjs');
 const { openWebOrApp, getActiveWindowsSummary, URL_SHORTCUTS, APP_SHORTCUTS } = require('./lib/launcher.cjs');
 const { classifyUserIntent } = require('./lib/intent.cjs');
+const { askGroq } = require('./lib/groq.cjs');
 
 const { createTranscriptWatcher } = require('./lib/transcript.cjs');
 const { formatToolCall } = require('./lib/formatter.cjs');
@@ -207,6 +208,9 @@ async function handleDisconnectCloud() {
 async function handleEmergencyCancel(chatId, threadId, source = '/cancel') {
     console.log(`[Bridge Action] 🛑 KÍCH HOẠT LỆNH HỦY KHẨN CẤP /CANCEL (${source})`);
     
+    // 0. Xóa bộ giám sát watchdog
+    clearWatchdog();
+
     // 1. Dọn sạch hàng đợi (Queue)
     const clearedQueueCount = clearQueue();
     
@@ -321,6 +325,135 @@ function executeRemoteCmd(chatId, threadId, command, isBackground = false) {
     });
 }
 
+// --- AUTONOMOUS CLOUD FALLBACK & RATE LIMIT WATCHDOG ---
+
+let antigravityWatchdogTimer = null;
+let currentPromptRaw = '';
+let currentPromptChatId = null;
+let currentPromptThreadId = null;
+
+function clearWatchdog() {
+    if (antigravityWatchdogTimer) {
+        clearTimeout(antigravityWatchdogTimer);
+        antigravityWatchdogTimer = null;
+    }
+}
+
+function startWatchdog(chatId, threadId, rawPrompt) {
+    clearWatchdog();
+    currentPromptRaw = rawPrompt;
+    currentPromptChatId = chatId;
+    currentPromptThreadId = threadId;
+
+    // Đặt hạn ngạch chờ: 65 giây không phản hồi => Kích hoạt Autonomous Cloud Continuation
+    antigravityWatchdogTimer = setTimeout(async () => {
+        if (currentPhase !== 'IDLE' && currentPhase !== 'CANCELED') {
+            console.warn(`[Watchdog Alert] ⚠️ Antigravity PC không phản hồi sau 65s (Báo Đỏ / Quota Limit). Tự động tiếp nối qua Groq LPU!`);
+            await triggerAutonomousCloudFallback('timeout');
+        }
+    }, 65000);
+}
+
+function resetWatchdog() {
+    if (antigravityWatchdogTimer) {
+        clearTimeout(antigravityWatchdogTimer);
+        antigravityWatchdogTimer = setTimeout(async () => {
+            if (currentPhase !== 'IDLE' && currentPhase !== 'CANCELED') {
+                console.warn(`[Watchdog Alert] ⚠️ Antigravity PC không phản hồi sau 65s (Báo Đỏ / Quota Limit). Tự động tiếp nối qua Groq LPU!`);
+                await triggerAutonomousCloudFallback('timeout');
+            }
+        }, 65000);
+    }
+}
+
+async function triggerAutonomousCloudFallback(reason = 'timeout') {
+    clearWatchdog();
+    if (currentPhase === 'IDLE' || currentPhase === 'CANCELED') return;
+
+    const chatId = currentPromptChatId || activeChatId;
+    const threadId = currentPromptThreadId || activeThreadId;
+    const promptToSolve = promptTextSaved || currentPromptRaw || 'Yêu cầu lập trình';
+
+    console.log(`[Cloud Fallback] Đang kích hoạt tiếp nối cho prompt "${promptToSolve.substring(0, 50)}..."`);
+
+    // 1. Dừng ticker và dọn nút hủy cũ
+    stopTicker();
+    sendViaBat({
+        action: 'cancel',
+        chat_id: chatId,
+        message_thread_id: threadId
+    });
+    await clearAllCancelButtons(chatId, tempMsgIds);
+
+    // 2. Gửi thông báo BÁO ĐỎ cho người dùng trên Telegram
+    const redAlertNotice = `⚠️ <b>[ANTIGRAVITY PC BÁO ĐỎ / CHẠM TRẦN LIMIT]</b>\n──────────────────────\n⏱️ <b>Trạng thái:</b> Antigravity PC đã chạm trần Rate Limit / Hết Quota tạm thời.\n⚡ <b>Tự động tiếp nối:</b> Máy PC đang kích hoạt <b>Groq LPU (Cloud AI 24/7)</b> để giải quyết ngay lập tức cho bro!`;
+    await sendMsg(chatId, redAlertNotice, threadId);
+
+    sendTyping(chatId, threadId);
+
+    // 3. Gọi Groq LPU tiếp nối
+    const groqStart = Date.now();
+    let groqRes = null;
+    try {
+        groqRes = await askGroq(promptToSolve);
+    } catch (e) {
+        console.error('[Groq Fallback Error]:', e.message);
+    }
+
+    const elapsed = ((Date.now() - groqStart) / 1000).toFixed(1);
+
+    if (groqRes && groqRes.ok && groqRes.content) {
+        let answerText = groqRes.content;
+
+        // Kiểm tra xem Groq có tạo ACTION không
+        const actionMatch = answerText.match(/\[ACTION:\s*({.*?})\]/s);
+        let executedActionDesc = '';
+        if (actionMatch) {
+            try {
+                const actionData = JSON.parse(actionMatch[1]);
+                answerText = answerText.replace(actionMatch[0], '').trim();
+                if (actionData.action === 'open_web' && actionData.target) {
+                    openWebOrApp(actionData.target, actionData.browser || 'default');
+                    executedActionDesc = `\n🌐 <i>(Đã tự động mở: ${actionData.target})</i>`;
+                } else if (actionData.action === 'screenshot') {
+                    setTimeout(() => sendScreenshot(botToken, chatId, threadId, '📸 [ẢNH CHỤP MÀN HÌNH TỪ GROQ FALLBACK]'), 1500);
+                }
+            } catch (e) {}
+        }
+
+        const formattedAnswer = mdToTgHtml(answerText);
+        const header = `🤖 <b>[KẾT QUẢ TIẾP NỐI TỪ GROQ LPU (CLOUD ENGINE)]</b>\n──────────────────────\n⚡ <i>Phản hồi siêu tốc trong ${elapsed}s qua chip Groq LPU (Qwen 3.8 / GPT-OSS):</i>\n\n`;
+
+        await sendLongResponse(chatId, header + formattedAnswer + executedActionDesc, Math.round(elapsed), threadId);
+    } else {
+        await sendMsg(
+            chatId,
+            `⚠️ <b>[HỆ THỐNG AI ĐANG QUÁ TẢI]</b>\n──────────────────────\nAntigravity PC đang chạm ngưỡng Rate Limit và Groq LPU cũng bận.\nBro hãy chờ khoảng 10-15 phút để quota hồi phục nhé!`,
+            threadId
+        );
+    }
+
+    // 4. Dọn dẹp trạng thái về IDLE
+    currentPhase = 'IDLE';
+    promptStartTime = null;
+    promptTextSaved = '';
+    currentWorkingMsgId = null;
+    tempMsgIds = [];
+
+    // 5. Nếu còn hàng đợi, tiếp tục chạy prompt tiếp theo
+    if (promptQueue.length > 0) {
+        const nextItem = getNextPrompt();
+        if (nextItem) {
+            await sendMsg(
+                chatId,
+                `🚀 <b>[ĐANG THỰC THI PROMPT TIẾP THEO TỪ HÀNG ĐỢI]:</b>\n<blockquote><i>${escapeHtml(nextItem.preview)}</i></blockquote>`,
+                nextItem.threadId || threadId
+            );
+            await executePromptImmediately(nextItem.chatId, nextItem.threadId || threadId, nextItem.text, nextItem.preview);
+        }
+    }
+}
+
 // --- START PROMPT EXECUTION HELPER ---
 
 async function executePromptImmediately(chatId, threadId, promptText, previewText, isEdit = false, isPhoto = false) {
@@ -336,6 +469,9 @@ async function executePromptImmediately(chatId, threadId, promptText, previewTex
     sendTyping(chatId, threadId);
 
     await clearAllCancelButtons(chatId);
+
+    // Kích hoạt Watchdog giám sát phản hồi PC
+    startWatchdog(chatId, threadId, promptText);
 
     // Giao toàn bộ việc gửi bong bóng nhận prompt & Live Ticking Stopwatch cho BAT độc lập
     sendViaBat({
@@ -354,6 +490,7 @@ const transcriptWatcher = createTranscriptWatcher({
     transcriptPath,
     onToolCall: async (toolCalls) => {
         if (currentPhase === 'CANCELED') return;
+        resetWatchdog();
         currentToolStartTime = Date.now();
         currentPhase = 'WORKING';
 
@@ -389,6 +526,7 @@ const transcriptWatcher = createTranscriptWatcher({
     },
     onToolComplete: async (entry) => {
         if (currentPhase === 'CANCELED') return;
+        resetWatchdog();
         const wSec = currentToolStartTime ? Math.max(1, Math.round((Date.now() - currentToolStartTime) / 1000)) : 1;
         const safeTask = escapeHtml(currentToolSummary || 'Tác vụ');
 
@@ -423,6 +561,7 @@ const transcriptWatcher = createTranscriptWatcher({
         sendTyping(activeChatId, activeThreadId);
     },
     onPlannerResponse: async (answer) => {
+        clearWatchdog();
         currentPhase = 'IDLE';
         stopTicker();
 
@@ -458,6 +597,13 @@ const transcriptWatcher = createTranscriptWatcher({
                 );
                 await executePromptImmediately(nextItem.chatId, nextItem.threadId || activeThreadId, nextItem.text, nextItem.preview);
             }
+        }
+    },
+    onError: async (entry) => {
+        const errText = ((entry && (entry.error || entry.content)) || '').toString().toLowerCase();
+        if (errText.includes('quota') || errText.includes('rate limit') || errText.includes('exhausted') || errText.includes('429') || errText.includes('resource has been exhausted')) {
+            console.warn('[Transcript Watcher] ⚠️ Phát hiện lỗi Rate Limit / Quota Exhausted từ Antigravity! Kích hoạt fallback tiếp nối ngay!');
+            await triggerAutonomousCloudFallback('rate_limit_error');
         }
     }
 });
