@@ -284,7 +284,7 @@ function executeRemoteCmd(chatId, threadId, command, isBackground = false) {
     if (!lobby.isSuperAdmin()) {
         return sendMsg(
             chatId,
-            `👑 <b>[YÊU CẦU MẬT KHẨU QUẢN TRỊ]</b>\n──────────────────────\n⚠️ <b>Nghiêm cấm thực thi lệnh terminal hoặc chỉnh sửa repo Mthu Code Mobile khi chưa có quyền quản trị!</b>\n\n👉 Bro hãy vào Sảnh Lobby bấm 7 lần và nhập Mật khẩu Quản trị để mở khóa nhé!`,
+            `👑 <b>[YÊU CẦU MẬT KHẨU QUẢN TRỊ]</b>\n──────────────────────\n⚠️ <b>Nghiêm cấm thực thi lệnh terminal hoặc chỉnh sửa repo Mthu Code Mobile khi chưa có quyền quản trị!</b>\n\n👉 Bro hãy vào Sảnh dùng cách bạn bảo tôi nhé!`,
             threadId,
             'HTML'
         );
@@ -882,7 +882,7 @@ async function pollUpdates() {
                             );
                             await sendMsg(
                                 chatId,
-                                `🔒 <b>[ĐÃ KẾT THÚC QUYỀN QUẢN TRỊ REPO]</b>\n──────────────────────\n✅ Đã khóa lại quyền hạn quản trị repo thành công!\n🏛️ Bảng điều khiển Sảnh Lobby đã trở về trạng thái chuẩn (đã ẩn dòng Quyền hạn).\n\n👉 Khi cần mở lại toàn quyền, bro hãy vào Sảnh bấm 7 lần và nhập mật khẩu nhé!`,
+                                `🔒 <b>[ĐÃ KẾT THÚC QUYỀN QUẢN TRỊ REPO]</b>\n──────────────────────\n✅ Đã khóa lại quyền hạn quản trị repo thành công!\n🏛️ Bảng điều khiển Sảnh Lobby đã trở về trạng thái chuẩn (đã ẩn dòng Quyền hạn).\n\n👉 Khi cần mở lại toàn quyền, bro hãy vào Sảnh dùng cách bạn bảo tôi nhé!`,
                                 threadId,
                                 'HTML'
                             );
@@ -1149,7 +1149,7 @@ async function pollUpdates() {
                     if (isProtectedRepoAction && !lobby.isSuperAdmin()) {
                         await sendMsg(
                             chatId,
-                            `👑 <b>[YÊU CẦU MẬT KHẨU QUẢN TRỊ]</b>\n──────────────────────\n⚠️ <b>Nghiêm cấm hành vi tạo cửa sổ để code / bypass hoặc chỉnh sửa repo Mthu Code Mobile khi chưa có quyền quản trị!</b>\n\n👉 Để mở khóa toàn quyền, bro hãy vào Sảnh Lobby bấm <b>7 lần liên tục</b> và nhập <b>Mật khẩu Quản trị</b> nhé!`,
+                            `👑 <b>[YÊU CẦU MẬT KHẨU QUẢN TRỊ]</b>\n──────────────────────\n⚠️ <b>Nghiêm cấm hành vi tạo cửa sổ để code / bypass hoặc chỉnh sửa repo Mthu Code Mobile khi chưa có quyền quản trị!</b>\n\n👉 Để mở khóa toàn quyền, bro hãy vào Sảnh dùng cách bạn bảo tôi nhé!`,
                             threadId,
                             'HTML'
                         );
