@@ -927,6 +927,48 @@ async function pollUpdates() {
                         continue;
                     }
 
+                    // 🖥️ LỆNH KẾT NỐI / TIẾP QUẢN PC: /pc, /ketnoi, ket noi pc
+                    if (/^(?:\/ketnoi|\/ketnoilai|\/reconnect|\/pc|\/local|kết nối lại|kết nối pc|ket noi pc|connect pc)(?:\s+(\w+))?$/i.test(userText.trim())) {
+                        const match = userText.trim().match(/^(?:\/ketnoi|\/ketnoilai|\/reconnect|\/pc|\/local|kết nối lại|kết nối pc|ket noi pc|connect pc)(?:\s+(\w+))?$/i);
+                        const providedCode = match ? match[1] : null;
+
+                        if (threadId === 1160 || (providedCode && lobby.verifyProjectPin(providedCode, threadId))) {
+                            waitingForPairCode = false;
+                            currentPhase = 'IDLE';
+                            isCloudStandby = false;
+                            stopTicker();
+                            tempMsgIds = [];
+                            promptMsgId = null;
+                            launchOrFocusAntigravity();
+
+                            forwardToAntigravity(conversationId, `[LỆNH KẾT NỐI PC]: Người dùng đã kết nối lại PC thành công từ Topic #${threadId || 1160}.`);
+
+                            await sendMsg(
+                                chatId,
+                                `🖥️ <b>[ĐÃ KẾT NỐI PC THÀNH CÔNG!]</b>\n──────────────────────\n🖥️ <b>Cửa sổ Antigravity PC:</b> SẴN SÀNG 100%\n🚀 <b>Kênh làm việc:</b> Topic #${threadId || '1160'}\n✨ Cầu nối PC đã thức tỉnh hoàn toàn! Mọi tin nhắn bro gửi tiếp theo sẽ được xử lý ngay lập tức!`,
+                                threadId
+                            );
+                            continue;
+                        }
+
+                        if (!providedCode) {
+                            currentPin = '';
+                            pinFailedCount = 0;
+                            const initialScreen = `📟 <b>[BÀN PHÍM XÁC THỰC KẾT NỐI]</b>\n──────────────────────\nMàn hình: <code>${getPinDisplay('')}</code>\n<i>(Nhập mã PIN 4 số của dự án rồi bấm ↵ Enter để kết nối với PC)</i>`;
+                            await sendMsg(chatId, initialScreen, threadId, 'HTML', getKeypadMarkup());
+                            continue;
+                        }
+
+                        waitingForPairCode = true;
+                        const expectedPin = lobby.getProjectPin(threadId);
+                        await sendMsg(
+                            chatId,
+                            `❌ <b>[MÃ 4 SỐ KHÔNG ĐÚNG]</b>\nMã <code>${providedCode}</code> không khớp. Bro hãy nhập lại mã 4 số chính xác (<code>${expectedPin}</code>):`,
+                            threadId
+                        );
+                        continue;
+                    }
+
                     // 🧠 BỘ PHÂN LOẠI Ý ĐỊNH BẰNG AI (GEMINI INTENT CLASSIFIER)
                     const intent = await classifyUserIntent(userText);
 
@@ -1071,48 +1113,6 @@ async function pollUpdates() {
                             await sendMsg(
                                 chatId,
                                 `❌ <b>[SAI MÃ ĐỒNG BỘ]</b>\nMã <code>${code}</code> không chính xác! Vui lòng nhập lại mã 4 số (Mã dự án này: <code>${expectedPin}</code>):`,
-                                threadId
-                            );
-                            continue;
-                        }
-                    }
-
-                    // Xử lý lệnh cưỡng chế kết nối lại (/ketnoi, /ketnoilai, /reconnect, /pc)
-                    if (/^(?:\/ketnoi|\/ketnoilai|\/reconnect|\/pc|\/local|kết nối lại)(?:\s+(\w+))?$/i.test(userText.trim())) {
-                        const match = userText.trim().match(/^(?:\/ketnoi|\/ketnoilai|\/reconnect|\/pc|\/local|kết nối lại)(?:\s+(\w+))?$/i);
-                        const providedCode = match ? match[1] : null;
-
-                        if (!providedCode) {
-                            currentPin = '';
-                            pinFailedCount = 0;
-                            const initialScreen = `📟 <b>[BÀN PHÍM XÁC THỰC KẾT NỐI]</b>\n──────────────────────\nMàn hình: <code>${getPinDisplay('')}</code>\n<i>(Nhập mã PIN 4 số của dự án rồi bấm ↵ Enter để kết nối với PC)</i>`;
-                            await sendMsg(chatId, initialScreen, threadId, 'HTML', getKeypadMarkup());
-                            continue;
-                        }
-
-                        if (lobby.verifyProjectPin(providedCode, threadId)) {
-                            waitingForPairCode = false;
-                            currentPhase = 'IDLE';
-                            isCloudStandby = false;
-                            stopTicker();
-                            tempMsgIds = [];
-                            promptMsgId = null;
-                            launchOrFocusAntigravity();
-
-                            forwardToAntigravity(conversationId, `[LỆNH CƯỠNG CHẾ KẾT NỐI LẠI]: Người dùng yêu cầu đồng bộ tức thì qua mã PIN ${providedCode}. Cửa sổ Antigravity PC đã kết nối sẵn sàng 100%.`);
-
-                            await sendMsg(
-                                chatId,
-                                `⚡ <b>[ĐÃ CƯỠNG CHẾ KẾT NỐI LẠI THÀNH CÔNG!]</b>\n──────────────────────\n🖥️ <b>Cửa sổ Antigravity PC:</b> SẴN SÀNG 100%\n🚀 <b>Kênh làm việc:</b> Topic ${threadId || 'Lobby'}\n✨ Cầu nối PC đã thức tỉnh hoàn toàn! Mọi tin nhắn bro gửi tiếp theo sẽ được xử lý ngay lập tức!`,
-                                threadId
-                            );
-                            continue;
-                        } else {
-                            waitingForPairCode = true;
-                            const expectedPin = lobby.getProjectPin(threadId);
-                            await sendMsg(
-                                chatId,
-                                `❌ <b>[MÃ 4 SỐ KHÔNG ĐÚNG]</b>\nMã <code>${providedCode}</code> không khớp. Bro hãy nhập lại mã 4 số chính xác (<code>${expectedPin}</code>):`,
                                 threadId
                             );
                             continue;
