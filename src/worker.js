@@ -82,7 +82,10 @@ async function handleTelegramUpdate(update, env) {
 
     // Lệnh chuyển tiếp PC
     if (["/pc", "/connect", "/ketnoi", "2726"].includes(text)) {
-        await sendTg(botToken, chatId, "🖥️ <b>[TIẾP NHẬN LỆNH /PC]</b>\n──────────────────────\nCloudflare đã sẵn sàng nhường quyền cho PC ở nhà khi PC online!", threadId);
+        try {
+            await fetch(`https://api.telegram.org/bot${botToken}/deleteWebhook`);
+        } catch (e) {}
+        await sendTg(botToken, chatId, "🖥️ <b>[TIẾP NHẬN LỆNH /PC]</b>\n──────────────────────\n✅ Cloudflare đã nhường quyền điều khiển cho PC ở nhà! PC tiếp quản ngay lập tức!", threadId);
         return;
     }
 
