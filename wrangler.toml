@@ -1,0 +1,10 @@
+name = "quin-iu-mthu-code-mobile"
+main = "src/worker.js"
+compatibility_date = "2024-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+CURRENT_REPO = "Quin-Iu-Mthu-Code-mobile"
+GITHUB_OWNER = "letrungquangm-alt"
+ALLOWED_CHAT_ID = "-1004457846636"
+DEFAULT_THREAD_ID = "1160"
