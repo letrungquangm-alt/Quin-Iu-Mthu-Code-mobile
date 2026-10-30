@@ -798,14 +798,38 @@ async function pollUpdates() {
                     }
 
                     // 🖥️ LỆNH BẬT / MỞ CỬA SỔ ANTIGRAVITY TRÊN MÁY TÍNH
-                    if (/^(?:\/antigravity|\/open_antigravity|\/open|\/app|bật antigravity|mở antigravity|bật app|mở app)(?:\s.*)?$/i.test(userText.trim())) {
+                    if (/(?:bật|mở|khởi động|chạy|hiển thị|open|focus|show).*(?:antigravity|ide|app|cửa sổ)|^(\/antigravity|\/open_antigravity|\/open|\/app|\/ide|antigravity)$/i.test(userText.trim())) {
                         const launchResult = launchOrFocusAntigravity();
-                        const actionDesc = launchResult === 'LAUNCHED' 
-                            ? 'Đã khởi chạy ứng dụng Antigravity IDE mới trên PC!' 
-                            : 'Đã kích hoạt và đưa cửa sổ Antigravity lên phía trước màn hình!';
+                        if (launchResult === 'NOT_FOUND') {
+                            await sendMsg(
+                                chatId,
+                                `⚠️ <b>[CHƯA CÀI ANTIGRAVITY TRÊN MÁY TÍNH NÀY]</b>\n──────────────────────\nℹ️ Máy tính hiện tại chưa cài đặt ứng dụng Antigravity IDE (hoặc bro đang dùng ở máy mới / quán net).\n\n💡 <b>Bro có thể làm gì?</b>\n1️⃣ <b>Dùng Remote CMD độc lập:</b> Gõ <code>/cmd &lt;lệnh&gt;</code> để chạy lệnh shell/git trực tiếp trên máy mà không cần mở giao diện IDE!\n2️⃣ <b>Tải Antigravity:</b> Gõ <code>/download_antigravity</code> để mở trang tải chính thức trên PC!`,
+                                threadId
+                            );
+                        } else {
+                            const actionDesc = launchResult === 'LAUNCHED' 
+                                ? 'Đã khởi chạy ứng dụng Antigravity IDE mới trên PC!' 
+                                : launchResult === 'FOCUSED'
+                                ? 'Đã khôi phục (restore) và đưa cửa sổ Antigravity lên phía trước màn hình!'
+                                : 'Đã kích hoạt và đưa cửa sổ Antigravity lên phía trước màn hình!';
+                            await sendMsg(
+                                chatId,
+                                `🖥️ <b>[ĐÃ MỞ CỬA SỔ ANTIGRAVITY TRÊN PC]</b>\n──────────────────────\n✅ <b>${actionDesc}</b>\n⚡ Cầu nối IPC đã đồng bộ hóa 100% với Antigravity PC.\n🚀 Bro gửi prompt hoặc yêu cầu code là AI nhận ngay lập tức!`,
+                                threadId
+                            );
+                        }
+                        continue;
+                    }
+
+                    // 🌐 LỆNH TẢI ANTIGRAVITY IDE CHO MÁY MỚI
+                    if (/^(?:\/download_antigravity|\/cai_antigravity|tải antigravity|cài antigravity)$/i.test(userText.trim())) {
+                        try {
+                            const cp = require('child_process');
+                            cp.exec('powershell.exe -NoProfile -Command "Start-Process https://antigravity.google"');
+                        } catch (e) {}
                         await sendMsg(
                             chatId,
-                            `🖥️ <b>[ĐÃ MỞ CỬA SỔ ANTIGRAVITY TRÊN PC]</b>\n──────────────────────\n✅ <b>${actionDesc}</b>\n⚡ Cầu nối IPC đã đồng bộ hóa 100% với Antigravity PC.\n🚀 Bro gửi prompt hoặc yêu cầu code là AI nhận ngay lập tức!`,
+                            `🌐 <b>[ĐANG MỞ TRANG TẢI ANTIGRAVITY TRÊN PC]</b>\n──────────────────────\n✅ Đã mở trình duyệt tải Antigravity IDE tại: https://antigravity.google\n⚡ Sau khi cài xong, bro gõ <code>/app</code> để bot kết nối ngay lập tức!`,
                             threadId
                         );
                         continue;
