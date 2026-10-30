@@ -848,9 +848,10 @@ async function pollUpdates() {
                     }
 
                     // 🎥 LỆNH QUAY VIDEO MÀN HÌNH MÁY TÍNH / TRÌNH DUYỆT (RECORDING)
-                    const recordMatch = userText.trim().match(/^(?:\/record|\/quay|\/video|quay màn hình|ghi màn hình|quay video|record|quay clip|quay trình duyệt)(?:\s+(\d+))?$/i);
-                    if (recordMatch) {
-                        const sec = parseInt(recordMatch[1] || '4', 10);
+                    const isRecordReq = /(?:quay|ghi|record|clip).*(?:màn hình|pc|video|trình duyệt|web|xem|\d+\s*s)|^(\/record|\/quay|\/video|record|quay)$/i.test(userText.trim());
+                    if (isRecordReq) {
+                        const secMatch = userText.match(/(\d+)\s*s/i) || userText.match(/(?:\/record|\/quay|\/video)\s+(\d+)/i);
+                        const sec = secMatch ? parseInt(secMatch[1], 10) : 4;
                         const safeSec = Math.min(10, Math.max(2, sec));
                         await sendMsg(chatId, `🎥 <b>[ĐANG QUAY VIDEO MÀN HÌNH PC ${safeSec}s...]</b>\n<i>Đang chụp chuỗi khung hình thực tế & ghép thành video MP4 H.264...</i>`, threadId);
                         const winSummary = getActiveWindowsSummary();
