@@ -1272,6 +1272,27 @@ async function pollUpdates() {
                                 continue;
                             }
                     }
+                            // 7. Tắt nguồn máy tính PC (Remote Shutdown)
+                            if (intent.action === 'shutdown_pc') {
+                                await sendMsg(
+                                    chatId,
+                                    `🔌 <b>[ĐÃ TIẾP NHẬN LỆNH TẮT NGUỒN PC]</b>\n──────────────────────\n✅ <b>Đã bàn giao quyền trực chiến 100% cho Cloudflare Worker 24/7!</b>\n⚡ Máy tính PC sẽ tự động ngắt nguồn hoàn toàn (Shut down) trong 5 giây.\n\n💤 <i>Chúc bro nghỉ ngơi! Khi nào bro mở lại máy tính, chỉ cần vào Telegram gõ <code>/pc</code> và nhập mã PIN để mở lại Antigravity nhé!</i>`,
+                                    threadId
+                                );
+
+                                // Chuyển giao ngay Webhook cho Cloudflare Worker 24/7
+                                await setCloudWebhook(true);
+                                isCloudStandby = true;
+
+                                // Thực thi lệnh tắt máy Windows
+                                setTimeout(() => {
+                                    try {
+                                        const cp = require('child_process');
+                                        cp.exec('shutdown.exe /s /t 5 /c "QuinloveRin Remote Shutdown from Telegram"');
+                                    } catch (e) {}
+                                }, 1500);
+                                continue;
+                            }
                     }
 
                     // 🌐 LỆNH TẢI ANTIGRAVITY IDE CHO MÁY MỚI
