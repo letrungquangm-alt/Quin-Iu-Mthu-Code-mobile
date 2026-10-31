@@ -1249,9 +1249,12 @@ async function pollUpdates() {
                                     if (isAntigravity) {
                                         await sendMsg(
                                             chatId,
-                                            `🛑 <b>[ĐÃ ĐÓNG CỬA SỔ ANTIGRAVITY TRÊN PC]</b>\n──────────────────────\n✅ <b>Đã tắt ứng dụng Antigravity IDE an toàn!</b>\n⚡ Đã giải phóng hoàn toàn tài nguyên CPU & RAM trên PC.\n\n💡 <i>Khi cần mở lại để code tiếp, bro chỉ cần gõ <code>bật antigravity</code> hoặc <code>/app</code> là bot tự bật ngay nhé!</i>`,
+                                            `🛑 <b>[ĐÃ ĐÓNG ANTIGRAVITY & BÀN GIAO CHO CLOUD 24/7]</b>\n──────────────────────\n✅ <b>Đã tắt ứng dụng Antigravity IDE trên PC an toàn!</b>\n⚡ Đã giải phóng hoàn toàn tài nguyên CPU & RAM trên PC.\n☁️ <b>Quyền điều hành AI đã bàn giao cho Cloudflare Worker 24/7!</b>\n\n💡 <i>Bro có thể tiếp tục chat/code trên Cloud. Khi cần mở lại Antigravity PC, chỉ cần gõ <code>/pc</code> hoặc <code>bật antigravity</code> nhé!</i>`,
                                             threadId
                                         );
+                                        await setCloudWebhook(true);
+                                        isCloudStandby = true;
+                                        continue;
                                     } else {
                                         await sendMsg(
                                             chatId,

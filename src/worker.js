@@ -276,8 +276,8 @@ async function handleTelegramUpdate(update, env, ctx) {
     // 2. NẾU LÀ PROMPT ĐÀM THOẠI / CÂU HỎI: BỎ QUA TOÀN BỘ LỆNH & ĐI THẲNG TỚI AI (GROQ / GEMINI)
     if (!isConversationalPrompt(text)) {
         // A. LỆNH KẾT NỐI / TIẾP QUẢN PC: /PC, /CONNECT, /KETNOI, KET NOI PC
-        if (/^(?:\/pc|\/connect|\/ketnoi|ket\s*noi\s*pc)(?:\s+(\d{3,4}))?$/i.test(text.trim())) {
-            const match = text.trim().match(/^(?:\/pc|\/connect|\/ketnoi|ket\s*noi\s*pc)(?:\s+(\d{3,4}))?$/i);
+        if (/^(?:\/pc|\/connect|\/ketnoi|ket\s*noi\s*pc|bật\s+antigravity|mở\s+antigravity|khởi\s+động\s+antigravity)(?:\s+(\d{3,4}))?$/i.test(text.trim())) {
+            const match = text.trim().match(/^(?:\/pc|\/connect|\/ketnoi|ket\s*noi\s*pc|bật\s+antigravity|mở\s+antigravity|khởi\s+động\s+antigravity)(?:\s+(\d{3,4}))?$/i);
             const providedCode = match ? match[1] : null;
 
             if (providedCode && (providedCode === PROJECT_PIN || providedCode === "2726" || providedCode === "6585")) {
@@ -394,6 +394,16 @@ async function handleTelegramUpdate(update, env, ctx) {
 
         // G. LỆNH ĐIỀU KHIỂN TẮT ỨNG DỤNG TRÊN PC: /TAT, /DONG, /CLOSE
         if (/^(?:\/tat|\/dong|\/close|\/kill|tắt|đóng)\s+(?:cửa sổ\s+|ứng dụng\s+|app\s+|phần mềm\s+|tab\s+)?(.+)$/i.test(text.trim())) {
+            const closeTarget = text.trim().toLowerCase();
+            if (closeTarget.includes('antigravity') || closeTarget.includes('agy') || closeTarget.includes('ide')) {
+                await sendTg(
+                    botToken,
+                    chatId,
+                    `☁️ <b>[ANTIGRAVITY ĐÃ TẮT & CLOUD 24/7 ĐANG TRỰC CHIẾN]</b>\n──────────────────────\n✅ Ứng dụng Antigravity IDE trên PC hiện đã tắt để tiết kiệm tài nguyên.\n⚡ Cloudflare Worker 24/7 đang trực tiếp tiếp nhận mọi yêu cầu của bro!\n\n💡 <i>Khi nào muốn mở lại Antigravity trên PC, bro chỉ cần gõ <code>bật antigravity</code> hoặc <code>/pc</code> nhé!</i>`,
+                    threadId
+                );
+                return;
+            }
             await sendTg(
                 botToken,
                 chatId,
