@@ -66,6 +66,29 @@ export default {
             return new Response("pong", { status: 200 });
         }
 
+        // 2b. Cứu hộ khẩn cấp 1 chạm: GET /cloud hoặc GET /rehook hoặc GET /rescue
+        // Dành cho trường hợp PC bị sập nguồn đột ngột / rút điện mà chưa kịp gỡ Webhook
+        if (request.method === "GET" && (url.pathname === "/cloud" || url.pathname === "/rehook" || url.pathname === "/rescue")) {
+            try {
+                const res = await fetch(`https://api.telegram.org/bot${botToken}/setWebhook`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        url: url.origin,
+                        ip_address: '172.67.144.228',
+                        drop_pending_updates: false
+                    })
+                });
+                const d = await res.json();
+                await sendTg(botToken, SUPERGROUP_ID, `☁️ <b>[KÍCH HOẠT CLOUD KHẨN CẤP THÀNH CÔNG]</b>\n──────────────────────\n✅ Webhook đã được khôi phục về Cloudflare Edge 24/7!\n⚡ Sẵn sàng phục vụ bro ngay cả khi PC mất điện hoặc tắt đột ngột!`, PROJECT_TOPIC_ID);
+                return new Response(`<h1>✅ Kích hoạt Cloud 24/7 thành công!</h1><p>Telegram Webhook đã được khôi phục về Cloudflare Edge.</p><pre>${JSON.stringify(d, null, 2)}</pre>`, {
+                    headers: { "Content-Type": "text/html; charset=utf-8" }
+                });
+            } catch (e) {
+                return new Response("Lỗi cứu hộ Cloud: " + e.message, { status: 500 });
+            }
+        }
+
         // 3. Máy net gửi thông tin đăng ký mã CMD (quinloverin -> cmdCode)
         if (request.method === "POST" && url.pathname === "/net/register") {
             try {

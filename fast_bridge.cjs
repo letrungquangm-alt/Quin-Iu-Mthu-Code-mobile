@@ -1437,6 +1437,8 @@ async function restoreCloudOnExit(reason) {
 
 process.on('SIGINT', async () => { await restoreCloudOnExit('SIGINT'); process.exit(0); });
 process.on('SIGTERM', async () => { await restoreCloudOnExit('SIGTERM'); process.exit(0); });
+process.on('SIGBREAK', async () => { await restoreCloudOnExit('SIGBREAK'); process.exit(0); });
+process.on('SIGHUP', async () => { await restoreCloudOnExit('SIGHUP'); process.exit(0); });
 process.on('beforeExit', async () => { await restoreCloudOnExit('beforeExit'); });
 
 // Khởi động: Gỡ Webhook để PC tiếp quản trực tiếp
