@@ -59,8 +59,8 @@ function isConversationalPrompt(text) {
     if (/^(?:\/screen|\/screenshot|\/snap|\/chup|chụp màn hình|chup man hinh)$/i.test(lower)) return false;
     if (/^(?:\/antigravity|\/app|\/ide|\/open_antigravity|bật antigravity|mở antigravity|bat antigravity|mo antigravity)$/i.test(lower)) return false;
     if (/^(?:\/close_antigravity|\/tat_antigravity|\/kill_antigravity|tắt antigravity|đóng antigravity|tat antigravity|dong antigravity)$/i.test(lower)) return false;
-    if (/^(?:\/shutdown|\/tatmay|\/tat_pc|\/tat_may|tắt máy|tat may|tắt máy tính|may tinh)$/i.test(lower)) return false;
-    if (/^(?:\/cancel_shutdown|\/huy_tat_may|\/huy_shutdown|hủy tắt máy|huy tat may|đừng tắt máy|dung tat may)$/i.test(lower)) return false;
+    if (/^(?:\/shutdown|\/tatmay|\/tat_pc|\/tat_may|(?:tắt|tat)\s+(?:máy|may|máy\s+tính|may\s+tinh|pc|nguồn|nguon)(?:\s+(?:đi|nhe|nhé|nha|thôi|thoi|giúp|giup|hộ|ho)?(?:\s+(?:bro|bạn|ban|ad|em))?)?)$/i.test(lower)) return false;
+    if (/^(?:\/cancel_shutdown|\/huy_tat_may|\/huy_shutdown|(?:hủy|huy|đừng|dung)\s+(?:tắt|tat)\s+(?:máy|may)(?:\s+(?:đi|nhe|nhé|nha|bro))?)$/i.test(lower)) return false;
 
     // 1. Có dấu hỏi hoặc dấu xuống dòng hoặc code markdown -> 100% Prompt
     if (/[?？]/.test(clean)) return true;
