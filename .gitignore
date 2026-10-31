@@ -23,3 +23,5 @@ incoming_photo.jpg
 
 keys.json
 .env
+
+bridge.pid
