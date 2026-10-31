@@ -28,6 +28,13 @@ let netRegistrations = new Map();
 // Trạng thái Admin xác thực kép tại Sảnh: userId -> { step: 'AWAIT_PIN' | 'AWAIT_PASS' | 'AWAIT_PC_PIN', enteredPin: false, enteredPass: false }
 let adminAuthStates = new Map();
 
+// 🧠 Ký ức ngữ cảnh Repo & Lịch sử hội thoại của từng Topic (Chia sẻ từ PC sang Cloud 24/7)
+let topicMemory = new Map();
+
+// ⏳ Hàng đợi xử lý tuần tự (FIFO Queue) trên Cloud cho từng Topic
+let topicQueues = new Map();
+let topicQueueLengths = new Map();
+
 function isConversationalPrompt(text) {
     const clean = (text || '').trim();
     if (!clean) return false;
@@ -86,6 +93,42 @@ export default {
                 });
             } catch (e) {
                 return new Response("Lỗi cứu hộ Cloud: " + e.message, { status: 500 });
+            }
+        }
+
+        // 2c. Đồng bộ Ký ức / Ngữ cảnh Repo từ PC lên Cloud 24/7: POST /sync/context
+        if (url.pathname === "/sync/context") {
+            if (request.method === "POST") {
+                try {
+                    const data = await request.json();
+                    const tId = Number(data.thread_id || PROJECT_TOPIC_ID);
+                    const existing = topicMemory.get(tId) || { history: [] };
+
+                    const incomingHist = Array.isArray(data.history) ? data.history : [];
+                    const mergedHist = [...existing.history, ...incomingHist].slice(-20);
+
+                    topicMemory.set(tId, {
+                        repo: data.repo || "Quin-Iu-Mthu-Code-mobile",
+                        path: data.path || "E:\\MThu Mobile Code",
+                        pin: data.pin || PROJECT_PIN,
+                        summary: data.summary || "Dự án Quin-Iu-Mthu-Code-mobile",
+                        files: data.files || ["fast_bridge.cjs", "src/worker.js", "lib/intent.cjs", "lib/ipc.cjs", "lib/lobby.cjs"],
+                        history: mergedHist,
+                        lastSync: Date.now()
+                    });
+
+                    return new Response(JSON.stringify({ ok: true, synced_topic: tId, history_count: mergedHist.length }), {
+                        headers: { "Content-Type": "application/json" }
+                    });
+                } catch (e) {
+                    return new Response(JSON.stringify({ ok: false, error: e.message }), { status: 400 });
+                }
+            } else if (request.method === "GET") {
+                const allMem = {};
+                for (const [k, v] of topicMemory.entries()) allMem[k] = v;
+                return new Response(JSON.stringify({ ok: true, memory: allMem }, null, 2), {
+                    headers: { "Content-Type": "application/json" }
+                });
             }
         }
 
@@ -451,22 +494,76 @@ async function handleTelegramUpdate(update, env, ctx) {
         return;
     }
 
-    // 4. XỬ LÝ PROMPT LẬP TRÌNH BÌNH THƯỜNG TRONG TOPIC DỰ ÁN
+    // 4. HÀNG ĐỢI TUẦN TỰ CLOUD (FIFO PROMPT QUEUE) & XỬ LÝ VỚI KÝ ỨC REPO
+    const queueKey = `${chatId}_${threadId || 'general'}`;
+    let currentChain = topicQueues.get(queueKey) || Promise.resolve();
+    const curLen = (topicQueueLengths.get(queueKey) || 0);
+
+    if (curLen > 0) {
+        await sendTg(
+            botToken,
+            chatId,
+            `⏳ <b>[ĐÃ ĐƯA VÀO HÀNG ĐỢI CLOUD #${curLen}]</b>\n──────────────────────\n📝 <code>${text.replace(/[<>]/g, "").substring(0, 50)}</code>\n⚡ Cloud đang trả lời yêu cầu trước, prompt này sẽ được thực thi tiếp theo!`,
+            threadId
+        );
+    }
+    topicQueueLengths.set(queueKey, curLen + 1);
+
+    const nextChain = currentChain.then(async () => {
+        try {
+            await executeCloudPromptWithMemory(text, chatId, threadId, botToken, env);
+        } finally {
+            const rem = (topicQueueLengths.get(queueKey) || 1) - 1;
+            topicQueueLengths.set(queueKey, Math.max(0, rem));
+        }
+    });
+    topicQueues.set(queueKey, nextChain);
+    await nextChain;
+}
+
+async function executeCloudPromptWithMemory(text, chatId, threadId, botToken, env) {
     const ghToken = (env && env.GITHUB_TOKEN) ? env.GITHUB_TOKEN : DEFAULT_GH_TOKEN;
     const ghOwner = (env && env.GITHUB_OWNER) ? env.GITHUB_OWNER : "letrungquangm-alt";
     const currentRepo = (env && env.CURRENT_REPO) ? env.CURRENT_REPO : "Quin-Iu-Mthu-Code-mobile";
     let groqKeys = DEFAULT_GROQ_KEYS;
     let geminiKeys = DEFAULT_GEMINI_KEYS;
 
+    const memKey = Number(threadId) || PROJECT_TOPIC_ID;
+    let mem = topicMemory.get(memKey);
+    if (!mem) {
+        mem = {
+            repo: currentRepo,
+            path: "E:\\MThu Mobile Code",
+            pin: PROJECT_PIN,
+            summary: "Dự án Quin-Iu-Mthu-Code-mobile (Universal Telegram Mobile Coding Bridge)",
+            files: ["fast_bridge.cjs", "src/worker.js", "lib/intent.cjs", "lib/ipc.cjs", "lib/lobby.cjs"],
+            history: []
+        };
+        topicMemory.set(memKey, mem);
+    }
+
+    let fullSystem = SYSTEM_INSTRUCTION;
+    fullSystem += `\n\n[KÝ ỨC NGỮ CẢNH DỰ ÁN & REPO]:\n- Tên repo: ${mem.repo}\n- Đường dẫn workspace PC: ${mem.path}\n- Mã PIN cửa sổ: ${mem.pin}\n- Topic Telegram hiện tại: #${memKey}\n- Tóm tắt công việc: ${mem.summary}`;
+    if (mem.files && mem.files.length > 0) {
+        fullSystem += `\n- Các file chính trong repo: ${mem.files.join(', ')}`;
+    }
+
+    const historyList = mem.history || [];
+    const groqMessages = [
+        { role: "system", content: fullSystem },
+        ...historyList.slice(-10),
+        { role: "user", content: text }
+    ];
+
     const preview = text.replace(/[<>]/g, "").substring(0, 50);
     const start = Date.now();
-    const ackId = await sendTg(botToken, chatId, `⏳ <b>[QUINLOVERIN 3.8 CLOUD 24/7]</b>\n──────────────────────\n⚡ <i>Đang xử lý qua Groq LPU...</i>\n📝 <code>${preview}</code>`, threadId);
+    const ackId = await sendTg(botToken, chatId, `⏳ <b>[QUINLOVERIN 3.8 CLOUD 24/7]</b>\n──────────────────────\n⚡ <i>Đang xử lý qua Groq LPU (Kèm Ký ức Repo)...</i>\n📝 <code>${preview}</code>`, threadId);
 
     let answer = "";
     let modelUsed = "Groq LPU Qwen 3.8 27B";
     let shouldEscalate = false;
 
-    // Gọi Groq LPU
+    // Gọi Groq LPU kèm Ký ức ngữ cảnh và Lịch sử hội thoại
     for (const gKey of groqKeys) {
         try {
             const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -474,7 +571,7 @@ async function handleTelegramUpdate(update, env, ctx) {
                 headers: { "Authorization": "Bearer " + gKey, "Content-Type": "application/json" },
                 body: JSON.stringify({
                     model: "qwen/qwen3.8-27b",
-                    messages: [{ role: "system", content: SYSTEM_INSTRUCTION }, { role: "user", content: text }],
+                    messages: groqMessages,
                     max_tokens: 2048,
                     temperature: 0.7
                 })
@@ -492,14 +589,22 @@ async function handleTelegramUpdate(update, env, ctx) {
 
     // Escalation Gemini nếu cần
     if (!answer || shouldEscalate) {
+        const geminiContents = [
+            ...historyList.slice(-10).map(h => ({
+                role: h.role === 'assistant' ? 'model' : 'user',
+                parts: [{ text: h.content }]
+            })),
+            { role: "user", parts: [{ text: text }] }
+        ];
+
         for (const gemKey of geminiKeys) {
             try {
                 const gemRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${gemKey}`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
-                        contents: [{ role: "user", parts: [{ text: text }] }],
-                        systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] }
+                        contents: geminiContents,
+                        systemInstruction: { parts: [{ text: fullSystem }] }
                     })
                 });
                 if (gemRes.status === 200) {
@@ -533,6 +638,14 @@ async function handleTelegramUpdate(update, env, ctx) {
     }
 
     const cleanAnswer = answer.replace(/```commit:[^\n\r]+\n[\s\S]*?```/g, "").replace("[ESCALATE_TO_GEMINI]", "").trim();
+
+    // Cập nhật Ký ức hội thoại cho Topic này
+    historyList.push({ role: "user", content: text });
+    historyList.push({ role: "assistant", content: cleanAnswer });
+    if (historyList.length > 20) historyList.splice(0, historyList.length - 20);
+    mem.history = historyList;
+    topicMemory.set(memKey, mem);
+
     let reply = `🤖 <b>[QUINLOVERIN 3.8 CLOUD]</b> ⏱️ <b>${elapsedSec}s</b> (<i>${modelUsed}</i>)\n──────────────────────\n${cleanAnswer}\n\n`;
 
     if (committedFiles.length > 0) {

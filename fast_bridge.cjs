@@ -208,9 +208,47 @@ function stopTicker() {}
 // --- CLOUDFLARE WORKER 24/7 CLOUD HANDOVER HELPERS ---
 const CLOUD_WORKER_URL = 'https://quin-iu-mthu-code-mobile.letrungquangm.workers.dev';
 
+async function syncContextToCloud() {
+    try {
+        let history = [];
+        if (fs.existsSync(syncBridgePath)) {
+            try {
+                const raw = fs.readFileSync(syncBridgePath, 'utf8').replace(/^\uFEFF/, '');
+                const d = JSON.parse(raw);
+                if (Array.isArray(d.messages)) {
+                    history = d.messages.slice(-8).map(m => ({
+                        role: m.sender === 'phone' ? 'user' : 'assistant',
+                        content: m.text
+                    }));
+                }
+            } catch (e) {}
+        }
+        const proj = lobby.getProjectInfo(activeThreadId);
+        const payload = {
+            thread_id: activeThreadId,
+            repo: proj.name,
+            path: proj.path,
+            pin: lobby.getProjectPin(activeThreadId),
+            summary: `Dự án ${proj.name} tại ${proj.path}. Cầu nối Antigravity PC đang tạm bàn giao cho Cloud.`,
+            files: ['fast_bridge.cjs', 'src/worker.js', 'lib/intent.cjs', 'lib/ipc.cjs', 'lib/lobby.cjs'],
+            history: history
+        };
+        const res = await fetch(`${CLOUD_WORKER_URL}/sync/context`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const json = await res.json();
+        console.log('[Context Sync] Đã chia sẻ ký ức Repo & lịch sử hội thoại lên Cloudflare Worker 24/7:', json && json.ok ? 'Thành công!' : JSON.stringify(json));
+    } catch (e) {
+        console.warn('[Context Sync Error]:', e.message);
+    }
+}
+
 async function setCloudWebhook(enable = true) {
     try {
         if (enable) {
+            await syncContextToCloud();
             const res = await tgApiRaw('setWebhook', { url: CLOUD_WORKER_URL, ip_address: '172.67.144.228', drop_pending_updates: false });
             console.log('[Cloud Handover] Đã kích hoạt Webhook tới Cloudflare Worker 24/7:', res && res.ok ? 'OK' : JSON.stringify(res));
             return res && res.ok;
