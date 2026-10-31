@@ -86,6 +86,30 @@ console.log(` Bot Token: ${botToken.substring(0, 10)}...`);
 console.log(` Conversation ID: ${conversationId}`);
 console.log('========================================================');
 
+// --- SINGLETON PROCESS CHECK (CHỐNG CHẠY TRÙNG LẶP GÂY LỖI 409 CONFLICT) ---
+const pidFile = path.join(rootDir, 'bridge.pid');
+try {
+    if (fs.existsSync(pidFile)) {
+        const oldPid = parseInt(fs.readFileSync(pidFile, 'utf8').trim(), 10);
+        if (oldPid && oldPid !== process.pid) {
+            try {
+                process.kill(oldPid, 0);
+                console.log(`[Bridge Startup] Phát hiện instance cũ PID ${oldPid} đang chạy. Tự động dừng để tránh lỗi 409 Conflict...`);
+                process.kill(oldPid, 'SIGTERM');
+            } catch (e) {}
+        }
+    }
+    fs.writeFileSync(pidFile, process.pid.toString(), 'utf8');
+} catch (e) {}
+
+process.on('exit', () => {
+    try {
+        if (fs.existsSync(pidFile) && fs.readFileSync(pidFile, 'utf8').trim() === process.pid.toString()) {
+            fs.unlinkSync(pidFile);
+        }
+    } catch (e) {}
+});
+
 // --- STATE MANAGEMENT ---
 
 let activeChatId = -1004457846636;
@@ -664,6 +688,13 @@ async function pollUpdates() {
             isCloudStandby = true;
         } else {
             console.log('[Bridge Startup] Chưa có Webhook, PC tiếp quản điều khiển trực tiếp!');
+            try {
+                await sendMsg(
+                    activeChatId,
+                    `🖥️ <b>[PC LOCAL BRIDGE - ĐÃ KẾT NỐI LẠI]</b>\n──────────────────────\n✅ <b>Cầu nối Antigravity PC đã kích hoạt thành công!</b>\n⚡ Sẵn sàng tiếp nhận lệnh và code trực tiếp từ điện thoại của bro!`,
+                    activeThreadId
+                );
+            } catch (e) {}
             isCloudStandby = false;
         }
     } catch (e) {
