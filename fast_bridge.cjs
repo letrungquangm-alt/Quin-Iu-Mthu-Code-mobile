@@ -1126,7 +1126,7 @@ async function pollUpdates() {
                             tempMsgIds = [];
                             promptMsgId = null;
 
-                            const proj = lobby.getProjectInfo(threadId);
+                            const proj = lobby.getProjectInfo(providedCode || threadId);
                             launchOrFocusAntigravity(proj.path);
                             forwardToAntigravity(conversationId, `[LỆNH KẾT NỐI PC]: Người dùng đã nhập đúng mã PIN ${providedCode} và kết nối lại PC thành công từ Topic #${threadId || 1160}. Dự án ${proj.name} (${proj.path}) đã được nạp tự động!`);
                             await sendMsg(
@@ -1310,7 +1310,7 @@ async function pollUpdates() {
                         if (lobby.verifyProjectPin(code, threadId)) {
                             waitingForPairCode = false;
                             isCloudStandby = false;
-                            const proj = lobby.getProjectInfo(threadId);
+                            const proj = lobby.getProjectInfo(code || threadId);
                             launchOrFocusAntigravity(proj.path);
                             forwardToAntigravity(conversationId, `[LỆNH KẾT NỐI PC]: Người dùng đã nhập đúng mã PIN ${code} từ Telegram. Đã mở và nạp dự án ${proj.name} (${proj.path}) vào Antigravity IDE.`);
                             await sendMsg(
