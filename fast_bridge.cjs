@@ -1271,12 +1271,12 @@ async function pollUpdates() {
                                 }
                                 continue;
                             }
-                    }
+
                             // 7. Tắt nguồn máy tính PC (Remote Shutdown)
                             if (intent.action === 'shutdown_pc') {
                                 await sendMsg(
                                     chatId,
-                                    `🔌 <b>[ĐÃ TIẾP NHẬN LỆNH TẮT NGUỒN PC]</b>\n──────────────────────\n✅ <b>Đã bàn giao quyền trực chiến 100% cho Cloudflare Worker 24/7!</b>\n⚡ Máy tính PC sẽ tự động ngắt nguồn hoàn toàn (Shut down) trong 5 giây.\n\n💤 <i>Chúc bro nghỉ ngơi! Khi nào bro mở lại máy tính, chỉ cần vào Telegram gõ <code>/pc</code> và nhập mã PIN để mở lại Antigravity nhé!</i>`,
+                                    `🔌 <b>[ĐÃ TIẾP NHẬN LỆNH TẮT NGUỒN PC]</b>\n──────────────────────\n✅ <b>Đã bàn giao quyền trực chiến 100% cho Cloudflare Worker 24/7!</b>\n⚡ Máy tính PC sẽ tự động ngắt nguồn hoàn toàn (Shut down) trong 10 giây.\n\n💡 <i>Nếu muốn hủy tắt máy, hãy gõ ngay: <code>hủy tắt máy</code> hoặc <code>/cancel_shutdown</code></i>\n💤 <i>Chúc bro nghỉ ngơi! Khi nào mở lại máy tính, chỉ cần vào Telegram gõ <code>/pc</code> và nhập mã PIN để mở lại Antigravity nhé!</i>`,
                                     threadId
                                 );
 
@@ -1284,15 +1284,30 @@ async function pollUpdates() {
                                 await setCloudWebhook(true);
                                 isCloudStandby = true;
 
-                                // Thực thi lệnh tắt máy Windows
+                                // Thực thi lệnh tắt máy Windows (đặt 10 giây để người dùng kịp hủy nếu vô tình ấn nhầm)
                                 setTimeout(() => {
                                     try {
                                         const cp = require('child_process');
-                                        cp.exec('shutdown.exe /s /t 5 /c "QuinloveRin Remote Shutdown from Telegram"');
+                                        cp.exec('shutdown.exe /s /t 10 /c "QuinloveRin Remote Shutdown from Telegram"');
                                     } catch (e) {}
                                 }, 1500);
                                 continue;
                             }
+
+                            // 8. Hủy lệnh tắt máy (Cancel Shutdown)
+                            if (intent.action === 'cancel_shutdown') {
+                                try {
+                                    const cp = require('child_process');
+                                    cp.exec('shutdown.exe /a');
+                                } catch (e) {}
+                                await sendMsg(
+                                    chatId,
+                                    `🛑 <b>[ĐÃ HỦY LỆNH TẮT MÁY THÀNH CÔNG]</b>\n──────────────────────\n✅ Đã kích hoạt <code>shutdown /a</code> trên Windows.\n🖥️ Máy tính PC tiếp tục hoạt động bình thường!`,
+                                    threadId
+                                );
+                                continue;
+                            }
+                        }
                     }
 
                     // 🌐 LỆNH TẢI ANTIGRAVITY IDE CHO MÁY MỚI
