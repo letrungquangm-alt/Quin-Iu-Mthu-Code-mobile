@@ -1,10 +1,10 @@
 {
-  "updated_at": "2026-10-31T16:12:04.617Z",
-  "file_id": "BQACAgUAAyEGAAMBCbVXbAACEQVq5hNURRPie_2XZnt2i9c0K0rWGAAC1SUAAqoFMFfPFeUc2DE__T0E",
-  "message_id": 4357,
-  "file_count": 73,
-  "raw_bytes": 611109,
-  "gzipped_size": 155356,
+  "updated_at": "2026-10-31T16:30:30.557Z",
+  "file_id": "BQACAgUAAyEGAAMBCbVXbAACEU5q5hemRcbcYOomBoSyCHBDKPyJfwAC4SUAAqoFMFft9v__Mo_roz0E",
+  "message_id": 4430,
+  "file_count": 74,
+  "raw_bytes": 626810,
+  "gzipped_size": 159332,
   "file_tree": [
     {
       "path": "antigravity_ls.json",
@@ -44,7 +44,7 @@
     },
     {
       "path": "fast_bridge.cjs",
-      "size": 87541
+      "size": 88676
     },
     {
       "path": "GEMINI.md",
@@ -92,7 +92,7 @@
     },
     {
       "path": "lib/intent.cjs",
-      "size": 10554
+      "size": 7695
     },
     {
       "path": "lib/ipc.cjs",
@@ -232,7 +232,7 @@
     },
     {
       "path": "src/worker.js",
-      "size": 45221
+      "size": 57477
     },
     {
       "path": "start.bat",
@@ -245,6 +245,10 @@
     {
       "path": "sync_bridge.json",
       "size": 6712
+    },
+    {
+      "path": "telecloud_manifest.json",
+      "size": 5169
     },
     {
       "path": "test_copyscreen.ps1",
