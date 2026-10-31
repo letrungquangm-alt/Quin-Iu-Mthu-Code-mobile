@@ -52,14 +52,32 @@ let teleCloudStores = new Map();
 function isConversationalPrompt(text) {
     const clean = (text || '').trim();
     if (!clean) return false;
+
+    // Các cụm từ lệnh ngắn chuẩn xác 100% không bao giờ là conversational prompt:
+    const lower = clean.toLowerCase();
+    if (/^(?:\/pc|\/connect|\/ketnoi|\/cancel|\/dongtopic|\/dongrepo|\/cloud|ket noi pc|kết nối pc)$/i.test(lower)) return false;
+    if (/^(?:\/screen|\/screenshot|\/snap|\/chup|chụp màn hình|chup man hinh)$/i.test(lower)) return false;
+    if (/^(?:\/antigravity|\/app|\/ide|\/open_antigravity|bật antigravity|mở antigravity|bat antigravity|mo antigravity)$/i.test(lower)) return false;
+    if (/^(?:\/close_antigravity|\/tat_antigravity|\/kill_antigravity|tắt antigravity|đóng antigravity|tat antigravity|dong antigravity)$/i.test(lower)) return false;
+    if (/^(?:\/shutdown|\/tatmay|\/tat_pc|\/tat_may|tắt máy|tat may|tắt máy tính|may tinh)$/i.test(lower)) return false;
+    if (/^(?:\/cancel_shutdown|\/huy_tat_may|\/huy_shutdown|hủy tắt máy|huy tat may|đừng tắt máy|dung tat may)$/i.test(lower)) return false;
+
+    // 1. Có dấu hỏi hoặc dấu xuống dòng hoặc code markdown -> 100% Prompt
     if (/[?？]/.test(clean)) return true;
     if (clean.includes('\n') || clean.includes('```')) return true;
-    const words = clean.split(/\s+/);
-    if (words.length > 2) {
-        if (/\b(?:sao|tại sao|vì sao|thế nào|làm sao|lỗi|thấy|bảo|ghi|làm gì|được k|được không|vậy|hả|à|nhỉ|hỏi|như v|như vậy|chưa|không được|k được|chỉ hiện|làm gì có|giúp|viết|sửa|chạy|bị|tắt|mở máy|ý tôi là|này đang|vấn đề)\b/i.test(clean)) {
-            return true;
-        }
+
+    // 2. Chứa các từ khóa đàm thoại, hỏi đáp, phàn nàn, lập trình
+    const promptKeywords = /(?:sao|tại sao|tai sao|vì sao|vi sao|thế nào|the nao|làm sao|lam sao|lỗi|loi|bị gì|bi gi|sao lại|sao lai|được k|duoc k|được không|duoc khong|vậy|vay|hả|ha|à|nhỉ|nhi|hỏi|hoi|như v|nhu v|như vậy|nhu vay|chưa|chua|không được|khong duoc|k được|k duoc|ko được|ko duoc|chỉ hiện|chi hien|làm gì có|lam gi co|giúp|giup|viết|viet|sửa|sua|chạy|chay|bị|bi|ý tôi là|y toi la|này đang|nay dang|vấn đề|van de|alo|giải thích|giai thich|kiểm tra|kiem tra|tìm hiểu|tim hieu|nếu|neu|tôi kêu|toi keu|nhìn lên|nhin len|tôi vừa|toi vua|test đồ|thành công|thanh cong|mở node|mo node|tắt liên tục|tat lien tuc|không yêu cầu|khong yeu cau|nghiêm trọng|nghiem trong|phân biệt|phan biet|kích hoạt|kich hoat)/i;
+    if (promptKeywords.test(clean)) {
+        return true;
     }
+
+    // 3. Nếu không bắt đầu bằng '/' và có trên 3 từ -> 100% Prompt
+    const words = clean.split(/\s+/);
+    if (!clean.startsWith('/') && words.length > 3) {
+        return true;
+    }
+
     return false;
 }
 
@@ -515,13 +533,25 @@ async function handleTelegramUpdate(update, env, ctx) {
         }
 
         // G. LỆNH ĐIỀU KHIỂN TẮT ỨNG DỤNG TRÊN PC: /TAT, /DONG, /CLOSE
-        if (/^(?:\/tat|\/dong|\/close|\/kill|tắt|đóng)\s+(?:cửa sổ\s+|ứng dụng\s+|app\s+|phần mềm\s+|tab\s+)?(.+)$/i.test(text.trim())) {
-            const closeTarget = text.trim().toLowerCase();
+        if (/^\/(?:close_antigravity|tat_antigravity|kill_antigravity)$/i.test(text.trim()) ||
+            /^(?:tắt|đóng|tat|dong)\s+antigravity$/i.test(text.trim())) {
+            await sendTg(
+                botToken,
+                chatId,
+                `☁️ <b>[ANTIGRAVITY ĐÃ TẮT & CLOUD 24/7 ĐANG TRỰC CHIẾN]</b>\n──────────────────────\n✅ Ứng dụng Antigravity IDE trên PC hiện đã tắt để tiết kiệm tài nguyên.\n⚡ Cloudflare Worker 24/7 đang trực tiếp tiếp nhận mọi yêu cầu của bro!\n\n💡 <i>Khi nào muốn mở lại Antigravity trên PC, bro chỉ cần gõ <code>/pc</code> và nhập mã PIN nhé!</i>`,
+                threadId
+            );
+            return;
+        }
+
+        if (/^\/(?:tat|dong|close|kill)\s+([a-zA-Z0-9_\-\.]+)$/i.test(text.trim())) {
+            const matchApp = text.trim().match(/^\/(?:tat|dong|close|kill)\s+([a-zA-Z0-9_\-\.]+)$/i);
+            const closeTarget = matchApp ? matchApp[1].toLowerCase() : '';
             if (closeTarget.includes('antigravity') || closeTarget.includes('agy') || closeTarget.includes('ide')) {
                 await sendTg(
                     botToken,
                     chatId,
-                    `☁️ <b>[ANTIGRAVITY ĐÃ TẮT & CLOUD 24/7 ĐANG TRỰC CHIẾN]</b>\n──────────────────────\n✅ Ứng dụng Antigravity IDE trên PC hiện đã tắt để tiết kiệm tài nguyên.\n⚡ Cloudflare Worker 24/7 đang trực tiếp tiếp nhận mọi yêu cầu của bro!\n\n💡 <i>Khi nào muốn mở lại Antigravity trên PC, bro chỉ cần gõ <code>bật antigravity</code> hoặc <code>/pc</code> nhé!</i>`,
+                    `☁️ <b>[ANTIGRAVITY ĐÃ TẮT & CLOUD 24/7 ĐANG TRỰC CHIẾN]</b>\n──────────────────────\n✅ Ứng dụng Antigravity IDE trên PC hiện đã tắt để tiết kiệm tài nguyên.\n⚡ Cloudflare Worker 24/7 đang trực tiếp tiếp nhận mọi yêu cầu của bro!\n\n💡 <i>Khi nào muốn mở lại Antigravity trên PC, bro chỉ cần gõ <code>/pc</code> và nhập mã PIN nhé!</i>`,
                     threadId
                 );
                 return;

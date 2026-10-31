@@ -35,22 +35,8 @@ const { takeScreenshot, sendScreenshot } = require('./lib/screen.cjs');
 const { sendScreenVideo, recordScreen } = require('./lib/recorder.cjs');
 const { checkInstalledBrowsers, getBrowserInstallMarkup, installBrowserAsync } = require('./lib/installer.cjs');
 const { openWebOrApp, closeAppOrProcess, normalizeStr, getActiveWindowsSummary, URL_SHORTCUTS, APP_SHORTCUTS } = require('./lib/launcher.cjs');
-const { classifyUserIntent } = require('./lib/intent.cjs');
+const { classifyUserIntent, isConversationalPrompt } = require('./lib/intent.cjs');
 const { syncRepoToTeleCloud } = require('./lib/telecloud.cjs');
-
-function isConversationalPrompt(text) {
-    const clean = (text || '').trim();
-    if (!clean) return false;
-    if (/[?？]/.test(clean)) return true;
-    if (clean.includes('\n') || clean.includes('```')) return true;
-    const words = clean.split(/\s+/);
-    if (words.length > 3) {
-        if (/\b(?:sao|tại sao|vì sao|thế nào|làm sao|lỗi|thấy|bảo|ghi|làm gì|được k|được không|vậy|hả|à|nhỉ|hỏi|như v|như vậy|chưa|không được|k được|chỉ hiện|làm gì có|giúp|viết|sửa|chạy)\b/i.test(clean)) {
-            return true;
-        }
-    }
-    return false;
-}
 
 const { askGroq } = require('./lib/groq.cjs');
 
@@ -729,22 +715,26 @@ async function pollUpdates() {
     // Thay vào đó, PC giữ chế độ Standby để Cloudflare Worker 24/7 đón nhận lệnh /pc và xác thực mã PIN.
     try {
         const whInfo = await tgApiRaw('getWebhookInfo');
-        if (whInfo && whInfo.result && whInfo.result.url) {
-            console.log('[Bridge Startup] Cloudflare Webhook dang hoat dong (' + whInfo.result.url + '). Chuyen PC vao che do Standby cho lenh /pc tu Telegram!');
+        const isDirectArg = process.argv.includes('--direct') || process.argv.includes('--connect');
+        if (!isDirectArg) {
+            console.log('[Bridge Startup] Che do Mac dinh: Thiet lap Webhook toi Cloudflare Worker 24/7 de tiep nhan lenh /pc...');
+            await setCloudWebhook(true);
             isCloudStandby = true;
+            console.log('[Bridge Startup] PC dang o che do Cho (Standby). Khi bro go /pc & nhap PIN 2726 tren Telegram, PC se tu dong mo Antigravity IDE!');
         } else {
-            console.log('[Bridge Startup] Chưa có Webhook, PC tiếp quản điều khiển trực tiếp!');
+            console.log('[Bridge Startup] Co --direct: PC truc tiep tiep quan dieu khien!');
+            await setCloudWebhook(false);
             try {
                 await sendMsg(
                     activeChatId,
-                    `🖥️ <b>[PC LOCAL BRIDGE - ĐÃ KẾT NỐI LẠI]</b>\n──────────────────────\n✅ <b>Cầu nối Antigravity PC đã kích hoạt thành công!</b>\n⚡ Sẵn sàng tiếp nhận lệnh và code trực tiếp từ điện thoại của bro!`,
+                    '🖥️ <b>[PC LOCAL BRIDGE - ĐÃ KẾT NỐI TRỰC TIẾP]</b>\n──────────────────────\n✅ <b>Cầu nối Antigravity PC đã kích hoạt thành công!</b>\n⚡ Sẵn sàng tiếp nhận lệnh và code trực tiếp từ điện thoại của bro!',
                     activeThreadId
                 );
             } catch (e) {}
             isCloudStandby = false;
         }
     } catch (e) {
-        console.warn('[Bridge Startup] Không kiểm tra được WebhookInfo:', e.message);
+        console.warn('[Bridge Startup] Khong kiem tra duoc WebhookInfo:', e.message);
     }
 
     const allowedList = [2029333412, -1004457846636];
@@ -1239,13 +1229,6 @@ async function pollUpdates() {
                                         ? 'Đã khôi phục (restore) và đưa cửa sổ Antigravity lên phía trước màn hình!'
                                         : 'Đã kích hoạt và đưa cửa sổ Antigravity lên phía trước màn hình!';
                                     await sendMsg(chatId, `🖥️ <b>[ĐÃ MỞ CỬA SỔ ANTIGRAVITY TRÊN PC]</b>\n──────────────────────\n✅ <b>${actionDesc}</b>\n⚡ Cầu nối IPC đã đồng bộ hóa 100% với Antigravity PC.`, threadId);
-                                    if (intent.screenshot) {
-                                        setTimeout(async () => {
-                                            try {
-                                                await sendScreenshot(botToken, chatId, threadId, `📸 <b>[ẢNH CHỤP CỬA SỔ ANTIGRAVITY TRÊN PC]</b>\n──────────────────────\n✅ ${actionDesc}`);
-                                            } catch (e) {}
-                                        }, 2500);
-                                    }
                                 }
                                 continue;
                             }
