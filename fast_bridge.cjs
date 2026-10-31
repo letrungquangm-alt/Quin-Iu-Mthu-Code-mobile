@@ -172,7 +172,7 @@ const CLOUD_WORKER_URL = 'https://quin-iu-mthu-code-mobile.letrungquangm.workers
 async function setCloudWebhook(enable = true) {
     try {
         if (enable) {
-            const res = await tgApiRaw('setWebhook', { url: CLOUD_WORKER_URL });
+            const res = await tgApiRaw('setWebhook', { url: CLOUD_WORKER_URL, ip_address: '172.67.144.228', drop_pending_updates: false });
             console.log('[Cloud Handover] Đã kích hoạt Webhook tới Cloudflare Worker 24/7:', res && res.ok ? 'OK' : JSON.stringify(res));
             return res && res.ok;
         } else {
