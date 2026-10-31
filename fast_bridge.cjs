@@ -34,7 +34,7 @@ const {
 const { takeScreenshot, sendScreenshot } = require('./lib/screen.cjs');
 const { sendScreenVideo, recordScreen } = require('./lib/recorder.cjs');
 const { checkInstalledBrowsers, getBrowserInstallMarkup, installBrowserAsync } = require('./lib/installer.cjs');
-const { openWebOrApp, getActiveWindowsSummary, URL_SHORTCUTS, APP_SHORTCUTS } = require('./lib/launcher.cjs');
+const { openWebOrApp, closeAppOrProcess, normalizeStr, getActiveWindowsSummary, URL_SHORTCUTS, APP_SHORTCUTS } = require('./lib/launcher.cjs');
 const { classifyUserIntent } = require('./lib/intent.cjs');
 
 function isConversationalPrompt(text) {
@@ -1238,7 +1238,37 @@ async function pollUpdates() {
                                 }
                                 continue;
                             }
-                        }
+                            // 6. Tắt / Đóng ứng dụng, phần mềm, tab hoặc Antigravity
+                            if (intent.action === 'close_app') {
+                                const rawTarget = intent.target || 'antigravity';
+                                const isAntigravity = /^(?:antigravity|agy|ide)$/i.test(rawTarget.trim()) ||
+                                    normalizeStr(rawTarget) === 'antigravity';
+
+                                const res = closeAppOrProcess(rawTarget);
+                                if (res.ok) {
+                                    if (isAntigravity) {
+                                        await sendMsg(
+                                            chatId,
+                                            `🛑 <b>[ĐÃ ĐÓNG CỬA SỔ ANTIGRAVITY TRÊN PC]</b>\n──────────────────────\n✅ <b>Đã tắt ứng dụng Antigravity IDE an toàn!</b>\n⚡ Đã giải phóng hoàn toàn tài nguyên CPU & RAM trên PC.\n\n💡 <i>Khi cần mở lại để code tiếp, bro chỉ cần gõ <code>bật antigravity</code> hoặc <code>/app</code> là bot tự bật ngay nhé!</i>`,
+                                            threadId
+                                        );
+                                    } else {
+                                        await sendMsg(
+                                            chatId,
+                                            `🛑 <b>[ĐÃ ĐÓNG TIẾN TRÌNH / CỬA SỔ TRÊN PC]</b>\n──────────────────────\n✅ <b>${res.desc}</b>\n⚡ Tiến trình đã được giải phóng khỏi máy tính.`,
+                                            threadId
+                                        );
+                                    }
+                                } else {
+                                    await sendMsg(
+                                        chatId,
+                                        `ℹ️ <b>[KHÔNG TÌM THẤY TIẾN TRÌNH ĐỂ ĐÓNG]</b>\n──────────────────────\n${res.desc}`,
+                                        threadId
+                                    );
+                                }
+                                continue;
+                            }
+                    }
                     }
 
                     // 🌐 LỆNH TẢI ANTIGRAVITY IDE CHO MÁY MỚI

@@ -391,6 +391,17 @@ async function handleTelegramUpdate(update, env, ctx) {
             }
             return;
         }
+
+        // G. LỆNH ĐIỀU KHIỂN TẮT ỨNG DỤNG TRÊN PC: /TAT, /DONG, /CLOSE
+        if (/^(?:\/tat|\/dong|\/close|\/kill|tắt|đóng)\s+(?:cửa sổ\s+|ứng dụng\s+|app\s+|phần mềm\s+|tab\s+)?(.+)$/i.test(text.trim())) {
+            await sendTg(
+                botToken,
+                chatId,
+                `🖥️ <b>[LỆNH ĐIỀU KHIỂN ỨNG DỤNG MÁY TÍNH]</b>\n──────────────────────\nℹ️ Lệnh <code>${text}</code> yêu cầu thực thi trực tiếp trên PC.\n👉 Hiện tại bot đang ở chế độ Cloud 24/7. Bro hãy gõ <code>/pc</code> và nhập mã PIN để kết nối máy tính trước nhé!`,
+                threadId
+            );
+            return;
+        }
     }
 
     // 🏛️ SẢNH LOBBY TRÊN CLOUD: XÓA TIN NHẮN & TUYỆT ĐỐI KHÔNG CHẠY CODE TẠI ĐÂY
