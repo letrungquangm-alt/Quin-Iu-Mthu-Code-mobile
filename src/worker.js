@@ -25,8 +25,22 @@ const DEFAULT_GEMINI_KEYS = JSON.parse(fromHex("5b2241512e416238524e364c5f524e75
 // Hàng đợi đăng ký máy net: cmdCode -> { hostname, drive, time, teleCode, dmBotToken, dmMsgId }
 let netRegistrations = new Map();
 
-// Trạng thái Admin xác thực kép tại Sảnh: userId -> { step: 'AWAIT_PIN' | 'AWAIT_PASS', enteredPin: false, enteredPass: false }
+// Trạng thái Admin xác thực kép tại Sảnh: userId -> { step: 'AWAIT_PIN' | 'AWAIT_PASS' | 'AWAIT_PC_PIN', enteredPin: false, enteredPass: false }
 let adminAuthStates = new Map();
+
+function isConversationalPrompt(text) {
+    const clean = (text || '').trim();
+    if (!clean) return false;
+    if (/[?？]/.test(clean)) return true;
+    if (clean.includes('\n') || clean.includes('```')) return true;
+    const words = clean.split(/\s+/);
+    if (words.length > 2) {
+        if (/\b(?:sao|tại sao|vì sao|thế nào|làm sao|lỗi|thấy|bảo|ghi|làm gì|được k|được không|vậy|hả|à|nhỉ|hỏi|như v|như vậy|chưa|không được|k được|chỉ hiện|làm gì có|giúp|viết|sửa|chạy|bị|tắt|mở máy|ý tôi là|này đang|vấn đề)\b/i.test(clean)) {
+            return true;
+        }
+    }
+    return false;
+}
 
 const SYSTEM_INSTRUCTION = `Bạn là QuinloveRin 3.8, trợ lý lập trình AI siêu cấp hoạt động 24/7 trên Cloudflare Worker & Groq LPU.
 Quy tắc:
@@ -259,75 +273,124 @@ async function handleTelegramUpdate(update, env, ctx) {
         }
     }
 
-    // 2. CƠ CHẾ XÁC THỰC KÉP QUẢN TRỊ VIÊN (ADMIN AUTH: PASSWORD & PIN 2726)
-    let authState = adminAuthStates.get(userId) || { step: null, enteredPin: false, enteredPass: false };
+    // 2. NẾU LÀ PROMPT ĐÀM THOẠI / CÂU HỎI: BỎ QUA TOÀN BỘ LỆNH & ĐI THẲNG TỚI AI (GROQ / GEMINI)
+    if (!isConversationalPrompt(text)) {
+        // A. LỆNH KẾT NỐI / TIẾP QUẢN PC: /PC, /CONNECT, /KETNOI, KET NOI PC
+        if (/^(?:\/pc|\/connect|\/ketnoi|ket\s*noi\s*pc)(?:\s+(\d{3,4}))?$/i.test(text.trim())) {
+            const match = text.trim().match(/^(?:\/pc|\/connect|\/ketnoi|ket\s*noi\s*pc)(?:\s+(\d{3,4}))?$/i);
+            const providedCode = match ? match[1] : null;
 
-    // A. Nhập mã PIN 2726
-    if (text === PROJECT_PIN) {
-        authState.enteredPin = true;
-        if (authState.enteredPass) {
-            // Cả hai đã hoàn tất!
-            adminAuthStates.delete(userId);
-            await sendTg(botToken, chatId, `👑 <b>[TOÀN QUYỀN QUẢN TRỊ ĐÃ MỞ KHÓA 100%]</b>\n──────────────────────\n🔑 Mã PIN: <code>2726</code> (Trí nhớ dự án đã nạp)\n🛡️ Mật mã quản trị: <b>Chính xác!</b>\n🚀 Bro có thể điều hành và phát triển dự án từ xa ngay trên Cloud 24/7!`, threadId);
-            return;
-        } else {
-            authState.step = "AWAIT_PASS";
-            adminAuthStates.set(userId, authState);
-            await sendTg(botToken, chatId, `👑 <b>[XÁC THỰC QUẢN TRỊ VIÊN]</b>\n──────────────────────\n✅ Đã nhận diện mã PIN dự án: <code>2726</code>!\n🔑 Vui lòng nhập <b>Mật mã Quản trị Tối cao</b> để kích hoạt toàn quyền:`, threadId);
-            return;
-        }
-    }
+            if (providedCode && (providedCode === PROJECT_PIN || providedCode === "2726" || providedCode === "6585")) {
+                adminAuthStates.delete(userId);
+                try {
+                    await fetch(`https://api.telegram.org/bot${botToken}/deleteWebhook`);
+                } catch (e) {}
+                await sendTg(
+                    botToken,
+                    chatId,
+                    `🖥️ <b>[ĐÃ XÁC THỰC MÃ PIN & BÀN GIAO CHO PC]</b>\n──────────────────────\n🔑 <b>Mã PIN:</b> <code>${providedCode}</code> (Khớp cửa sổ dự án #${threadId || 1160})\n⚡ <b>Hành động:</b> Đã gửi tín hiệu đánh thức Terminal Node của PC!\n🚀 Ứng dụng Antigravity IDE trên PC sẽ tự động mở và trỏ vào dự án!`,
+                    threadId
+                );
+                return;
+            }
 
-    // B. Nhập Mật mã Quản trị Tối cao
-    if (text === MASTER_PASSWORD) {
-        authState.enteredPass = true;
-        if (authState.enteredPin) {
-            // Cả hai đã hoàn tất!
-            adminAuthStates.delete(userId);
-            await sendTg(botToken, chatId, `👑 <b>[TOÀN QUYỀN QUẢN TRỊ ĐÃ MỞ KHÓA 100%]</b>\n──────────────────────\n🔑 Mật mã quản trị: <b>Chính xác!</b>\n🧠 Mã PIN 2726: <b>Đã đồng bộ trí nhớ dự án!</b>\n🚀 Bro có thể điều hành và phát triển dự án từ xa ngay trên Cloud 24/7!`, threadId);
-            return;
-        } else {
-            authState.step = "AWAIT_PIN";
-            adminAuthStates.set(userId, authState);
-            await sendTg(botToken, chatId, `👑 <b>[MẬT MÃ QUẢN TRỊ HỢP LỆ]</b>\n──────────────────────\n✅ Mật mã chính xác!\n🧠 Vui lòng nhập <b>Mã PIN 4 số của dự án</b> (<code>2726</code>) để liên kết trí nhớ:`, threadId);
+            // Chưa có mã PIN hoặc mã PIN không khớp: BẮT BUỘC HỎI MÃ PIN DỰ ÁN
+            adminAuthStates.set(userId, { step: "AWAIT_PC_PIN", threadId });
+            await sendTg(
+                botToken,
+                chatId,
+                `📟 <b>[XÁC THỰC KẾT NỐI MÁY PC - QUINLOVERIN]</b>\n──────────────────────\n🔑 <b>Dự án:</b> Topic #${threadId || 1160}\n👉 Bro hãy nhập <b>Mã PIN (Mã cửa sổ repo)</b> của dự án để đánh thức PC:`,
+                threadId
+            );
             return;
         }
-    }
 
-    // 3. LỆNH CHUYỂN TIẾP PC / CLOUD
-    if (["/pc", "/connect", "/ketnoi"].includes(text)) {
-        try {
-            await fetch(`https://api.telegram.org/bot${botToken}/deleteWebhook`);
-        } catch (e) {}
-        await sendTg(botToken, chatId, "🖥️ <b>[TIẾP NHẬN LỆNH /PC]</b>\n──────────────────────\n✅ Cloudflare đã nhường quyền cho PC chính ở nhà! PC tiếp quản ngay lập tức!", threadId);
-        return;
-    }
+        // B. KIỂM TRA NẾU ĐANG CHỜ MÃ PIN ĐỂ ĐÁNH THỨC PC HOẶC NHẬP MÃ PIN DỰ ÁN TRONG TOPIC
+        let authState = adminAuthStates.get(userId) || { step: null, enteredPin: false, enteredPass: false };
+        if (authState.step === "AWAIT_PC_PIN" || (/^\d{4}$/.test(text.trim()) && threadId !== null && threadId !== 3562)) {
+            const inputPin = text.trim();
+            if (inputPin === PROJECT_PIN || inputPin === "2726" || inputPin === "6585") {
+                adminAuthStates.delete(userId);
+                try {
+                    await fetch(`https://api.telegram.org/bot${botToken}/deleteWebhook`);
+                } catch (e) {}
+                await sendTg(
+                    botToken,
+                    chatId,
+                    `🖥️ <b>[ĐÃ XÁC THỰC MÃ PIN & BÀN GIAO CHO PC]</b>\n──────────────────────\n🔑 <b>Mã PIN:</b> <code>${inputPin}</code> (Khớp cửa sổ dự án #${threadId || 1160})\n⚡ <b>Hành động:</b> Đã gửi tín hiệu đánh thức Terminal Node của PC!\n🚀 Ứng dụng Antigravity IDE trên PC sẽ tự động mở và trỏ vào dự án!`,
+                    threadId
+                );
+                return;
+            } else if (/^\d{3,4}$/.test(inputPin)) {
+                await sendTg(
+                    botToken,
+                    chatId,
+                    `❌ <b>[MÃ PIN DỰ ÁN KHÔNG ĐÚNG]</b>\nMã <code>${inputPin}</code> không chính xác! Bro hãy nhập lại đúng mã PIN 4 số của dự án này:`,
+                    threadId
+                );
+                return;
+            }
+        }
 
-    if (["/cancel", "/stop"].includes(text)) {
-        await sendTg(botToken, chatId, "🛑 <b>[ĐÃ DỪNG TOÀN BỘ TÁC VỤ CLOUD]</b>", threadId);
-        return;
-    }
-
-    if (["/ketthucrepo", "/endrepo", "/dongrepo"].includes(text)) {
-        await sendTg(botToken, chatId, "🔒 <b>[ĐÃ KẾT THÚC QUYỀN QUẢN TRỊ REPO]</b>\n──────────────────────\n✅ Đã khóa lại quyền hạn quản trị repo thành công trên Cloud!", threadId);
-        return;
-    }
-
-    // 🔒 LỆNH ĐÓNG TOPIC TRÊN CLOUD: /dongtopic
-    if (["/dongtopic", "/closetopic", "/dong_topic"].includes(text)) {
+        // C. CƠ CHẾ XÁC THỰC KÉP QUẢN TRỊ VIÊN TẠI SẢNH LOBBY (MASTER PASSWORD & PIN)
         if (threadId === null || threadId === 3562) {
-            await sendTg(botToken, chatId, "⚠️ <b>[KHÔNG THỂ ĐÓNG SẢNH LOBBY]</b>\n──────────────────────\nSảnh Lobby là kênh điều khiển trung tâm, tuyệt đối không thể đóng!", threadId);
-        } else {
-            await sendTg(botToken, chatId, `🔒 <b>[TOPIC ĐÃ ĐƯỢC ĐÓNG]</b>\n──────────────────────\nTopic #${threadId} này đã được đóng lại theo lệnh <code>/dongtopic</code>.\n👉 Bro có thể quay lại Sảnh Lobby bất cứ lúc nào!`, threadId);
-            try {
-                await fetch(`https://api.telegram.org/bot${botToken}/closeForumTopic`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ chat_id: chatId, message_thread_id: threadId })
-                });
-            } catch (e) {}
+            if (text === PROJECT_PIN && authState.step === "AWAIT_PIN") {
+                authState.enteredPin = true;
+                if (authState.enteredPass) {
+                    adminAuthStates.delete(userId);
+                    await sendTg(botToken, chatId, `👑 <b>[TOÀN QUYỀN QUẢN TRỊ ĐÃ MỞ KHÓA 100%]</b>\n──────────────────────\n🔑 Mã PIN: <code>2726</code> (Trí nhớ dự án đã nạp)\n🛡️ Mật mã quản trị: <b>Chính xác!</b>\n🚀 Bro có thể điều hành và phát triển dự án từ xa ngay trên Cloud 24/7!`, threadId);
+                    return;
+                } else {
+                    authState.step = "AWAIT_PASS";
+                    adminAuthStates.set(userId, authState);
+                    await sendTg(botToken, chatId, `👑 <b>[XÁC THỰC QUẢN TRỊ VIÊN]</b>\n──────────────────────\n✅ Đã nhận diện mã PIN dự án: <code>2726</code>!\n🔑 Vui lòng nhập <b>Mật mã Quản trị Tối cao</b> để kích hoạt toàn quyền:`, threadId);
+                    return;
+                }
+            }
+
+            if (text === MASTER_PASSWORD) {
+                authState.enteredPass = true;
+                if (authState.enteredPin) {
+                    adminAuthStates.delete(userId);
+                    await sendTg(botToken, chatId, `👑 <b>[TOÀN QUYỀN QUẢN TRỊ ĐÃ MỞ KHÓA 100%]</b>\n──────────────────────\n🔑 Mật mã quản trị: <b>Chính xác!</b>\n🧠 Mã PIN 2726: <b>Đã đồng bộ trí nhớ dự án!</b>\n🚀 Bro có thể điều hành và phát triển dự án từ xa ngay trên Cloud 24/7!`, threadId);
+                    return;
+                } else {
+                    authState.step = "AWAIT_PIN";
+                    adminAuthStates.set(userId, authState);
+                    await sendTg(botToken, chatId, `👑 <b>[MẬT MÃ QUẢN TRỊ HỢP LỆ]</b>\n──────────────────────\n✅ Mật mã chính xác!\n🧠 Vui lòng nhập <b>Mã PIN 4 số của dự án</b> (<code>2726</code>) để liên kết trí nhớ:`, threadId);
+                    return;
+                }
+            }
         }
-        return;
+
+        // D. LỆNH DỪNG / HỦY TÁC VỤ CLOUD: /CANCEL, /STOP
+        if (/^(?:\/cancel|\/stop)$/i.test(text.trim())) {
+            await sendTg(botToken, chatId, "🛑 <b>[ĐÃ DỪNG TOÀN BỘ TÁC VỤ CLOUD]</b>", threadId);
+            return;
+        }
+
+        // E. LỆNH ĐÓNG REPO
+        if (/^(?:\/ketthucrepo|\/endrepo|\/dongrepo)$/i.test(text.trim())) {
+            await sendTg(botToken, chatId, "🔒 <b>[ĐÃ KẾT THÚC QUYỀN QUẢN TRỊ REPO]</b>\n──────────────────────\n✅ Đã khóa lại quyền hạn quản trị repo thành công trên Cloud!", threadId);
+            return;
+        }
+
+        // F. LỆNH ĐÓNG TOPIC TRÊN CLOUD: /DONGTOPIC
+        if (/^(?:\/dongtopic|\/closetopic|\/dong_topic)$/i.test(text.trim())) {
+            if (threadId === null || threadId === 3562) {
+                await sendTg(botToken, chatId, "⚠️ <b>[KHÔNG THỂ ĐÓNG SẢNH LOBBY]</b>\n──────────────────────\nSảnh Lobby là kênh điều khiển trung tâm, tuyệt đối không thể đóng!", threadId);
+            } else {
+                await sendTg(botToken, chatId, `🔒 <b>[TOPIC ĐÃ ĐƯỢC ĐÓNG]</b>\n──────────────────────\nTopic #${threadId} này đã được đóng lại theo lệnh <code>/dongtopic</code>.\n👉 Bro có thể quay lại Sảnh Lobby bất cứ lúc nào!`, threadId);
+                try {
+                    await fetch(`https://api.telegram.org/bot${botToken}/closeForumTopic`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ chat_id: chatId, message_thread_id: threadId })
+                    });
+                } catch (e) {}
+            }
+            return;
+        }
     }
 
     // 🏛️ SẢNH LOBBY TRÊN CLOUD: XÓA TIN NHẮN & TUYỆT ĐỐI KHÔNG CHẠY CODE TẠI ĐÂY
