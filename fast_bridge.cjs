@@ -1154,31 +1154,33 @@ async function pollUpdates() {
                         continue;
                     }
 
-                    // 🔒 LỆNH ĐÓNG TOPIC: /dongtopic (SẢNH TUYỆT ĐỐI KHÔNG ĐƯỢC ĐÓNG)
-                    if (/^(?:\/dongtopic|\/closetopic|\/dong_topic)$/i.test(userText.trim())) {
+                    // 🗑️ LỆNH ĐÓNG & XOÁ VĨNH VIỄN TOPIC: /dongtopic, /xoatopic
+                    if (/^(?:\/dongtopic|\/closetopic|\/dong_topic|\/xoatopic|\/xoa_topic)$/i.test(userText.trim())) {
                         if (threadId === null || lobby.isLobby(threadId)) {
                             await sendMsg(
                                 chatId,
-                                `⚠️ <b>[KHÔNG THỂ ĐÓNG SẢNH LOBBY]</b>\n──────────────────────\nSảnh Lobby là kênh điều khiển trung tâm, tuyệt đối không thể đóng!`,
+                                '⚠️ <b>[KHÔNG THỂ XOÁ SẢNH LOBBY]</b>\n──────────────────────\nSảnh Lobby là kênh điều khiển trung tâm, tuyệt đối không thể xoá!',
+                                threadId,
+                                'HTML'
+                            );
+                        } else if (Number(threadId) === 1160) {
+                            await sendMsg(
+                                chatId,
+                                '⚠️ <b>[DỰ ÁN CỐT LÕI #1160 ĐƯỢC BẢO VỆ]</b>\n──────────────────────\nTopic dự án chính không thể xoá tự động để tránh mất dữ liệu liên kết PC!',
                                 threadId,
                                 'HTML'
                             );
                         } else {
-                            await sendMsg(
-                                chatId,
-                                `🔒 <b>[TOPIC ĐÃ ĐƯỢC ĐÓNG]</b>\n──────────────────────\nTopic #${threadId} này đã được đóng lại theo lệnh <code>/dongtopic</code>.\n👉 Bro có thể quay lại Sảnh Lobby bất cứ lúc nào!`,
-                                threadId,
-                                'HTML'
-                            );
                             try {
-                                await tgApiRaw('closeForumTopic', {
+                                await tgApiRaw('deleteForumTopic', {
                                     chat_id: chatId,
                                     message_thread_id: threadId
                                 });
+                                console.log(`[deleteForumTopic] Đã xoá vĩnh viễn Topic #${threadId} thành công!`);
                             } catch (e) {
-                                console.error('[closeForumTopic Error]:', e.message);
+                                console.error('[deleteForumTopic Error]:', e.message);
                             }
-                            forwardToAntigravity(conversationId, `[ĐÓNG TOPIC]: Người dùng đã phát lệnh /dongtopic đóng Topic #${threadId}.`);
+                            forwardToAntigravity(conversationId, `[XOÁ TOPIC]: Đã xoá vĩnh viễn Topic #${threadId} theo lệnh /dongtopic.`);
                         }
                         continue;
                     }

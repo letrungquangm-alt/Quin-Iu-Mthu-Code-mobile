@@ -606,14 +606,15 @@ async function handleTelegramUpdate(update, env, ctx) {
             return;
         }
 
-        // F. LỆNH ĐÓNG TOPIC TRÊN CLOUD: /DONGTOPIC
-        if (/^(?:\/dongtopic|\/closetopic|\/dong_topic)$/i.test(text.trim())) {
+        // F. LỆNH ĐÓNG & XOÁ TOPIC TRÊN CLOUD: /DONGTOPIC, /XOATOPIC
+        if (/^(?:\/dongtopic|\/closetopic|\/dong_topic|\/xoatopic|\/xoa_topic)$/i.test(text.trim())) {
             if (threadId === null || threadId === 3562) {
-                await sendTg(botToken, chatId, "⚠️ <b>[KHÔNG THỂ ĐÓNG SẢNH LOBBY]</b>\n──────────────────────\nSảnh Lobby là kênh điều khiển trung tâm, tuyệt đối không thể đóng!", threadId);
+                await sendTg(botToken, chatId, "⚠️ <b>[KHÔNG THỂ XOÁ SẢNH LOBBY]</b>\n──────────────────────\nSảnh Lobby là kênh điều khiển trung tâm, tuyệt đối không thể xoá!", threadId);
+            } else if (Number(threadId) === 1160) {
+                await sendTg(botToken, chatId, "⚠️ <b>[DỰ ÁN CỐT LÕI #1160 ĐƯỢC BẢO VỆ]</b>\n──────────────────────\nTopic dự án chính không thể xoá tự động để tránh mất dữ liệu liên kết!", threadId);
             } else {
-                await sendTg(botToken, chatId, `🔒 <b>[TOPIC ĐÃ ĐƯỢC ĐÓNG]</b>\n──────────────────────\nTopic #${threadId} này đã được đóng lại theo lệnh <code>/dongtopic</code>.\n👉 Bro có thể quay lại Sảnh Lobby bất cứ lúc nào!`, threadId);
                 try {
-                    await fetch(`https://api.telegram.org/bot${botToken}/closeForumTopic`, {
+                    await fetch(`https://api.telegram.org/bot${botToken}/deleteForumTopic`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ chat_id: chatId, message_thread_id: threadId })
