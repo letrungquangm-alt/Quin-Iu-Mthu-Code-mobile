@@ -115,7 +115,8 @@ export default {
                     body: JSON.stringify({
                         url: url.origin,
                         ip_address: '172.67.144.228',
-                        drop_pending_updates: false
+                        drop_pending_updates: false,
+                        allowed_updates: ['message', 'edited_message', 'callback_query']
                     })
                 });
                 const d = await res.json();

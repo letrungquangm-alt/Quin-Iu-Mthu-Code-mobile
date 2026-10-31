@@ -243,7 +243,7 @@ async function setCloudWebhook(enable = true) {
     try {
         if (enable) {
             await syncContextToCloud();
-            const res = await tgApiRaw('setWebhook', { url: CLOUD_WORKER_URL, ip_address: '172.67.144.228', drop_pending_updates: false });
+            const res = await tgApiRaw('setWebhook', { url: CLOUD_WORKER_URL, ip_address: '172.67.144.228', drop_pending_updates: false, allowed_updates: ['message', 'edited_message', 'callback_query'] });
             console.log('[Cloud Handover] Đã kích hoạt Webhook tới Cloudflare Worker 24/7:', res && res.ok ? 'OK' : JSON.stringify(res));
             return res && res.ok;
         } else {
@@ -741,7 +741,7 @@ async function pollUpdates() {
     if (allowedChatId) allowedList.push(Number(allowedChatId));
 
     try {
-        const initRes = await tgApiRaw('getUpdates', { offset: -1 });
+        const initRes = await tgApiRaw('getUpdates', { offset: -1, allowed_updates: ['message', 'edited_message', 'callback_query'] });
         if (initRes.ok && initRes.result && initRes.result.length > 0) {
             pollOffset = initRes.result[0].update_id + 1;
         }
@@ -779,7 +779,7 @@ async function pollUpdates() {
                 }
             }
 
-            const res = await tgApiRaw('getUpdates', { offset: pollOffset, timeout: 8 });
+            const res = await tgApiRaw('getUpdates', { offset: pollOffset, timeout: 8, allowed_updates: ['message', 'edited_message', 'callback_query'] });
             if (!res.ok) {
                 if (res.error_code === 409) {
                     console.warn('[Bridge Polling] 409 Conflict: Tự động gỡ Webhook & reset kết nối...');

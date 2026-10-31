@@ -307,7 +307,7 @@ async function run() {
         let lastText = initialText;
 
         while (true) {
-            await new Promise(r => setTimeout(r, 3500));
+            await new Promise(r => setTimeout(r, 6000));
             const currentState = getBridgeState();
 
             // Nếu tác vụ đã kết thúc hoặc phiên mới đã đè lên -> Dừng đếm giây
