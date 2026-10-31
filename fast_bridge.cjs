@@ -36,6 +36,7 @@ const { sendScreenVideo, recordScreen } = require('./lib/recorder.cjs');
 const { checkInstalledBrowsers, getBrowserInstallMarkup, installBrowserAsync } = require('./lib/installer.cjs');
 const { openWebOrApp, closeAppOrProcess, normalizeStr, getActiveWindowsSummary, URL_SHORTCUTS, APP_SHORTCUTS } = require('./lib/launcher.cjs');
 const { classifyUserIntent } = require('./lib/intent.cjs');
+const { syncRepoToTeleCloud } = require('./lib/telecloud.cjs');
 
 function isConversationalPrompt(text) {
     const clean = (text || '').trim();
@@ -240,6 +241,13 @@ async function syncContextToCloud() {
         });
         const json = await res.json();
         console.log('[Context Sync] Đã chia sẻ ký ức Repo & lịch sử hội thoại lên Cloudflare Worker 24/7:', json && json.ok ? 'Thành công!' : JSON.stringify(json));
+        
+        // Tự động đóng gói & đồng bộ TeleCloud Virtual Repo Snapshot sang Telegram Storage
+        try {
+            await syncRepoToTeleCloud(botToken, activeChatId, activeThreadId, CLOUD_WORKER_URL, rootDir);
+        } catch (e) {
+            console.warn('[TeleCloud Auto-Sync Warning]:', e.message);
+        }
     } catch (e) {
         console.warn('[Context Sync Error]:', e.message);
     }
@@ -1378,6 +1386,22 @@ async function pollUpdates() {
                                 continue;
                             }
                         }
+                    }
+
+                    // 📦 LỆNH ĐỒNG BỘ TELECLOUD VIRTUAL REPO TỪ PC LÊN TELEGRAM STORAGE
+                    if (/^(?:\/sync_telecloud|\/telecloud|đồng\s+bộ\s+telecloud|dong\s+bo\s+telecloud)$/i.test(userText.trim())) {
+                        await sendMsg(chatId, `⏳ <b>[ĐANG ĐÓNG GÓI & ĐỒNG BỘ TELECLOUD VIRTUAL REPO...]</b>\n<i>Đang nén toàn bộ mã nguồn repo và tải lên Telegram Storage...</i>`, threadId);
+                        try {
+                            const res = await syncRepoToTeleCloud(botToken, chatId, threadId, CLOUD_WORKER_URL, rootDir);
+                            await sendMsg(
+                                chatId,
+                                `✅ <b>[ĐỒNG BỘ TELECLOUD THÀNH CÔNG RỰC RỠ!]</b>\n──────────────────────\n📦 <b>Số lượng:</b> ${res.fileCount} files mã nguồn\n⚡ <b>Dung lượng nén:</b> ${(res.gzippedSize / 1024).toFixed(1)} KB\n🆔 <b>File ID:</b> <code>${res.file_id}</code>\n\n☁️ <b>Cloudflare Worker 24/7</b> giờ đây có thể đọc trực tiếp toàn bộ code của repo này mà không cần gọi bất kỳ GitHub API nào!`,
+                                threadId
+                            );
+                        } catch (e) {
+                            await sendMsg(chatId, `❌ Lỗi đồng bộ TeleCloud: ${escapeHtml(e.message)}`, threadId);
+                        }
+                        continue;
                     }
 
                     // 🌐 LỆNH TẢI ANTIGRAVITY IDE CHO MÁY MỚI

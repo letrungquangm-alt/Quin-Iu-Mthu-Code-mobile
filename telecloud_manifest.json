@@ -1,0 +1,302 @@
+{
+  "updated_at": "2026-10-31T16:12:04.617Z",
+  "file_id": "BQACAgUAAyEGAAMBCbVXbAACEQVq5hNURRPie_2XZnt2i9c0K0rWGAAC1SUAAqoFMFfPFeUc2DE__T0E",
+  "message_id": 4357,
+  "file_count": 73,
+  "raw_bytes": 611109,
+  "gzipped_size": 155356,
+  "file_tree": [
+    {
+      "path": "antigravity_ls.json",
+      "size": 161
+    },
+    {
+      "path": "api/index.js",
+      "size": 1769
+    },
+    {
+      "path": "api/switch-cloud.js",
+      "size": 1731
+    },
+    {
+      "path": "api/webhook.js",
+      "size": 25494
+    },
+    {
+      "path": "bootstrap.ps1",
+      "size": 3762
+    },
+    {
+      "path": "bot.ps1",
+      "size": 142146
+    },
+    {
+      "path": "bridge_state.json",
+      "size": 537
+    },
+    {
+      "path": "config.example.json",
+      "size": 453
+    },
+    {
+      "path": "config.json",
+      "size": 1181
+    },
+    {
+      "path": "fast_bridge.cjs",
+      "size": 87541
+    },
+    {
+      "path": "GEMINI.md",
+      "size": 3093
+    },
+    {
+      "path": "index.html",
+      "size": 10344
+    },
+    {
+      "path": "install.bat",
+      "size": 1397
+    },
+    {
+      "path": "install.ps1",
+      "size": 5930
+    },
+    {
+      "path": "keys.json",
+      "size": 552
+    },
+    {
+      "path": "lib/capture_screen.ps1",
+      "size": 2899
+    },
+    {
+      "path": "lib/close_app.ps1",
+      "size": 1323
+    },
+    {
+      "path": "lib/discover_ls.ps1",
+      "size": 697
+    },
+    {
+      "path": "lib/formatter.cjs",
+      "size": 5723
+    },
+    {
+      "path": "lib/groq.cjs",
+      "size": 5823
+    },
+    {
+      "path": "lib/installer.cjs",
+      "size": 3506
+    },
+    {
+      "path": "lib/intent.cjs",
+      "size": 10554
+    },
+    {
+      "path": "lib/ipc.cjs",
+      "size": 8287
+    },
+    {
+      "path": "lib/launcher.cjs",
+      "size": 8862
+    },
+    {
+      "path": "lib/launch_interactive.ps1",
+      "size": 3906
+    },
+    {
+      "path": "lib/lobby.cjs",
+      "size": 40830
+    },
+    {
+      "path": "lib/menu.cjs",
+      "size": 6092
+    },
+    {
+      "path": "lib/numpad.cjs",
+      "size": 1222
+    },
+    {
+      "path": "lib/open_antigravity.ps1",
+      "size": 4144
+    },
+    {
+      "path": "lib/queue.cjs",
+      "size": 2232
+    },
+    {
+      "path": "lib/recorder.cjs",
+      "size": 7074
+    },
+    {
+      "path": "lib/run_antigravity.bat",
+      "size": 132
+    },
+    {
+      "path": "lib/run_launch.bat",
+      "size": 188
+    },
+    {
+      "path": "lib/screen.cjs",
+      "size": 2777
+    },
+    {
+      "path": "lib/telecloud.cjs",
+      "size": 7743
+    },
+    {
+      "path": "lib/telegram.cjs",
+      "size": 11839
+    },
+    {
+      "path": "lib/transcript.cjs",
+      "size": 2935
+    },
+    {
+      "path": "mirror_worker.ps1",
+      "size": 36220
+    },
+    {
+      "path": "outbox/send_1793264320469_w9nn7m.json",
+      "size": 2040
+    },
+    {
+      "path": "outbox/send_1793265927421_5m7zh3.json",
+      "size": 1605
+    },
+    {
+      "path": "outbox/send_1793265977555_ra629xl.json",
+      "size": 1347
+    },
+    {
+      "path": "package-lock.json",
+      "size": 11622
+    },
+    {
+      "path": "package.json",
+      "size": 251
+    },
+    {
+      "path": "preview_tunnel.ps1",
+      "size": 6930
+    },
+    {
+      "path": "project_registry.json",
+      "size": 303
+    },
+    {
+      "path": "README.md",
+      "size": 2027
+    },
+    {
+      "path": "record_test_video.js",
+      "size": 5503
+    },
+    {
+      "path": "scripts/clean_temp.bat",
+      "size": 520
+    },
+    {
+      "path": "scripts/create_project.bat",
+      "size": 1189
+    },
+    {
+      "path": "scripts/open_window.bat",
+      "size": 528
+    },
+    {
+      "path": "scripts/send_message.bat",
+      "size": 812
+    },
+    {
+      "path": "scripts/send_worker.cjs",
+      "size": 17386
+    },
+    {
+      "path": "scripts/switch_cloud.bat",
+      "size": 631
+    },
+    {
+      "path": "send_to_telegram.ps1",
+      "size": 2377
+    },
+    {
+      "path": "setup_net.bat",
+      "size": 434
+    },
+    {
+      "path": "show_notification.ps1",
+      "size": 2385
+    },
+    {
+      "path": "src/worker.js",
+      "size": 45221
+    },
+    {
+      "path": "start.bat",
+      "size": 357
+    },
+    {
+      "path": "stream_to_telegram.ps1",
+      "size": 4776
+    },
+    {
+      "path": "sync_bridge.json",
+      "size": 6712
+    },
+    {
+      "path": "test_copyscreen.ps1",
+      "size": 331
+    },
+    {
+      "path": "test_debug_cap.ps1",
+      "size": 2410
+    },
+    {
+      "path": "test_display_dc.ps1",
+      "size": 2615
+    },
+    {
+      "path": "test_pw.ps1",
+      "size": 1600
+    },
+    {
+      "path": "test_real_capture.ps1",
+      "size": 2576
+    },
+    {
+      "path": "test_schtask_cap.ps1",
+      "size": 470
+    },
+    {
+      "path": "test_shell_cap.ps1",
+      "size": 748
+    },
+    {
+      "path": "test_winsta.ps1",
+      "size": 2035
+    },
+    {
+      "path": "watchdog.ps1",
+      "size": 1389
+    },
+    {
+      "path": "worker-failover-antigravity.js",
+      "size": 5355
+    },
+    {
+      "path": "worker.js",
+      "size": 1480
+    },
+    {
+      "path": "worker_execute.ps1",
+      "size": 13767
+    },
+    {
+      "path": "wrangler.toml",
+      "size": 278
+    }
+  ]
+}

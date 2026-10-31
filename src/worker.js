@@ -1,5 +1,16 @@
 // src/worker.js - QuinloveRin 3.8 24/7 Cloudflare Worker
-// Interactive Net PC Handshake & Dual-Auth Admin System
+// Interactive Net PC Handshake & Dual-Auth Admin System & TeleCloud Virtual Repo
+import { gunzipSync } from "node:zlib";
+
+function escapeHtml(str) {
+    if (!str) return "";
+    return str
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
 
 function fromHex(hex) {
     let str = "";
@@ -34,6 +45,9 @@ let topicMemory = new Map();
 // ⏳ Hàng đợi xử lý tuần tự (FIFO Queue) trên Cloud cho từng Topic
 let topicQueues = new Map();
 let topicQueueLengths = new Map();
+
+// 📦 TeleCloud Virtual Repo Store: threadId -> { fileId, repo, files: Map/Object, fileTree: [], updatedAt }
+let teleCloudStores = new Map();
 
 function isConversationalPrompt(text) {
     const clean = (text || '').trim();
@@ -127,6 +141,48 @@ export default {
                 const allMem = {};
                 for (const [k, v] of topicMemory.entries()) allMem[k] = v;
                 return new Response(JSON.stringify({ ok: true, memory: allMem }, null, 2), {
+                    headers: { "Content-Type": "application/json" }
+                });
+            }
+        }
+
+        // 2d. Đồng bộ TeleCloud Virtual Repo Snapshot từ PC: POST /telecloud/sync
+        if (url.pathname === "/telecloud/sync") {
+            if (request.method === "POST") {
+                try {
+                    const data = await request.json();
+                    const tId = Number(data.thread_id || PROJECT_TOPIC_ID);
+                    teleCloudStores.set(tId, {
+                        fileId: data.file_id,
+                        repo: data.repo || "Quin-Iu-Mthu-Code-mobile",
+                        fileTree: data.file_tree || [],
+                        fileCount: data.file_count || 0,
+                        rawSize: data.raw_size || 0,
+                        gzippedSize: data.gzipped_size || 0,
+                        files: null, // lazy loaded
+                        updatedAt: Date.now()
+                    });
+
+                    // Cập nhật luôn vào topicMemory
+                    const mem = topicMemory.get(tId) || { history: [] };
+                    mem.files = (data.file_tree || []).slice(0, 20);
+                    topicMemory.set(tId, mem);
+
+                    return new Response(JSON.stringify({
+                        ok: true,
+                        synced_telecloud: tId,
+                        file_count: data.file_count,
+                        file_id: data.file_id
+                    }), { headers: { "Content-Type": "application/json" } });
+                } catch (e) {
+                    return new Response(JSON.stringify({ ok: false, error: e.message }), { status: 400 });
+                }
+            } else if (request.method === "GET") {
+                const allStores = {};
+                for (const [k, v] of teleCloudStores.entries()) {
+                    allStores[k] = { fileId: v.fileId, repo: v.repo, fileCount: v.fileCount, updatedAt: v.updatedAt };
+                }
+                return new Response(JSON.stringify({ ok: true, telecloud_stores: allStores }, null, 2), {
                     headers: { "Content-Type": "application/json" }
                 });
             }
@@ -478,6 +534,74 @@ async function handleTelegramUpdate(update, env, ctx) {
             );
             return;
         }
+
+        // H. LỆNH TELECLOUD VIRTUAL REPO: /files, /cat, /search
+        if (/^(?:\/files|\/tree|danh\s+sách\s+file|cây\s+thư\s+mục)$/i.test(text.trim())) {
+            const store = await getOrLoadTeleCloudRepo(botToken, threadId);
+            if (store && store.fileTree && store.fileTree.length > 0) {
+                const treeText = store.fileTree.slice(0, 35).map(f => `📄 <code>${f}</code>`).join('\n');
+                const moreText = store.fileTree.length > 35 ? `\n<i>...và ${store.fileTree.length - 35} files khác</i>` : '';
+                await sendTg(
+                    botToken,
+                    chatId,
+                    `📦 <b>[TELECLOUD VIRTUAL REPO - ${store.repo}]</b>\n──────────────────────\n📊 <b>Tổng số file:</b> ${store.fileTree.length} files mã nguồn\n☁️ <b>Lưu trữ:</b> Telegram Object Store (Zero API Call)\n\n${treeText}${moreText}\n\n👉 <i>Bro có thể gõ <code>/cat &lt;đường_dẫn&gt;</code> để đọc trực tiếp file!</i>`,
+                    threadId
+                );
+            } else {
+                await sendTg(botToken, chatId, `⚠️ Chưa có snapshot TeleCloud cho Topic này. Trên PC gõ <code>/sync_telecloud</code> để đồng bộ nhé!`, threadId);
+            }
+            return;
+        }
+
+        const catMatch = text.trim().match(/^(?:\/cat|\/read|xem\s+file|đọc\s+file)\s+([^\s]+)$/i);
+        if (catMatch) {
+            const targetPath = catMatch[1].trim();
+            const store = await getOrLoadTeleCloudRepo(botToken, threadId);
+            if (store && store.files) {
+                const matchedKey = Object.keys(store.files).find(k => k.toLowerCase() === targetPath.toLowerCase() || k.toLowerCase().endsWith('/' + targetPath.toLowerCase()));
+                if (matchedKey) {
+                    const content = store.files[matchedKey];
+                    const previewContent = content.length > 3000 ? content.substring(0, 3000) + '\n\n// ... (đã cắt bớt vì giới hạn độ dài tin nhắn)' : content;
+                    await sendTg(
+                        botToken,
+                        chatId,
+                        `📄 <b>[TELECLOUD FILE: <code>${matchedKey}</code>]</b>\n──────────────────────\n<pre><code class="language-javascript">${escapeHtml(previewContent)}</code></pre>`,
+                        threadId
+                    );
+                } else {
+                    await sendTg(botToken, chatId, `⚠️ Không tìm thấy file <code>${escapeHtml(targetPath)}</code> trong TeleCloud snapshot. Gõ <code>/files</code> để xem danh sách file nhé!`, threadId);
+                }
+            } else {
+                await sendTg(botToken, chatId, `⚠️ Không thể tải TeleCloud snapshot. Vui lòng thử lại sau!`, threadId);
+            }
+            return;
+        }
+
+        const searchMatch = text.trim().match(/^(?:\/search|\/grep|tìm\s+code|tìm\s+kiếm)\s+(.+)$/i);
+        if (searchMatch) {
+            const query = searchMatch[1].trim();
+            const store = await getOrLoadTeleCloudRepo(botToken, threadId);
+            if (store && store.files) {
+                const matches = [];
+                for (const [fPath, content] of Object.entries(store.files)) {
+                    if (content.toLowerCase().includes(query.toLowerCase())) {
+                        matches.push(fPath);
+                    }
+                }
+                if (matches.length > 0) {
+                    const list = matches.slice(0, 15).map(m => `• <code>${m}</code>`).join('\n');
+                    await sendTg(
+                        botToken,
+                        chatId,
+                        `🔍 <b>[KẾT QUẢ TÌM KIẾM TELECLOUD]: "${escapeHtml(query)}"</b>\n──────────────────────\nTìm thấy trong <b>${matches.length}</b> files:\n${list}\n\n👉 <i>Gõ <code>/cat &lt;file&gt;</code> để xem chi tiết!</i>`,
+                        threadId
+                    );
+                } else {
+                    await sendTg(botToken, chatId, `🔍 Không tìm thấy từ khóa <code>${escapeHtml(query)}</code> trong bất kỳ file nào của repo!`, threadId);
+                }
+            }
+            return;
+        }
     }
 
     // 🏛️ SẢNH LOBBY TRÊN CLOUD: XÓA TIN NHẮN & TUYỆT ĐỐI KHÔNG CHẠY CODE TẠI ĐÂY
@@ -521,6 +645,47 @@ async function handleTelegramUpdate(update, env, ctx) {
     await nextChain;
 }
 
+async function getOrLoadTeleCloudRepo(botToken, threadId) {
+    const memKey = Number(threadId) || PROJECT_TOPIC_ID;
+    let store = teleCloudStores.get(memKey);
+    if (!store) {
+        store = {
+            fileId: "BQACAgUAAyEGAAMBCbVXbAACEQVq5hNURRPie_2XZnt2i9c0K0rWGAAC1SUAAqoFMFfPFeUc2DE__T0E",
+            repo: "Quin-Iu-Mthu-Code-mobile",
+            fileTree: [],
+            files: null,
+            updatedAt: Date.now()
+        };
+        teleCloudStores.set(memKey, store);
+    }
+
+    if (store.files) {
+        return store;
+    }
+
+    if (store.fileId) {
+        try {
+            const getFileRes = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${store.fileId}`);
+            const fileData = await getFileRes.json();
+            if (fileData.ok && fileData.result && fileData.result.file_path) {
+                const downloadUrl = `https://api.telegram.org/file/bot${botToken}/${fileData.result.file_path}`;
+                const fileRes = await fetch(downloadUrl);
+                const arrayBuf = await fileRes.arrayBuffer();
+                const decompressed = gunzipSync(Buffer.from(arrayBuf)).toString("utf8");
+                const bundle = JSON.parse(decompressed);
+                store.files = bundle.files || {};
+                store.fileTree = Object.keys(store.files);
+                store.fileCount = store.fileTree.length;
+                store.repo = bundle.repo || store.repo;
+            }
+        } catch (e) {
+            console.error('[TeleCloud Unpack Error]:', e.message);
+        }
+    }
+
+    return store;
+}
+
 async function executeCloudPromptWithMemory(text, chatId, threadId, botToken, env) {
     const ghToken = (env && env.GITHUB_TOKEN) ? env.GITHUB_TOKEN : DEFAULT_GH_TOKEN;
     const ghOwner = (env && env.GITHUB_OWNER) ? env.GITHUB_OWNER : "letrungquangm-alt";
@@ -546,6 +711,28 @@ async function executeCloudPromptWithMemory(text, chatId, threadId, botToken, en
     fullSystem += `\n\n[KÝ ỨC NGỮ CẢNH DỰ ÁN & REPO]:\n- Tên repo: ${mem.repo}\n- Đường dẫn workspace PC: ${mem.path}\n- Mã PIN cửa sổ: ${mem.pin}\n- Topic Telegram hiện tại: #${memKey}\n- Tóm tắt công việc: ${mem.summary}`;
     if (mem.files && mem.files.length > 0) {
         fullSystem += `\n- Các file chính trong repo: ${mem.files.join(', ')}`;
+    }
+
+    // Tự động nạp mã nguồn thực tế của file nếu câu hỏi có nhắc tới (Zero GitHub API Call)
+    const store = await getOrLoadTeleCloudRepo(botToken, memKey);
+    let injectedFilesContext = "";
+    if (store && store.files) {
+        const textLower = text.toLowerCase();
+        let injectedCount = 0;
+        for (const fPath of Object.keys(store.files)) {
+            const baseName = fPath.split('/').pop().toLowerCase();
+            if (textLower.includes(fPath.toLowerCase()) || (baseName.length > 4 && textLower.includes(baseName))) {
+                const fileCode = store.files[fPath];
+                if (fileCode && fileCode.length < 25000) {
+                    injectedFilesContext += `\n\n--- [FILE THỰC TẾ TRONG REPO TỪ TELECLOUD: ${fPath}] ---\n${fileCode}\n--- [HẾT FILE ${fPath}] ---`;
+                    injectedCount++;
+                    if (injectedCount >= 3) break;
+                }
+            }
+        }
+    }
+    if (injectedFilesContext) {
+        fullSystem += `\n\n[MÃ NGUỒN THỰC TẾ TỪ TELECLOUD VIRTUAL REPO]:${injectedFilesContext}`;
     }
 
     const historyList = mem.history || [];
