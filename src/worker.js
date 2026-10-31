@@ -357,11 +357,102 @@ async function handleTelegramUpdate(update, env, ctx) {
             const menuMarkup = {
                 inline_keyboard: [
                     [{ text: '🚀 Tạo Dự Án Mới (New Project)', callback_data: 'hub_create_proj' }],
+                    [{ text: '☁️ GMCloud Virtual Storage', callback_data: 'hub_gmcloud' }],
                     [{ text: '🌐 Nối Máy Phụ (Connect Net)', callback_data: 'hub_connect_net' }],
                     [{ text: '☁️ Bàn Giao Cloud 24/7', callback_data: 'hub_cloud' }]
                 ]
             };
             await editTg(botToken, chatId, msgId, menuText, menuMarkup);
+            return;
+        }
+
+        // Bấm nút GMCloud Virtual Storage từ Sảnh hoặc từ Topic
+        if (cbData === "hub_gmcloud") {
+            const store = await getOrLoadTeleCloudRepo(botToken, threadId);
+            const tree = store ? store.fileTree : [];
+            const dirs = new Set();
+            const files = [];
+            for (const f of tree) {
+                if (f.includes('/')) dirs.add(f.split('/')[0]);
+                else files.push(f);
+            }
+            const rows = [];
+            const dirArr = Array.from(dirs);
+            for (let i = 0; i < dirArr.length; i += 2) {
+                const r = [{ text: `📁 ${dirArr[i]}/`, callback_data: `gmcloud_dir:${dirArr[i]}` }];
+                if (dirArr[i + 1]) r.push({ text: `📁 ${dirArr[i + 1]}/`, callback_data: `gmcloud_dir:${dirArr[i + 1]}` });
+                rows.push(r);
+            }
+            for (const f of files.slice(0, 6)) {
+                rows.push([{ text: `📄 ${f}`, callback_data: `gmcloud_view:${f}` }]);
+            }
+            rows.push([{ text: '🏛️ Về Sảnh Lobby', callback_data: 'hub_refresh_menu' }]);
+            const boardText = `☁️ <b>[GMCLOUD - VIRTUAL REPO EXPLORER]</b>\n──────────────────────\n📂 <b>Repo:</b> <code>${store.repo || 'Quin-Iu-Mthu-Code-mobile'}</code>\n📊 <b>Mã nguồn:</b> ${tree.length} files (TeleCloud Object Storage)\n⚡ <b>Trực chiến:</b> Cloudflare Worker 24/7 (Độc lập 100%)\n🌐 <b>Web Dashboard:</b> Đồng bộ 100%\n\n👉 <i>Bro bấm các nút bên dưới để duyệt thư mục hoặc xem code file:</i>`;
+            await editTg(botToken, chatId, msgId, boardText, { inline_keyboard: rows });
+            return;
+        }
+
+        if (cbData.startsWith("gmcloud_dir:")) {
+            const dir = cbData.replace("gmcloud_dir:", "");
+            const store = await getOrLoadTeleCloudRepo(botToken, threadId);
+            const tree = store ? store.fileTree : [];
+            const subDirs = new Set();
+            const subFiles = [];
+            for (const f of tree) {
+                if (!dir) {
+                    if (f.includes('/')) subDirs.add(f.split('/')[0]);
+                    else subFiles.push(f);
+                } else if (f.startsWith(dir + '/')) {
+                    const rest = f.slice(dir.length + 1);
+                    if (rest.includes('/')) subDirs.add(rest.split('/')[0]);
+                    else subFiles.push(f);
+                }
+            }
+            const rows = [];
+            const dArr = Array.from(subDirs);
+            for (let i = 0; i < dArr.length; i += 2) {
+                const fullD1 = dir ? `${dir}/${dArr[i]}` : dArr[i];
+                const r = [{ text: `📁 ${dArr[i]}/`, callback_data: `gmcloud_dir:${fullD1}` }];
+                if (dArr[i + 1]) {
+                    const fullD2 = dir ? `${dir}/${dArr[i + 1]}` : dArr[i + 1];
+                    r.push({ text: `📁 ${dArr[i + 1]}/`, callback_data: `gmcloud_dir:${fullD2}` });
+                }
+                rows.push(r);
+            }
+            for (const f of subFiles.slice(0, 6)) {
+                rows.push([{ text: `📄 ${f.split('/').pop()}`, callback_data: `gmcloud_view:${f}` }]);
+            }
+            const navRow = [];
+            if (dir) {
+                const parts = dir.split('/');
+                parts.pop();
+                navRow.push({ text: '🔙 Thư mục cha', callback_data: `gmcloud_dir:${parts.join('/')}` });
+            }
+            navRow.push({ text: '🏛️ Về Sảnh Lobby', callback_data: 'hub_refresh_menu' });
+            rows.push(navRow);
+            const dirText = `☁️ <b>[GMCLOUD - VIRTUAL REPO EXPLORER]</b>\n──────────────────────\n📁 <b>Thư mục:</b> <code>/${dir ? dir + '/' : ''}</code>\n📊 <b>Số file:</b> ${subFiles.length} files\n\n👉 <i>Bro bấm các nút bên dưới để mở thư mục hoặc xem code file:</i>`;
+            await editTg(botToken, chatId, msgId, dirText, { inline_keyboard: rows });
+            return;
+        }
+
+        if (cbData.startsWith("gmcloud_view:")) {
+            const filePath = cbData.replace("gmcloud_view:", "");
+            const store = await getOrLoadTeleCloudRepo(botToken, threadId);
+            const code = (store && store.files && store.files[filePath]) ? store.files[filePath] : "// Không tìm thấy file trong snapshot TeleCloud";
+            const lines = code.split('\n');
+            let displayCode = code;
+            if (displayCode.length > 2800 || lines.length > 60) {
+                displayCode = lines.slice(0, 55).join('\n') + `\n\n... (và còn ${lines.length - 55} dòng nữa)`;
+            }
+            const dir = filePath.includes('/') ? filePath.slice(0, filePath.lastIndexOf('/')) : '';
+            const viewText = `📄 <b>[GMCLOUD VIEWER]:</b> <code>${filePath}</code>\n──────────────────────\n📊 <b>Số dòng:</b> ${lines.length} dòng | <b>Dung lượng:</b> ${(code.length / 1024).toFixed(1)} KB\n☁️ <b>Lưu trữ:</b> TeleCloud Object Storage 24/7\n\n<pre><code>${escapeHtml(displayCode)}</code></pre>`;
+            const markup = {
+                inline_keyboard: [
+                    [{ text: `🔙 Quay lại ${dir || 'Root'}`, callback_data: `gmcloud_dir:${dir}` }],
+                    [{ text: '🏛️ Về Sảnh Lobby', callback_data: 'hub_refresh_menu' }]
+                ]
+            };
+            await editTg(botToken, chatId, msgId, viewText, markup);
             return;
         }
         return;

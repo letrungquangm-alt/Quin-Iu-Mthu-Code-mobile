@@ -862,7 +862,9 @@ async function pollUpdates() {
                             handleDisconnectCloud,
                             conversationId,
                             getPinDisplay,
-                            getKeypadMarkup
+                            getKeypadMarkup,
+                            botToken,
+                            isLobby: lobby.isLobby,
                         });
                         if (lobbyHandled) continue;
 
@@ -1369,6 +1371,23 @@ async function pollUpdates() {
                                 continue;
                             }
                         }
+                    }
+
+                    // ☁️ LỆNH MỞ GMCLOUD VIRTUAL REPO EXPLORER
+                    if (/^(?:\/gmcloud|gmcloud|\/telecloud)$/i.test(userText.trim())) {
+                        const { handleGmCloudCallback } = require('./lib/gmcloud.cjs');
+                        await handleGmCloudCallback({
+                            data: 'hub_gmcloud',
+                            message: { chat: { id: chatId }, message_thread_id: threadId, message_id: (msg ? msg.message_id : null) },
+                            id: 'cmd_' + Date.now()
+                        }, {
+                            sendMsg,
+                            editMsg,
+                            tgApiRaw,
+                            botToken,
+                            isLobby: lobby.isLobby
+                        });
+                        continue;
                     }
 
                     // 📦 LỆNH ĐỒNG BỘ TELECLOUD VIRTUAL REPO TỪ PC LÊN TELEGRAM STORAGE
