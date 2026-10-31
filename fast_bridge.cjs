@@ -1386,6 +1386,6 @@ process.on('SIGTERM', async () => { await restoreCloudOnExit('SIGTERM'); process
 process.on('beforeExit', async () => { await restoreCloudOnExit('beforeExit'); });
 
 // Khởi động: Gỡ Webhook để PC tiếp quản trực tiếp
-setCloudWebhook(false).catch(() => {});
+// PC giu che do standby kiem tra webhook
 
 pollUpdates();
