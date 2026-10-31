@@ -746,7 +746,8 @@ async function pollUpdates() {
             const res = await tgApiRaw('getUpdates', { offset: pollOffset, timeout: 8 });
             if (!res.ok) {
                 if (res.error_code === 409) {
-                    console.warn('[Bridge Polling] 409 Conflict: Đang chờ 4s trước khi thử lại...');
+                    console.warn('[Bridge Polling] 409 Conflict: Tự động gỡ Webhook & reset kết nối...');
+                    await tgApiRaw('deleteWebhook', { drop_pending_updates: false });
                     await new Promise(r => setTimeout(r, 4000));
                     continue;
                 }
