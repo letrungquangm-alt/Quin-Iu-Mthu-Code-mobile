@@ -36,7 +36,8 @@ const { sendScreenVideo, recordScreen } = require('./lib/recorder.cjs');
 const { checkInstalledBrowsers, getBrowserInstallMarkup, installBrowserAsync } = require('./lib/installer.cjs');
 const { openWebOrApp, closeAppOrProcess, normalizeStr, getActiveWindowsSummary, URL_SHORTCUTS, APP_SHORTCUTS } = require('./lib/launcher.cjs');
 const { classifyUserIntent, isConversationalPrompt } = require('./lib/intent.cjs');
-const { syncRepoToTeleCloud } = require('./lib/telecloud.cjs');
+const { syncRepoToGmCloud } = require('./lib/gmcloud_storage.cjs');
+// GMCloud storage integration
 
 const { askGroq } = require('./lib/groq.cjs');
 
@@ -230,9 +231,9 @@ async function syncContextToCloud() {
         
         // Tự động đóng gói & đồng bộ TeleCloud Virtual Repo Snapshot sang Telegram Storage
         try {
-            await syncRepoToTeleCloud(botToken, activeChatId, activeThreadId, CLOUD_WORKER_URL, rootDir);
+            await syncRepoToGmCloud(botToken, activeChatId, activeThreadId, CLOUD_WORKER_URL, rootDir);
         } catch (e) {
-            console.warn('[TeleCloud Auto-Sync Warning]:', e.message);
+            console.warn('[GMCloud Auto-Sync Warning]:', e.message);
         }
     } catch (e) {
         console.warn('[Context Sync Error]:', e.message);
@@ -1392,18 +1393,18 @@ async function pollUpdates() {
                         continue;
                     }
 
-                    // 📦 LỆNH ĐỒNG BỘ TELECLOUD VIRTUAL REPO TỪ PC LÊN TELEGRAM STORAGE
-                    if (/^(?:\/sync_telecloud|\/telecloud|đồng\s+bộ\s+telecloud|dong\s+bo\s+telecloud)$/i.test(userText.trim())) {
-                        await sendMsg(chatId, `⏳ <b>[ĐANG ĐÓNG GÓI & ĐỒNG BỘ TELECLOUD VIRTUAL REPO...]</b>\n<i>Đang nén toàn bộ mã nguồn repo và tải lên Telegram Storage...</i>`, threadId);
+                    // 📦 LỆNH ĐỒNG BỘ GMCLOUD VIRTUAL REPO TỪ PC LÊN KHO GMCLOUD (TOPIC #)
+                    if (/^(?:\/sync_gmcloud|\/gmcloud_sync|\/sync_telecloud|\/telecloud|đồng\s+bộ\s+gmcloud|dong\s+bo\s+gmcloud)$/i.test(userText.trim())) {
+                        await sendMsg(chatId, `⏳ <b>[ĐANG ĐÓNG GÓI & ĐỒNG BỘ KHO GMCLOUD STORAGE...]</b>\n<i>Đang nén toàn bộ mã nguồn repo và tải lên Topic # (Kho GMCloud Storage vĩnh cửu)...</i>`, threadId);
                         try {
-                            const res = await syncRepoToTeleCloud(botToken, chatId, threadId, CLOUD_WORKER_URL, rootDir);
+                            const res = await syncRepoToGmCloud(botToken, chatId, threadId, CLOUD_WORKER_URL, rootDir);
                             await sendMsg(
                                 chatId,
-                                `✅ <b>[ĐỒNG BỘ TELECLOUD THÀNH CÔNG RỰC RỠ!]</b>\n──────────────────────\n📦 <b>Số lượng:</b> ${res.fileCount} files mã nguồn\n⚡ <b>Dung lượng nén:</b> ${(res.gzippedSize / 1024).toFixed(1)} KB\n🆔 <b>File ID:</b> <code>${res.file_id}</code>\n\n☁️ <b>Cloudflare Worker 24/7</b> giờ đây có thể đọc trực tiếp toàn bộ code của repo này mà không cần gọi bất kỳ GitHub API nào!`,
+                                `✅ <b>[ĐỒNG BỘ GMCLOUD THÀNH CÔNG RỰC RỠ!]</b>\n──────────────────────\n🏛️ <b>Kênh lưu trữ:</b> Topic # (<code>☁️ Kho GMCloud Storage</code>)\n📦 <b>Số lượng:</b> ${res.fileCount} files mã nguồn\n⚡ <b>Dung lượng nén:</b> ${(res.gzippedSize / 1024).toFixed(1)} KB (Gzip)\n🆔 <b>File ID:</b> <code>${res.file_id}</code>\n\n☁️ <b>Cloudflare Worker 24/7</b> và Kho GMCloud đã cập nhật bản mới nhất vĩnh viễn!`,
                                 threadId
                             );
                         } catch (e) {
-                            await sendMsg(chatId, `❌ Lỗi đồng bộ TeleCloud: ${escapeHtml(e.message)}`, threadId);
+                            await sendMsg(chatId, `❌ Lỗi đồng bộ GMCloud: ${escapeHtml(e.message)}`, threadId);
                         }
                         continue;
                     }

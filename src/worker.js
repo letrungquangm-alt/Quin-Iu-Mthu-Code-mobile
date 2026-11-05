@@ -142,7 +142,7 @@ export default {
 
                     topicMemory.set(tId, {
                         repo: data.repo || "Quin-Iu-Mthu-Code-mobile",
-                        path: data.path || "E:\\MThu Mobile Code",
+                        path: data.path || "G:\\MThu Mobile Code",
                         pin: data.pin || PROJECT_PIN,
                         summary: data.summary || "Dự án Quin-Iu-Mthu-Code-mobile",
                         files: data.files || ["fast_bridge.cjs", "src/worker.js", "lib/intent.cjs", "lib/ipc.cjs", "lib/lobby.cjs"],
@@ -166,7 +166,7 @@ export default {
         }
 
         // 2d. Đồng bộ TeleCloud Virtual Repo Snapshot từ PC: POST /telecloud/sync
-        if (url.pathname === "/telecloud/sync") {
+        if (url.pathname === "/gmcloud/sync" || url.pathname === "/telecloud/sync") {
             if (request.method === "POST") {
                 try {
                     const data = await request.json();
@@ -786,23 +786,29 @@ async function getOrLoadTeleCloudRepo(botToken, threadId) {
         return store;
     }
 
+    // Timeout nhanh 3 giay de tranh delay / hang tren Cloudflare
     if (store.fileId) {
         try {
-            const getFileRes = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${store.fileId}`);
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 3000);
+            const getFileRes = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${store.fileId}`, { signal: controller.signal });
             const fileData = await getFileRes.json();
             if (fileData.ok && fileData.result && fileData.result.file_path) {
                 const downloadUrl = `https://api.telegram.org/file/bot${botToken}/${fileData.result.file_path}`;
-                const fileRes = await fetch(downloadUrl);
+                const fileRes = await fetch(downloadUrl, { signal: controller.signal });
                 const arrayBuf = await fileRes.arrayBuffer();
+                clearTimeout(timeoutId);
                 const decompressed = gunzipSync(Buffer.from(arrayBuf)).toString("utf8");
                 const bundle = JSON.parse(decompressed);
                 store.files = bundle.files || {};
                 store.fileTree = Object.keys(store.files);
                 store.fileCount = store.fileTree.length;
                 store.repo = bundle.repo || store.repo;
+            } else {
+                clearTimeout(timeoutId);
             }
         } catch (e) {
-            console.error('[TeleCloud Unpack Error]:', e.message);
+            console.warn('[GMCloud Quick Cache Bypass]:', e.message);
         }
     }
 
@@ -821,7 +827,7 @@ async function executeCloudPromptWithMemory(text, chatId, threadId, botToken, en
     if (!mem) {
         mem = {
             repo: currentRepo,
-            path: "E:\\MThu Mobile Code",
+            path: "G:\\MThu Mobile Code",
             pin: PROJECT_PIN,
             summary: "Dự án Quin-Iu-Mthu-Code-mobile (Universal Telegram Mobile Coding Bridge)",
             files: ["fast_bridge.cjs", "src/worker.js", "lib/intent.cjs", "lib/ipc.cjs", "lib/lobby.cjs"],
@@ -873,61 +879,38 @@ async function executeCloudPromptWithMemory(text, chatId, threadId, botToken, en
     let modelUsed = "Groq LPU Qwen 3.8 27B";
     let shouldEscalate = false;
 
-    // Gọi Groq LPU kèm Ký ức ngữ cảnh và Lịch sử hội thoại
-    for (const gKey of groqKeys) {
-        try {
-            const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                method: "POST",
-                headers: { "Authorization": "Bearer " + gKey, "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    model: "qwen/qwen3.8-27b",
-                    messages: groqMessages,
-                    max_tokens: 2048,
-                    temperature: 0.7
-                })
-            });
-            if (groqRes.status === 200) {
-                const gData = await groqRes.json();
-                if (gData.choices && gData.choices[0]) {
-                    answer = gData.choices[0].message.content.trim();
-                    if (answer.includes("[ESCALATE_TO_GEMINI]")) shouldEscalate = true;
-                    break;
-                }
-            }
-        } catch (e) {}
-    }
+    // Goi Groq LPU sieu toc (qwen3.8-27b -> openai/gpt-oss-120b -> openai/gpt-oss-20b)
+    const groqModels = ["qwen/qwen3.8-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b"];
 
-    // Escalation Gemini nếu cần
-    if (!answer || shouldEscalate) {
-        const geminiContents = [
-            ...historyList.slice(-10).map(h => ({
-                role: h.role === 'assistant' ? 'model' : 'user',
-                parts: [{ text: h.content }]
-            })),
-            { role: "user", parts: [{ text: text }] }
-        ];
-
-        for (const gemKey of geminiKeys) {
+    for (const model of groqModels) {
+        for (const gKey of groqKeys) {
             try {
-                const gemRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${gemKey}`, {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 8000);
+                const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    headers: { "Authorization": "Bearer " + gKey, "Content-Type": "application/json" },
                     body: JSON.stringify({
-                        contents: geminiContents,
-                        systemInstruction: { parts: [{ text: fullSystem }] }
-                    })
+                        model: model,
+                        messages: groqMessages,
+                        max_tokens: 2048,
+                        temperature: 0.7
+                    }),
+                    signal: controller.signal
                 });
-                if (gemRes.status === 200) {
-                    const gemData = await gemRes.json();
-                    if (gemData.candidates && gemData.candidates[0]) {
-                        const parts = gemData.candidates[0].content.parts || [];
-                        answer = parts.map(p => p.text || "").join("\n").trim();
-                        modelUsed = "Gemini 3.5 Flash Escalation";
+                clearTimeout(timeoutId);
+
+                if (groqRes.status === 200) {
+                    const gData = await groqRes.json();
+                    if (gData.choices && gData.choices[0] && gData.choices[0].message) {
+                        answer = gData.choices[0].message.content.trim();
+                        modelUsed = `Groq LPU (${model})`;
                         break;
                     }
                 }
             } catch (e) {}
         }
+        if (answer) break;
     }
 
     if (!answer) answer = "Hệ thống Cloud đang xử lý yêu cầu, bro hãy gửi lại tin nhắn nhé!";

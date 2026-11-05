@@ -1,10 +1,11 @@
 {
-  "updated_at": "2026-10-31T16:30:30.557Z",
-  "file_id": "BQACAgUAAyEGAAMBCbVXbAACEU5q5hemRcbcYOomBoSyCHBDKPyJfwAC4SUAAqoFMFft9v__Mo_roz0E",
-  "message_id": 4430,
-  "file_count": 74,
-  "raw_bytes": 626810,
-  "gzipped_size": 159332,
+  "updated_at": "2026-11-05T05:56:55.660Z",
+  "file_id": "BQACAgUAAyEGAAMBCbVXbAACEkZq7BqkCUbewbpsaMOitVf6tjpJcAACHSMAAtSaYVcrdqcVxwUJkz0E",
+  "message_id": 4678,
+  "topic": "General (#)",
+  "file_count": 77,
+  "raw_bytes": 671169,
+  "gzipped_size": 169560,
   "file_tree": [
     {
       "path": "antigravity_ls.json",
@@ -32,7 +33,7 @@
     },
     {
       "path": "bridge_state.json",
-      "size": 537
+      "size": 547
     },
     {
       "path": "config.example.json",
@@ -40,19 +41,23 @@
     },
     {
       "path": "config.json",
-      "size": 1181
+      "size": 1216
     },
     {
       "path": "fast_bridge.cjs",
-      "size": 88676
+      "size": 90103
     },
     {
       "path": "GEMINI.md",
       "size": 3093
     },
     {
+      "path": "gmcloud_manifest.json",
+      "size": 5477
+    },
+    {
       "path": "index.html",
-      "size": 10344
+      "size": 11092
     },
     {
       "path": "install.bat",
@@ -83,6 +88,14 @@
       "size": 5723
     },
     {
+      "path": "lib/gmcloud.cjs",
+      "size": 27381
+    },
+    {
+      "path": "lib/gmcloud_storage.cjs",
+      "size": 8883
+    },
+    {
       "path": "lib/groq.cjs",
       "size": 5823
     },
@@ -92,7 +105,7 @@
     },
     {
       "path": "lib/intent.cjs",
-      "size": 7695
+      "size": 7929
     },
     {
       "path": "lib/ipc.cjs",
@@ -108,7 +121,7 @@
     },
     {
       "path": "lib/lobby.cjs",
-      "size": 40830
+      "size": 42955
     },
     {
       "path": "lib/menu.cjs",
@@ -144,7 +157,7 @@
     },
     {
       "path": "lib/telecloud.cjs",
-      "size": 7743
+      "size": 466
     },
     {
       "path": "lib/telegram.cjs",
@@ -232,7 +245,7 @@
     },
     {
       "path": "src/worker.js",
-      "size": 57477
+      "size": 62922
     },
     {
       "path": "start.bat",
@@ -244,11 +257,11 @@
     },
     {
       "path": "sync_bridge.json",
-      "size": 6712
+      "size": 6275
     },
     {
       "path": "telecloud_manifest.json",
-      "size": 5169
+      "size": 5477
     },
     {
       "path": "test_copyscreen.ps1",
