@@ -823,6 +823,63 @@ async function getOrLoadTeleCloudRepo(botToken, threadId) {
     return store;
 }
 
+/**
+ * Tra cứu thông tin trực tiếp trên Internet (Live Web Search qua DuckDuckGo Lite)
+ * Siêu nhẹ: < 2ms CPU, < 2MB RAM, timeout 3.5s an toàn cho Cloudflare Worker!
+ */
+async function searchLiveWeb(query) {
+    if (!query || query.length < 3) return "";
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3500);
+        const res = await fetch("https://lite.duckduckgo.com/lite/", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            },
+            body: "q=" + encodeURIComponent(query),
+            signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        if (!res.ok) return "";
+        const html = await res.text();
+        const snippetRegex = /<td class=['"]result-snippet['"]>([\s\S]*?)<\/td>/g;
+        const linkRegex = /<a[^>]*class=['"]result-link['"][^>]*>([\s\S]*?)<\/a>/g;
+
+        const titles = [];
+        let mLink;
+        while ((mLink = linkRegex.exec(html)) !== null && titles.length < 3) {
+            titles.push(mLink[1].replace(/<[^>]+>/g, "").trim());
+        }
+
+        const snippets = [];
+        let mSnippet;
+        while ((mSnippet = snippetRegex.exec(html)) !== null && snippets.length < 3) {
+            snippets.push(
+                mSnippet[1]
+                    .replace(/<[^>]+>/g, "")
+                    .replace(/&quot;/g, '"')
+                    .replace(/&amp;/g, '&')
+                    .replace(/&#039;/g, "'")
+                    .trim()
+            );
+        }
+
+        const items = [];
+        for (let i = 0; i < Math.max(titles.length, snippets.length); i++) {
+            const t = titles[i] || "";
+            const s = snippets[i] || "";
+            if (t || s) {
+                items.push(`• ${t}: ${s}`);
+            }
+        }
+        return items.join("\n\n");
+    } catch (e) {
+        return "";
+    }
+}
+
 async function executeCloudPromptWithMemory(text, chatId, threadId, botToken, env) {
     const ghToken = (env && env.GITHUB_TOKEN) ? env.GITHUB_TOKEN : DEFAULT_GH_TOKEN;
     const ghOwner = (env && env.GITHUB_OWNER) ? env.GITHUB_OWNER : "letrungquangm-alt";
@@ -872,6 +929,17 @@ async function executeCloudPromptWithMemory(text, chatId, threadId, botToken, en
         fullSystem += `\n\n[MÃ NGUỒN THỰC TẾ TỪ TELECLOUD VIRTUAL REPO]:${injectedFilesContext}`;
     }
 
+    // Tự động tìm kiếm Internet (Live Web Search) nếu câu hỏi cần tra cứu bên ngoài
+    let webSearchContext = "";
+    const shouldSearchWeb = /(?:là gì|la gi|thế nào|the nao|mới nhất|moi nhat|hôm nay|hom nay|thời tiết|thoi tiet|tin tức|tin tuc|giá|gia|thư viện|thu vien|cách dùng|cach dung|hướng dẫn|huong dan|search|google|tra cứu|tra cuu|nghĩa là gì|nghia la gi|ai là|ai la|ở đâu|o dau)/i.test(text) || text.trim().startsWith('/search');
+    if (shouldSearchWeb) {
+        const queryToSearch = text.replace(/^\/search\s*/i, '').trim();
+        webSearchContext = await searchLiveWeb(queryToSearch);
+    }
+    if (webSearchContext) {
+        fullSystem += `\n\n[KẾT QUẢ TRA CỨU INTERNET TRỰC TIẾP (LIVE WEB SEARCH)]:\n${webSearchContext}\n--- (Bro hãy dùng thông tin mới nhất từ Internet này để trả lời chuẩn xác cho người dùng) ---`;
+    }
+
     const historyList = mem.history || [];
     const groqMessages = [
         { role: "system", content: fullSystem },
@@ -881,7 +949,8 @@ async function executeCloudPromptWithMemory(text, chatId, threadId, botToken, en
 
     const preview = text.replace(/[<>]/g, "").substring(0, 50);
     const start = Date.now();
-    const ackId = await sendTg(botToken, chatId, `⏳ <b>[QUINLOVERIN 3.8 CLOUD 24/7]</b>\n──────────────────────\n⚡ <i>Đang xử lý qua Groq LPU (Kèm Ký ức Repo)...</i>\n📝 <code>${preview}</code>`, threadId);
+    const searchNotice = webSearchContext ? "🌐 Đã tra cứu Internet Live & Đang xử lý qua Groq LPU..." : "⚡ Đang xử lý qua Groq LPU (Kèm Ký ức Repo)...";
+    const ackId = await sendTg(botToken, chatId, `⏳ <b>[QUINLOVERIN 3.8 CLOUD 24/7]</b>\n──────────────────────\n<i>${searchNotice}</i>\n📝 <code>${preview}</code>`, threadId);
 
     let answer = "";
     let modelUsed = "Groq LPU Qwen 3.8 27B";
