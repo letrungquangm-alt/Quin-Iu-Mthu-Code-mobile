@@ -666,6 +666,17 @@ async function handleTelegramUpdate(update, env, ctx) {
             return;
         }
 
+        // G2. LỆNH TẮT MÁY (REMOTE SHUTDOWN) KHI ĐANG Ở CLOUD
+        if (/^(?:\/shutdown|\/tatmay|\/tat_pc|\/tat_may|(?:tắt|tat)\s+(?:máy|may|máy\s+tính|may\s+tinh|pc|nguồn|nguon)(?:\s+(?:đi|nhe|nhé|nha|thôi|thoi|giúp|giup|hộ|ho)?(?:\s+(?:bro|bạn|ban|ad|em))?)?)$/i.test(text.trim())) {
+            await sendTg(
+                botToken,
+                chatId,
+                `☁️ <b>[CLOUDFLARE WORKER 24/7 - KHÔNG THỂ TẮT NGUỒN VẬT LÝ]</b>\n──────────────────────\n😄 <b>Haha bro ơi:</b>\n• Hiện tại bro đang chat trực tiếp với <b>Cloudflare Worker trên Đám Mây</b>, máy tính PC ở nhà của bro đã tắt nguồn (hoặc đang ở chế độ Chờ) rồi!\n• Cloudflare Worker là <i>Serverless Edge</i> chạy trên hàng trăm trung tâm dữ liệu toàn cầu nên <b>không có nút nguồn vật lý để "tắt máy"</b> :v\n• Khi bro không nhắn tin, Cloud tự động nằm im ở <b>0% CPU, 0đ tiền điện</b> và kiên nhẫn trực chiến 24/7 chờ bro.\n\n💡 <i>Nếu bro muốn đóng cửa sổ làm việc này trên điện thoại, hãy gõ <code>/dongtopic</code> nhé! Chúc bro nghỉ ngơi vui vẻ!</i>`,
+                threadId
+            );
+            return;
+        }
+
         // H. LỆNH TELECLOUD VIRTUAL REPO: /files, /cat, /search
         if (/^(?:\/files|\/tree|danh\s+sách\s+file|cây\s+thư\s+mục)$/i.test(text.trim())) {
             const store = await getOrLoadTeleCloudRepo(botToken, threadId);
