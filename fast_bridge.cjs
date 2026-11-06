@@ -326,6 +326,8 @@ async function handleEmergencyCancel(chatId, threadId, source = '/cancel') {
     // 0. Xóa bộ giám sát watchdog
     clearWatchdog();
     mtproto.resetAuthState();
+    waitingForPairCode = false;
+    waitingForEditQueueId = null;
 
     // 1. Dọn sạch hàng đợi (Queue)
     const clearedQueueCount = clearQueue();
@@ -1489,6 +1491,9 @@ async function pollUpdates() {
 
                         if (mtState.step === 'AWAITING_2FA') {
                             const pass = userText.trim();
+                            if (msg.message_id) {
+                                try { await tgApiRaw('deleteMessage', { chat_id: chatId, message_id: msg.message_id }); } catch (e) {}
+                            }
                             await sendMsg(chatId, `⏳ Đang kiểm tra mật khẩu 2FA...`, null);
                             const passRes = await mtproto.verify2FaPassword(pass);
                             if (passRes.ok && passRes.session) {
@@ -1950,8 +1955,8 @@ async function pollUpdates() {
                         continue;
                     }
 
-                    // Kiểm tra nếu đang chờ mã 4 số kết nối lại
-                    if (/^\d{4}$/.test(userText.trim())) {
+                    // Kiểm tra nếu đang chờ mã 4 số kết nối lại PC (chỉ khi có yêu cầu nhập mã PIN)
+                    if (waitingForPairCode && /^\d{4}$/.test(userText.trim())) {
                         const code = userText.trim();
                         if (lobby.verifyProjectPin(code, threadId || activeThreadId)) {
                             waitingForPairCode = false;
