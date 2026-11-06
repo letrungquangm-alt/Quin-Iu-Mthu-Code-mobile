@@ -406,12 +406,16 @@ async function run() {
         console.log(`[SendWorker Cancel OK] Đã dừng và dọn dẹp`);
     }
 
-    // --- 4. ACTION: RESPONSE (GỬI KẾT QUẢ HOÀN TẤT & TỰ ĐỘNG DỌN BUBBLE) ---
+    // --- 4. ACTION: RESPONSE (GỬI KẾT QUẢ HOÀN TẤT & TỰ ĐỘNG DỌN TOÀN BỘ PHẦN Ở GIỮA) ---
     else {
         const rawText = payload.text || '';
         const totalSec = payload.totalSec;
+        const toDeleteIds = Array.isArray(payload.toDeleteIds) ? payload.toDeleteIds : [];
+        const userMsgIds = new Set(Array.isArray(payload.userMsgIds) ? payload.userMsgIds : []);
         const st = updateBridgeState({ isWorking: false });
-        const oldMsgId = st.promptMsgId;
+        const startMsgId = st.promptMsgId;
+
+        let firstResMsgId = null;
 
         if (rawText.trim()) {
             const header = totalSec
@@ -426,7 +430,7 @@ async function run() {
                     ? header
                     : `<i>(Phần ${i + 1}/${chunks.length})</i>\n\n`;
 
-                await tgApi('sendMessage', {
+                const res = await tgApi('sendMessage', {
                     chat_id: chatId,
                     message_thread_id: threadId,
                     text: `${chunkHeader}${html}`,
@@ -434,18 +438,45 @@ async function run() {
                     disable_web_page_preview: true
                 });
 
+                if (res && res.result && !firstResMsgId) {
+                    firstResMsgId = res.result.message_id;
+                }
+
                 if (i < chunks.length - 1) {
                     await new Promise(r => setTimeout(r, 200));
                 }
             }
-            console.log(`[SendWorker Response OK] Da gui ${chunks.length} phan toi Topic #${threadId}!`);
+            console.log(`[SendWorker Response OK] Da gui ${chunks.length} phan toi Topic #${threadId}! First Msg ID: ${firstResMsgId}`);
         }
 
-        // Tự động xóa bong bóng đếm giây cũ sau khi đã gửi xong kết quả
-        if (oldMsgId) {
+        // 👉 DỌN DẸP SẠCH TOÀN BỘ PHẦN Ở GIỮA (Từ mốc "Đã đọc prompt" đến trước tin nhắn phản hồi):
+        const deleteCandidates = new Set(toDeleteIds);
+        if (startMsgId) deleteCandidates.add(startMsgId);
+
+        // Quét toàn bộ dải message ID từ startMsgId đến firstResMsgId - 1
+        if (startMsgId && firstResMsgId && firstResMsgId > startMsgId) {
+            for (let mid = startMsgId; mid < firstResMsgId; mid++) {
+                if (!userMsgIds.has(mid)) {
+                    deleteCandidates.add(mid);
+                }
+            }
+        }
+
+        const finalDeleteList = Array.from(deleteCandidates).filter(id => typeof id === 'number' && id > 0 && !userMsgIds.has(id));
+        console.log(`[SendWorker Range Cleanup] Đang xóa ${finalDeleteList.length} tin nhắn ở giữa (từ mốc ${startMsgId} đến ${firstResMsgId}):`, finalDeleteList);
+
+        if (finalDeleteList.length > 0) {
             setTimeout(async () => {
-                await tgApi('deleteMessage', { chat_id: chatId, message_id: oldMsgId });
-            }, 1500);
+                for (let i = 0; i < finalDeleteList.length; i += 80) {
+                    const batch = finalDeleteList.slice(i, i + 80);
+                    const delRes = await tgApi('deleteMessages', { chat_id: chatId, message_ids: batch });
+                    if (!delRes || !delRes.ok) {
+                        for (const mid of batch) {
+                            try { await tgApi('deleteMessage', { chat_id: chatId, message_id: mid }); } catch (e) {}
+                        }
+                    }
+                }
+            }, 600);
         }
     }
 

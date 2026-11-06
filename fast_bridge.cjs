@@ -159,7 +159,9 @@ function sendViaBat(payloadData) {
     }
 }
 
-async function sendLongResponse(chatId, answerText, totalSec, threadId = 1160) {
+const knownUserMsgIds = new Set();
+
+async function sendLongResponse(chatId, answerText, totalSec, threadId = 1160, toDeleteIds = [], userMsgIds = []) {
     if (!answerText) return;
     const targetThreadId = Number(threadId) || activeThreadId || 1160;
 
@@ -168,9 +170,11 @@ async function sendLongResponse(chatId, answerText, totalSec, threadId = 1160) {
         chat_id: chatId,
         message_thread_id: targetThreadId,
         text: answerText,
-        totalSec: totalSec
+        totalSec: totalSec,
+        toDeleteIds: toDeleteIds,
+        userMsgIds: userMsgIds
     });
-    console.log(`[Bridge] Đã bàn giao phản hồi (${answerText.length} ký tự) cho send_message.bat xử lý ngầm!`);
+    console.log(`[Bridge] Đã bàn giao phản hồi (${answerText.length} ký tự) và danh sách dọn dẹp (${toDeleteIds.length} tin) cho send_message.bat xử lý ngầm!`);
 }
 
 // --- SILENT CLEANUP (1 FAST API CALL) ---
@@ -787,9 +791,6 @@ const transcriptWatcher = createTranscriptWatcher({
         const totalSec = promptStartTime ? Math.max(1, Math.round((Date.now() - promptStartTime) / 1000)) : 1;
         console.log(`[Bridge] Phản hồi hoàn tất trong ${totalSec}s. Gửi tới Telegram #${activeThreadId}...`);
 
-        await clearAllCancelButtons(activeChatId, tempMsgIds);
-        await sendLongResponse(activeChatId, answer, totalSec, activeThreadId);
-
         const toClean = [...tempMsgIds];
         tempMsgIds = [];
         promptMsgId = null;
@@ -800,9 +801,7 @@ const transcriptWatcher = createTranscriptWatcher({
         isEditedPrompt = false;
         currentWorkingMsgId = null;
 
-        if (toClean.length > 0) {
-            runCountdownCleanup(activeChatId, activeThreadId, toClean);
-        }
+        await sendLongResponse(activeChatId, answer, totalSec, activeThreadId, toClean, Array.from(knownUserMsgIds));
 
         if (promptQueue.length > 0) {
             const nextItem = getNextPrompt();
@@ -1294,6 +1293,14 @@ async function pollUpdates() {
                         userText = msg.caption.trim();
                     }
 
+                    if (msg.message_id) {
+                        knownUserMsgIds.add(msg.message_id);
+                        if (knownUserMsgIds.size > 200) {
+                            const arr = Array.from(knownUserMsgIds);
+                            knownUserMsgIds.clear();
+                            arr.slice(-100).forEach(id => knownUserMsgIds.add(id));
+                        }
+                    }
                     if (!userText) continue;
 
                     console.log(`[Telegram Nhận Tin] (chat=${chatId}, thread=${threadId}): ${userText.substring(0, 60)}`);
