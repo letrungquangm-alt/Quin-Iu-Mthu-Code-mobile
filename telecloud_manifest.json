@@ -1,11 +1,11 @@
 {
-  "updated_at": "2026-11-06T10:21:50.713Z",
-  "file_id": "BQACAgUAAyEGAAMBCbVXbAACE7Nq7ao-8c8QLkK1hsZpWEtHI6wg1wAC5CQAAtSacVc3-ZC7z5OFAT0E",
-  "message_id": 5043,
+  "updated_at": "2026-11-06T11:20:06.153Z",
+  "file_id": "BQACAgUAAyEGAAMBCbVXbAACFAtq7bflVW_nk6_kjamePcOfmYLuVgACJyUAAtSacVcq-6gl3WRM0z0E",
+  "message_id": 5131,
   "topic": "General (#)",
-  "file_count": 80,
-  "raw_bytes": 697683,
-  "gzipped_size": 177512,
+  "file_count": 82,
+  "raw_bytes": 710976,
+  "gzipped_size": 181083,
   "file_tree": [
     {
       "path": "antigravity_ls.json",
@@ -33,7 +33,7 @@
     },
     {
       "path": "bridge_state.json",
-      "size": 921
+      "size": 1066
     },
     {
       "path": "config.example.json",
@@ -45,7 +45,7 @@
     },
     {
       "path": "fast_bridge.cjs",
-      "size": 94732
+      "size": 99124
     },
     {
       "path": "GEMINI.md",
@@ -53,7 +53,7 @@
     },
     {
       "path": "gmcloud_manifest.json",
-      "size": 5551
+      "size": 5695
     },
     {
       "path": "index.html",
@@ -248,6 +248,14 @@
       "size": 2377
     },
     {
+      "path": "setup_autologon.bat",
+      "size": 717
+    },
+    {
+      "path": "setup_autologon.ps1",
+      "size": 6213
+    },
+    {
       "path": "setup_net.bat",
       "size": 434
     },
@@ -257,7 +265,7 @@
     },
     {
       "path": "src/worker.js",
-      "size": 75033
+      "size": 77083
     },
     {
       "path": "start.bat",
@@ -269,11 +277,11 @@
     },
     {
       "path": "sync_bridge.json",
-      "size": 8400
+      "size": 7888
     },
     {
       "path": "telecloud_manifest.json",
-      "size": 5551
+      "size": 5695
     },
     {
       "path": "test_copyscreen.ps1",
