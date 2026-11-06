@@ -201,6 +201,7 @@ export default {
                         summary: data.summary || "Dự án Quin-Iu-Mthu-Code-mobile",
                         files: data.files || ["fast_bridge.cjs", "src/worker.js", "lib/intent.cjs", "lib/ipc.cjs", "lib/lobby.cjs"],
                         history: mergedHist,
+                        device_passport: data.device_passport || null,
                         lastSync: Date.now()
                     });
 
@@ -576,6 +577,20 @@ async function handleTelegramUpdate(update, env, ctx) {
 
     // 2. NẾU LÀ PROMPT ĐÀM THOẠI / CÂU HỎI: BỎ QUA TOÀN BỘ LỆNH & ĐI THẲNG TỚI AI (GROQ / GEMINI)
     if (!isConversationalPrompt(text)) {
+        // 🛂 LỆNH XEM HỘ CHIẾU THIẾT BỊ (DEVICE PASSPORT / IP / MODEL)
+        if (/^(?:\/passport|\/device|\/device_info|\/ip|hộ\s*chiếu|ho\s*chieu|thông\s*tin\s*máy|thong\s*tin\s*may|ip\s*máy|ip\s*may)$/i.test(text.trim())) {
+            const memKey = Number(threadId) || PROJECT_TOPIC_ID;
+            const mem = topicMemory.get(memKey);
+            const p = mem && mem.device_passport;
+            if (p) {
+                const card = `🛂 <b>[HỘ CHIẾU THIẾT BỊ - DEVICE PASSPORT]</b>\n──────────────────────\n💻 <b>Tên máy:</b> <code>${p.hostname}</code>\n🌐 <b>Địa chỉ IP:</b> <code>${p.localIp}</code>\n⚙️ <b>Model CPU:</b> <code>${p.cpuModel}</code>\n🪟 <b>Hệ điều hành:</b> <code>${p.osInfo}</code> (${p.ramGB} GB RAM)\n🪪 <b>Mã định danh (GUID):</b> <code>${p.machineGuid}</code>\n💾 <b>Ổ làm việc:</b> Ổ <code>${p.workingDrive}:\\</code>\n\n💡 <i>Cloudflare 24/7 đã lưu trữ hộ chiếu thiết bị của PC chính xác 100%!</i>`;
+                await sendTg(botToken, chatId, card, threadId);
+            } else {
+                await sendTg(botToken, chatId, `🛂 <b>[HỘ CHIẾU THIẾT BỊ - DEVICE PASSPORT]</b>\n──────────────────────\n💻 <b>Định danh máy:</b> Mỗi máy tính (PC nhà, laptop, máy net) khi khởi động đều cấp một <b>Hộ chiếu phần cứng duy nhất</b> (gồm <b>Machine GUID + IP + Model CPU + Hostname</b>).\n⚡ Nhờ hộ chiếu này, Cloudflare Worker biết chính xác lệnh <code>/pc</code> hoặc mã PIN trỏ tới máy tính nào, hoàn toàn không bị xung đột khi có nhiều máy!\n\n💡 <i>Khi máy tính PC của bro bật lên, gõ <code>/pc</code> để kết nối và cập nhật hộ chiếu ngay nhé!</i>`, threadId);
+            }
+            return;
+        }
+
         // A. LỆNH KẾT NỐI / TIẾP QUẢN PC: /PC, /CONNECT, /KETNOI, KET NOI PC
         if (/^(?:\/pc|\/connect|\/ketnoi|ket\s*noi\s*pc|bật\s+antigravity|mở\s+antigravity|khởi\s+động\s+antigravity)(?:\s+(\d{3,4}))?$/i.test(text.trim())) {
             const match = text.trim().match(/^(?:\/pc|\/connect|\/ketnoi|ket\s*noi\s*pc|bật\s+antigravity|mở\s+antigravity|khởi\s+động\s+antigravity)(?:\s+(\d{3,4}))?$/i);

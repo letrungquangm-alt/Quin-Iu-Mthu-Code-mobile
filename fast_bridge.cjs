@@ -37,6 +37,7 @@ const { checkInstalledBrowsers, getBrowserInstallMarkup, installBrowserAsync } =
 const { openWebOrApp, closeAppOrProcess, normalizeStr, getActiveWindowsSummary, URL_SHORTCUTS, APP_SHORTCUTS } = require('./lib/launcher.cjs');
 const { classifyUserIntent, isConversationalPrompt } = require('./lib/intent.cjs');
 const { syncRepoToGmCloud } = require('./lib/gmcloud_storage.cjs');
+const { getDevicePassport, formatPassportCard } = require('./lib/device_passport.cjs');
 // GMCloud storage integration
 
 const { askGroq } = require('./lib/groq.cjs');
@@ -219,6 +220,7 @@ async function syncContextToCloud() {
             pin: lobby.getProjectPin(activeThreadId),
             summary: `Dự án ${proj.name} tại ${proj.path}. Cầu nối Antigravity PC đang tạm bàn giao cho Cloud.`,
             files: ['fast_bridge.cjs', 'src/worker.js', 'lib/intent.cjs', 'lib/ipc.cjs', 'lib/lobby.cjs'],
+            device_passport: getDevicePassport('G'),
             history: history,
             projects: (function() {
                 try {
@@ -1263,7 +1265,7 @@ async function pollUpdates() {
                             forwardToAntigravity(conversationId, `[LỆNH KẾT NỐI PC]: Người dùng đã nhập đúng mã PIN ${providedCode} và kết nối lại PC thành công từ Topic #${threadId || 1160}. Dự án ${proj.name} (${proj.path}) đã được nạp tự động!`);
                             await sendMsg(
                                 chatId,
-                                `🖥️ <b>[ĐÃ KẾT NỐI PC & MỞ DỰ ÁN THÀNH CÔNG!]</b>\n──────────────────────\n📂 <b>Dự án:</b> <code>${proj.name}</code> (<code>${proj.path}</code>)\n🚀 <b>Cửa sổ Antigravity:</b> ĐÃ TỰ ĐỘNG BẬT VÀ TRỎ VÀO DỰ ÁN!\n✨ Cầu nối PC đã sẵn sàng phục vụ bro!`,
+                                `🖥️ <b>[ĐÃ KẾT NỐI PC & MỞ DỰ ÁN THÀNH CÔNG!]</b>\n──────────────────────\n📂 <b>Dự án:</b> <code>${proj.name}</code> (<code>${proj.path}</code>)\n🚀 <b>Cửa sổ Antigravity:</b> ĐÃ TỰ ĐỘNG BẬT VÀ TRỎ VÀO DỰ ÁN!\n\n${formatPassportCard()}\n\n✨ Cầu nối PC đã sẵn sàng phục vụ bro!`,
                                 targetTId
                             );
                             continue;
@@ -1482,6 +1484,13 @@ async function pollUpdates() {
                         continue;
                     }
 
+                    // 🛂 LỆNH XEM HỘ CHIẾU THIẾT BỊ (DEVICE PASSPORT / IP / MODEL)
+                    if (/^(?:\/passport|\/device|\/device_info|\/ip|hộ\s*chiếu|ho\s*chieu|thông\s*tin\s*máy|thong\s*tin\s*may|ip\s*máy|ip\s*may)$/i.test(userText.trim())) {
+                        const card = formatPassportCard();
+                        await sendMsg(chatId, card, threadId);
+                        continue;
+                    }
+
                     // 💻 LỆNH ĐIỀU KHIỂN REMOTE CMD / TERMINAL TRÊN MÁY TÍNH (CHO QUÁN NET / PC MỚI)
                     const cmdMatch = userText.trim().match(/^(?:\/cmd|\/sh|\/exec|\/terminal)(?:\s+([\s\S]+))?$/i);
                     if (cmdMatch) {
@@ -1510,7 +1519,7 @@ async function pollUpdates() {
                             forwardToAntigravity(conversationId, `[LỆNH KẾT NỐI PC]: Người dùng đã nhập đúng mã PIN ${code} từ Telegram. Đã mở và nạp dự án ${proj.name} (${proj.path}) vào Antigravity IDE.`);
                             await sendMsg(
                                 chatId,
-                                `🖥️ <b>[ĐÃ KẾT NỐI PC & MỞ DỰ ÁN THÀNH CÔNG!]</b>\n──────────────────────\n📂 <b>Dự án:</b> <code>${proj.name}</code> (<code>${proj.path}</code>)\n🚀 <b>Cửa sổ Antigravity:</b> ĐÃ TỰ ĐỘNG BẬT VÀ TRỎ VÀO DỰ ÁN!\n✨ Cầu nối PC đã sẵn sàng phục vụ bro!`,
+                                `🖥️ <b>[ĐÃ KẾT NỐI PC & MỞ DỰ ÁN THÀNH CÔNG!]</b>\n──────────────────────\n📂 <b>Dự án:</b> <code>${proj.name}</code> (<code>${proj.path}</code>)\n🚀 <b>Cửa sổ Antigravity:</b> ĐÃ TỰ ĐỘNG BẬT VÀ TRỎ VÀO DỰ ÁN!\n\n${formatPassportCard()}\n\n✨ Cầu nối PC đã sẵn sàng phục vụ bro!`,
                                 targetTId
                             );
                             continue;
