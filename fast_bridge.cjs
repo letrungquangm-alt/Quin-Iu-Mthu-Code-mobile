@@ -235,7 +235,7 @@ async function syncContextToCloud() {
 
 [TRI THỨC GITHUB & QUẢN TRỊ REPO]:
 - GITHUB_TOKEN / PAT của bro ĐÃ CÓ SẴN TRONG HỆ THỐNG.
-- Mọi file và code mới nhất đã được commit và push lên GitHub origin/main thành công (commit 7826bb0).
+- Mọi file và code mới nhất đã được commit và push lên GitHub origin/main thành công .
 - TUYỆT ĐỐI KHÔNG BAO GIỜ nói 'không có quyền truy cập GitHub' hay hỏi xin lại Personal Access Token (PAT) của bro! Bro đã nạp rồi.
 - Khi bro hỏi 'bạn push lên github chưa?' -> Khẳng định ngay: '✅ Đã commit và push toàn bộ code mới nhất lên GitHub (nhánh main) an toàn rực rỡ rồi bro!'
 
@@ -292,6 +292,7 @@ async function setCloudWebhook(enable = true) {
 
 async function handleDisconnectCloud(targetChatId = null, targetThreadId = null) {
     const chatId = targetChatId || activeChatId;
+    const threadId = targetThreadId || activeThreadId;
     console.log('[Bridge Disconnect] Bàn giao cho Cloudflare Worker 24/7...');
     isCloudStandby = true;
     stopTicker();
@@ -300,35 +301,14 @@ async function handleDisconnectCloud(targetChatId = null, targetThreadId = null)
     promptMsgId = null;
     currentWorkingMsgId = null;
 
-    let cloudTopicId = null;
+    const handoverText = `☁️ <b>[CLOUDFLARE WORKER 24/7 - TIẾP QUẢN TRỰC CHIẾN]</b>\n──────────────────────\n💻 <b>Máy tính:</b> Đã chuyển sang chế độ Chờ (Standby)\n🌐 <b>Cloudflare Edge & Groq LPU:</b> Đã tiếp quản xử lý trực tiếp tại topic này!\n☁️ <b>Kho GMCloud Storage:</b> Dữ liệu mã nguồn lưu trữ an toàn vĩnh cửu tại Topic #\n\n💬 Bro hãy chat, yêu cầu code qua Cloudflare 24/7 ngay tại đây, kể cả khi máy tính tắt nguồn!\n\n⚡ <b>Lệnh đánh thức:</b>\n• <code>/pc</code> hoặc mã PIN <code>2726</code>: Gọi máy tính ở nhà tiếp quản lại.\n• <code>/cloud</code>: Kiểm tra trạng thái trực chiến của Cloud.`;
 
-    // 1. TẠO TOPIC RIÊNG BIỆT CHO CLOUD ĐỂ KHÔNG BAO GIỜ CODE BÊN SẢNH LOBBY
-    try {
-        const topicRes = await tgApiRaw('createForumTopic', {
-            chat_id: chatId,
-            name: '☁️ Cloud 24/7 (Groq LPU)',
-            icon_color: 7322096 // Màu xanh da trời Cloud
-        });
-        if (topicRes && topicRes.ok && topicRes.result) {
-            cloudTopicId = topicRes.result.message_thread_id;
-            console.log(`[Bridge Disconnect] Đã sinh Topic riêng cho Cloud: #${cloudTopicId}`);
-        }
-    } catch (e) {
-        console.error('[Create Cloud Topic Error]:', e.message);
-    }
-
-    const destinationThread = cloudTopicId || (!lobby.isLobby(targetThreadId) ? targetThreadId : null);
-
-    const handoverText = `☁️ <b>[CỬA SỔ CLOUDFLARE 24/7 ĐÃ SẴN SÀNG PHỤC VỤ]</b>\n──────────────────────\n🖥️ <b>Máy tính:</b> Đã ngưng tiếp nhận lệnh trực tiếp (Chế độ Chờ)\n🌐 <b>Cloudflare Worker (Groq LPU):</b> ĐÃ TIẾP QUẢN TOÀN DIỆN!\n🔒 <b>Topic độc lập:</b> #${destinationThread || 'Cloud'}\n\n✨ Bro hãy chat, yêu cầu code qua Groq LPU siêu tốc ngay tại đây, kể cả khi máy tính tắt nguồn!\n\n👉 <b>Lệnh hữu ích:</b>\n• <code>/pc</code> hoặc <code>ket noi pc</code>: Gọi máy tính ở nhà tiếp quản lại.\n• <code>/dongtopic</code>: Đóng topic Cloud này khi hoàn tất.`;
-
-    // Tuyệt đối CHỈ gửi tin nhắn này vào Topic riêng của Cloud, KHÔNG BAO GIỜ gửi vào Sảnh Lobby!
-    if (destinationThread && !lobby.isLobby(destinationThread)) {
-        await sendMsg(chatId, handoverText, destinationThread, 'HTML', { inline_keyboard: [] });
+    if (threadId && !lobby.isLobby(threadId)) {
+        await sendMsg(chatId, handoverText, threadId, 'HTML', { inline_keyboard: [] });
     }
 
     await setCloudWebhook(true);
-
-    return cloudTopicId;
+    return threadId;
 }
 
 // --- HANDLE CANCEL ACTION ---
@@ -939,74 +919,83 @@ async function pollUpdates() {
                     console.log('[Bridge Wakeup] ⚡ Đã nhận tín hiệu cưỡng chế kết nối lại từ PC! Tiếp quản Telegram ngay lập tức!');
                     await sendMsg(activeChatId, '🖥️ <b>[PC LOCAL BRIDGE - SẴN SÀNG]</b>\n──────────────────────\nPC đã thức tỉnh và tiếp quản kết nối Telegram thành công!', activeThreadId);
                 } else {
+                    // PC ở chế độ Chờ: Luôn chủ động kiểm tra hàng đợi lệnh từ Cloudflare Worker (Shutdown / Close App / Wake)
                     try {
-                        const whInfo = await tgApiRaw('getWebhookInfo');
-                        if (whInfo && whInfo.result && !whInfo.result.url) {
-                            isCloudStandby = false;
-                            console.log('[Bridge Wakeup] ⚡ Cloudflare da nhuong quyen cho PC!');
-
-                            // Kiểm tra xem có lệnh thực thi từ xa (Shutdown / Close App / Wake) từ Cloud hay không
-                            let pendingCmds = [];
-                            try {
-                                const pcCmdRes = await fetch(`${CLOUD_WORKER_URL}/pc/pending_commands`);
-                                const pcCmdJson = await pcCmdRes.json();
-                                if (pcCmdJson && Array.isArray(pcCmdJson.commands) && pcCmdJson.commands.length > 0) {
-                                    pendingCmds = pcCmdJson.commands;
-                                    await fetch(`${CLOUD_WORKER_URL}/pc/pending_commands`, { method: 'POST' }); // ACK / clear
-                                }
-                            } catch (e) {}
-
-                            // 1. Xử lý lệnh tắt máy từ xa
-                            const shutdownCmd = pendingCmds.find(c => c.type === 'shutdown_pc');
-                            if (shutdownCmd) {
-                                console.log('[Remote Shutdown] Tiếp nhận lệnh tắt nguồn từ Cloud!');
-                                const targetT = shutdownCmd.threadId || activeThreadId;
-                                await sendMsg(
-                                    activeChatId,
-                                    `🔌 <b>[PC ĐÃ TIẾP NHẬN LỆNH TẮT NGUỒN TỪ XA]</b>\n──────────────────────\n✅ Máy tính PC đang tiến hành tắt máy trong 10 giây!\n💤 Chúc bro nghỉ ngơi! Khi cần mở lại, bật máy tính và gõ <code>/pc</code> nhé!`,
-                                    targetT
-                                );
-                                await setCloudWebhook(true);
-                                isCloudStandby = true;
-                                setTimeout(() => {
-                                    const cp = require('child_process');
-                                    cp.exec('shutdown.exe /s /t 10 /c "QuinloveRin Remote Shutdown"');
-                                }, 1500);
-                                continue;
+                        let pendingCmds = [];
+                        try {
+                            const pcCmdRes = await fetch(`${CLOUD_WORKER_URL}/pc/pending_commands`);
+                            const pcCmdJson = await pcCmdRes.json();
+                            if (pcCmdJson && Array.isArray(pcCmdJson.commands) && pcCmdJson.commands.length > 0) {
+                                pendingCmds = pcCmdJson.commands;
+                                await fetch(`${CLOUD_WORKER_URL}/pc/pending_commands`, { method: 'POST' }); // ACK / clear
                             }
+                        } catch (e) {}
 
-                            // 2. Xử lý lệnh đóng ứng dụng từ xa
-                            const closeCmd = pendingCmds.find(c => c.type === 'close_app');
-                            if (closeCmd) {
-                                console.log(`[Remote Close] Đóng ứng dụng: ${closeCmd.target}`);
-                                const res = closeAppOrProcess(closeCmd.target);
-                                const targetT = closeCmd.threadId || activeThreadId;
-                                await sendMsg(
-                                    activeChatId,
-                                    `🛑 <b>[ĐÃ ĐÓNG ỨNG DỤNG THEO LỆNH TỪ XA]</b>\n──────────────────────\n✅ <b>${res.desc}</b>`,
-                                    targetT
-                                );
-                                await setCloudWebhook(true);
-                                isCloudStandby = true;
-                                continue;
-                            }
+                        // 1. Xử lý lệnh tắt máy từ xa
+                        const shutdownCmd = pendingCmds.find(c => c.type === 'shutdown_pc');
+                        if (shutdownCmd) {
+                            console.log('[Remote Shutdown] Tiếp nhận lệnh tắt nguồn từ Cloud!');
+                            const targetT = shutdownCmd.threadId || activeThreadId;
+                            await sendMsg(
+                                activeChatId,
+                                `🔌 <b>[PC ĐÃ TIẾP NHẬN LỆNH TẮT NGUỒN TỪ XA]</b>\n──────────────────────\n✅ Máy tính PC đang tiến hành tắt máy trong 10 giây!\n💤 Chúc bro nghỉ ngơi! Khi cần mở lại, bật máy tính và gõ <code>/pc</code> nhé!`,
+                                targetT
+                            );
+                            await setCloudWebhook(true);
+                            isCloudStandby = true;
+                            setTimeout(() => {
+                                const cp = require('child_process');
+                                cp.exec('shutdown.exe /s /t 10 /c "QuinloveRin Remote Shutdown"');
+                            }, 1500);
+                            await new Promise(r => setTimeout(r, 3000));
+                            continue;
+                        }
 
-                            // 3. Xử lý lệnh đánh thức & mở dự án
-                            const wakeCmd = pendingCmds.find(c => c.type === 'wake_and_open');
-                            if (wakeCmd && wakeCmd.project && wakeCmd.project.topicId) {
+                        // 2. Xử lý lệnh đóng ứng dụng từ xa
+                        const closeCmd = pendingCmds.find(c => c.type === 'close_app');
+                        if (closeCmd) {
+                            console.log(`[Remote Close] Đóng ứng dụng: ${closeCmd.target}`);
+                            const res = closeAppOrProcess(closeCmd.target);
+                            const targetT = closeCmd.threadId || activeThreadId;
+                            await sendMsg(
+                                activeChatId,
+                                `🛑 <b>[ĐÃ ĐÓNG ỨNG DỤNG THEO LỆNH TỪ XA]</b>\n──────────────────────\n✅ <b>${res.desc}</b>`,
+                                targetT
+                            );
+                            await setCloudWebhook(true);
+                            isCloudStandby = true;
+                            await new Promise(r => setTimeout(r, 2000));
+                            continue;
+                        }
+
+                        // 3. Xử lý lệnh đánh thức & mở dự án (User gõ /pc & mã PIN trên Cloud)
+                        const wakeCmd = pendingCmds.find(c => c.type === 'wake_and_open');
+                        if (wakeCmd) {
+                            console.log('[Bridge Wakeup] 🚀 Tiếp nhận lệnh kết nối lại PC & Mở dự án từ Cloud!');
+                            if (wakeCmd.project && wakeCmd.project.topicId) {
                                 activeThreadId = wakeCmd.project.topicId;
                             }
+                            isCloudStandby = false;
+                            await setCloudWebhook(false); // Gỡ bỏ Webhook để PC tiếp quản trực tiếp
                             const proj = lobby.getProjectInfo(activeThreadId);
                             launchOrFocusAntigravity(proj.path);
                             await sendMsg(
                                 activeChatId,
-                                `🖥️ <b>[PC LOCAL BRIDGE - ĐÃ TIẾP QUẢN & MỞ DỰ ÁN]</b>\n──────────────────────\n📂 <b>Dự án:</b> <code>${proj.name}</code> (<code>${proj.path}</code>)\n🚀 <b>Antigravity:</b> ĐÃ TỰ ĐỘNG BẬT VÀ TRỎ VÀO WORKSPACE!\n✨ PC đã sẵn sàng phục vụ bro!`,
+                                `🖥️ <b>[PC LOCAL BRIDGE - ĐÃ TIẾP QUẢN & MỞ DỰ ÁN]</b>\n──────────────────────\n📂 <b>Dự án:</b> <code>${proj.name}</code> (<code>${proj.path}</code>)\n🚀 <b>Antigravity:</b> ĐÃ TỰ ĐỘNG BẬT VÀ TRỎ VÀO WORKSPACE!\n✨ PC đã sẵn sàng phục vụ bro!\n\n${formatPassportCard()}`,
                                 activeThreadId
                             );
                             continue;
                         }
+
+                        // Kiểm tra nếu Webhook bị gỡ từ bên ngoài
+                        const whInfo = await tgApiRaw('getWebhookInfo');
+                        if (whInfo && whInfo.result && !whInfo.result.url) {
+                            isCloudStandby = false;
+                            console.log('[Bridge Wakeup] ⚡ Webhook đã gỡ, PC tiếp quản!');
+                            continue;
+                        }
                     } catch (e) {}
-                    await new Promise(r => setTimeout(r, 2000));
+                    await new Promise(r => setTimeout(r, 2500));
                     continue;
                 }
             }
@@ -1014,6 +1003,11 @@ async function pollUpdates() {
             const res = await tgApiRaw('getUpdates', { offset: pollOffset, timeout: 8, allowed_updates: ['message', 'edited_message', 'callback_query'] });
             if (!res.ok) {
                 if (res.error_code === 409) {
+                    if (isCloudStandby) {
+                        console.log('[Bridge Polling] Đang ở chế độ Standby, giữ nguyên Webhook cho Cloud.');
+                        await new Promise(r => setTimeout(r, 4000));
+                        continue;
+                    }
                     console.warn('[Bridge Polling] 409 Conflict: Tự động gỡ Webhook & reset kết nối...');
                     await tgApiRaw('deleteWebhook', { drop_pending_updates: false });
                     await new Promise(r => setTimeout(r, 4000));
