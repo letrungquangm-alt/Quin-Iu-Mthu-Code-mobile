@@ -1,0 +1,13 @@
+{
+  "name": "kkphim-core",
+  "version": "1.0.0",
+  "description": "Clean, standalone KKPhim API SDK & Stream Processing Engine",
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "test": "node test_all.js"
+  },
+  "keywords": ["kkphim", "ophim", "m3u8", "stream", "hls"],
+  "author": "",
+  "license": "MIT"
+}
