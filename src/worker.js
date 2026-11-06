@@ -1167,7 +1167,7 @@ async function executeCloudPromptWithMemory(text, chatId, threadId, botToken, en
     topicMemory.set(memKey, mem);
 
     const formattedBody = mdToTgHtml(cleanAnswer);
-    let reply = `🤖 <b>[QUINLOVERIN 3.8 CLOUD]</b> ⏱️ <b>${elapsedSec}s</b> (<i>${modelUsed}</i>)\n──────────────────────\n${formattedBody}\n\n`;
+    let reply = `🤖 <b>[QUINLOVERIN 3.8 - CLOUD 24/7]</b> ⏱️ <b>${elapsedSec}s</b>\n──────────────────────\n${formattedBody}\n\n`;
 
     if (committedFiles.length > 0) {
         reply += `📦 <b>CÁC FILE ĐÃ COMMIT TỰ ĐỘNG LÊN GITHUB:</b>\n`;
