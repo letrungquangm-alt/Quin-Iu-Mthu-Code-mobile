@@ -1,6 +1,6 @@
 # open_antigravity.ps1 - Intelligent Antigravity Window Launcher & Restorer
 param(
-    [string]$WorkspaceDir = "E:\MThu Mobile Code"
+    [string]$WorkspaceDir = "G:\MThu Mobile Code"
 )
 
 # 1. Tìm đường dẫn Antigravity.exe linh hoạt trên mọi máy tính

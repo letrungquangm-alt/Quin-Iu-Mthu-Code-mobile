@@ -101,7 +101,7 @@ process.on('exit', () => {
 // --- STATE MANAGEMENT ---
 
 let activeChatId = -1004457846636;
-let activeThreadId = 1160;
+let activeThreadId = 4692;
 
 if (fs.existsSync(syncBridgePath)) {
     try {
@@ -244,7 +244,7 @@ async function setCloudWebhook(enable = true) {
     try {
         if (enable) {
             await syncContextToCloud();
-            const res = await tgApiRaw('setWebhook', { url: CLOUD_WORKER_URL, ip_address: '172.67.144.228', drop_pending_updates: false, allowed_updates: ['message', 'edited_message', 'callback_query'] });
+            const res = await tgApiRaw('setWebhook', { url: CLOUD_WORKER_URL, drop_pending_updates: false, allowed_updates: ['message', 'edited_message', 'callback_query'] });
             console.log('[Cloud Handover] Đã kích hoạt Webhook tới Cloudflare Worker 24/7:', res && res.ok ? 'OK' : JSON.stringify(res));
             return res && res.ok;
         } else {
@@ -1056,12 +1056,13 @@ async function pollUpdates() {
                     if (!isAllowed) continue;
 
                     activeChatId = chatId;
-                    activeThreadId = threadId;
+                    if (threadId) activeThreadId = threadId;
+                    const targetTId = threadId || activeThreadId || 4692;
 
                     // 🏛️ NẾU TIN NHẮN TẠI SẢNH LOBBY (threadId === null || lobby.isLobby(threadId)):
                     // 1. NGAY LẬP TỨC XÓA BẤT KỲ TIN NHẮN NÀO XUẤT HIỆN TẠI SẢNH (chữ, ảnh, sticker, voice, file...)
                     // 2. TUYỆT ĐỐI KHÔNG COI ĐÓ LÀ PROMPT ĐỂ THỰC HIỆN CODE!
-                    if (threadId === null || lobby.isLobby(threadId)) {
+                    if (lobby.isLobby(threadId)) {
                         if (msg.message_id) {
                             try {
                                 await tgApiRaw('deleteMessage', { chat_id: chatId, message_id: msg.message_id });
@@ -1107,7 +1108,7 @@ async function pollUpdates() {
                             await sendMsg(
                                 chatId,
                                 `✅ <b>[ĐÃ CẬP NHẬT PROMPT MỚI CHO HÀNG ĐỢI]</b>\nNội dung mới: <blockquote><i>${escapeHtml(updated.preview)}</i></blockquote>`,
-                                threadId,
+                                targetTId,
                                 'HTML',
                                 getQueueButtons(editedId)
                             );
@@ -1140,7 +1141,7 @@ async function pollUpdates() {
                             await sendMsg(
                                 chatId,
                                 `🔒 <b>[ĐÃ KẾT THÚC QUYỀN QUẢN TRỊ REPO]</b>\n──────────────────────\n✅ Đã khóa lại quyền hạn quản trị repo thành công!\n🏛️ Bảng điều khiển Sảnh Lobby đã trở về trạng thái chuẩn (đã ẩn dòng Quyền hạn).\n\n👉 Khi cần mở lại toàn quyền, bro hãy vào Sảnh dùng cách bạn bảo tôi nhé!`,
-                                threadId,
+                                targetTId,
                                 'HTML'
                             );
                             forwardToAntigravity(conversationId, `[KẾT THÚC QUYỀN REPO]: Người dùng đã phát lệnh /ketthucrepo tại Topic #${threadId}. Quyền quản trị repo đã được thu hồi và khóa lại.`);
@@ -1148,7 +1149,7 @@ async function pollUpdates() {
                             await sendMsg(
                                 chatId,
                                 `⚠️ <b>[LỆNH KHÔNG HỢP LỆ TẠI ĐÂY]</b>\n──────────────────────\nLệnh <code>/ketthucrepo</code> chỉ có hiệu lực khi gửi trong chính Topic dự án được sinh ra!`,
-                                threadId,
+                                targetTId,
                                 'HTML'
                             );
                         }
@@ -1157,18 +1158,18 @@ async function pollUpdates() {
 
                     // 🗑️ LỆNH ĐÓNG & XOÁ VĨNH VIỄN TOPIC: /dongtopic, /xoatopic
                     if (/^(?:\/dongtopic|\/closetopic|\/dong_topic|\/xoatopic|\/xoa_topic)$/i.test(userText.trim())) {
-                        if (threadId === null || lobby.isLobby(threadId)) {
+                        if (lobby.isLobby(threadId)) {
                             await sendMsg(
                                 chatId,
                                 '⚠️ <b>[KHÔNG THỂ XOÁ SẢNH LOBBY]</b>\n──────────────────────\nSảnh Lobby là kênh điều khiển trung tâm, tuyệt đối không thể xoá!',
-                                threadId,
+                                targetTId,
                                 'HTML'
                             );
                         } else if (Number(threadId) === 1160) {
                             await sendMsg(
                                 chatId,
                                 '⚠️ <b>[DỰ ÁN CỐT LÕI #1160 ĐƯỢC BẢO VỆ]</b>\n──────────────────────\nTopic dự án chính không thể xoá tự động để tránh mất dữ liệu liên kết PC!',
-                                threadId,
+                                targetTId,
                                 'HTML'
                             );
                         } else {
@@ -1205,7 +1206,7 @@ async function pollUpdates() {
                             await sendMsg(
                                 chatId,
                                 `🖥️ <b>[ĐÃ KẾT NỐI PC & MỞ DỰ ÁN THÀNH CÔNG!]</b>\n──────────────────────\n📂 <b>Dự án:</b> <code>${proj.name}</code> (<code>${proj.path}</code>)\n🚀 <b>Cửa sổ Antigravity:</b> ĐÃ TỰ ĐỘNG BẬT VÀ TRỎ VÀO DỰ ÁN!\n✨ Cầu nối PC đã sẵn sàng phục vụ bro!`,
-                                threadId
+                                targetTId
                             );
                             continue;
                         }
@@ -1316,7 +1317,7 @@ async function pollUpdates() {
                                         await sendMsg(
                                             chatId,
                                             `🛑 <b>[ĐÃ ĐÓNG ANTIGRAVITY & BÀN GIAO CHO CLOUD 24/7]</b>\n──────────────────────\n✅ <b>Đã tắt ứng dụng Antigravity IDE trên PC an toàn!</b>\n⚡ Đã giải phóng hoàn toàn tài nguyên CPU & RAM trên PC.\n☁️ <b>Quyền điều hành AI đã bàn giao cho Cloudflare Worker 24/7!</b>\n\n💡 <i>Bro có thể tiếp tục chat/code trên Cloud. Khi cần mở lại Antigravity PC, chỉ cần gõ <code>/pc</code> hoặc <code>bật antigravity</code> nhé!</i>`,
-                                            threadId
+                                            targetTId
                                         );
                                         await setCloudWebhook(true);
                                         isCloudStandby = true;
@@ -1325,14 +1326,14 @@ async function pollUpdates() {
                                         await sendMsg(
                                             chatId,
                                             `🛑 <b>[ĐÃ ĐÓNG TIẾN TRÌNH / CỬA SỔ TRÊN PC]</b>\n──────────────────────\n✅ <b>${res.desc}</b>\n⚡ Tiến trình đã được giải phóng khỏi máy tính.`,
-                                            threadId
+                                            targetTId
                                         );
                                     }
                                 } else {
                                     await sendMsg(
                                         chatId,
                                         `ℹ️ <b>[KHÔNG TÌM THẤY TIẾN TRÌNH ĐỂ ĐÓNG]</b>\n──────────────────────\n${res.desc}`,
-                                        threadId
+                                        targetTId
                                     );
                                 }
                                 continue;
@@ -1343,7 +1344,7 @@ async function pollUpdates() {
                                 await sendMsg(
                                     chatId,
                                     `🔌 <b>[ĐÃ TIẾP NHẬN LỆNH TẮT NGUỒN PC]</b>\n──────────────────────\n✅ <b>Đã bàn giao quyền trực chiến 100% cho Cloudflare Worker 24/7!</b>\n⚡ Máy tính PC sẽ tự động ngắt nguồn hoàn toàn (Shut down) trong 10 giây.\n\n💡 <i>Nếu muốn hủy tắt máy, hãy gõ ngay: <code>hủy tắt máy</code> hoặc <code>/cancel_shutdown</code></i>\n💤 <i>Chúc bro nghỉ ngơi! Khi nào mở lại máy tính, chỉ cần vào Telegram gõ <code>/pc</code> và nhập mã PIN để mở lại Antigravity nhé!</i>`,
-                                    threadId
+                                    targetTId
                                 );
 
                                 // Chuyển giao ngay Webhook cho Cloudflare Worker 24/7
@@ -1369,7 +1370,7 @@ async function pollUpdates() {
                                 await sendMsg(
                                     chatId,
                                     `🛑 <b>[ĐÃ HỦY LỆNH TẮT MÁY THÀNH CÔNG]</b>\n──────────────────────\n✅ Đã kích hoạt <code>shutdown /a</code> trên Windows.\n🖥️ Máy tính PC tiếp tục hoạt động bình thường!`,
-                                    threadId
+                                    targetTId
                                 );
                                 continue;
                             }
@@ -1401,7 +1402,7 @@ async function pollUpdates() {
                             await sendMsg(
                                 chatId,
                                 `✅ <b>[ĐỒNG BỘ GMCLOUD THÀNH CÔNG RỰC RỠ!]</b>\n──────────────────────\n🏛️ <b>Kênh lưu trữ:</b> Topic # (<code>☁️ Kho GMCloud Storage</code>)\n📦 <b>Số lượng:</b> ${res.fileCount} files mã nguồn\n⚡ <b>Dung lượng nén:</b> ${(res.gzippedSize / 1024).toFixed(1)} KB (Gzip)\n🆔 <b>File ID:</b> <code>${res.file_id}</code>\n\n☁️ <b>Cloudflare Worker 24/7</b> và Kho GMCloud đã cập nhật bản mới nhất vĩnh viễn!`,
-                                threadId
+                                targetTId
                             );
                         } catch (e) {
                             await sendMsg(chatId, `❌ Lỗi đồng bộ GMCloud: ${escapeHtml(e.message)}`, threadId);
@@ -1442,24 +1443,25 @@ async function pollUpdates() {
                     // Kiểm tra nếu đang chờ mã 4 số kết nối lại
                     if ((waitingForPairCode && /^\d{4}$/.test(userText.trim())) || /^(?:2726|6585)$/.test(userText.trim())) {
                         const code = userText.trim();
-                        if (lobby.verifyProjectPin(code, threadId)) {
+                        if (lobby.verifyProjectPin(code, threadId || activeThreadId)) {
                             waitingForPairCode = false;
                             isCloudStandby = false;
-                            const proj = lobby.getProjectInfo(code || threadId);
+                            activeThreadId = targetTId;
+                            const proj = lobby.getProjectInfo(code || targetTId);
                             launchOrFocusAntigravity(proj.path);
                             forwardToAntigravity(conversationId, `[LỆNH KẾT NỐI PC]: Người dùng đã nhập đúng mã PIN ${code} từ Telegram. Đã mở và nạp dự án ${proj.name} (${proj.path}) vào Antigravity IDE.`);
                             await sendMsg(
                                 chatId,
                                 `🖥️ <b>[ĐÃ KẾT NỐI PC & MỞ DỰ ÁN THÀNH CÔNG!]</b>\n──────────────────────\n📂 <b>Dự án:</b> <code>${proj.name}</code> (<code>${proj.path}</code>)\n🚀 <b>Cửa sổ Antigravity:</b> ĐÃ TỰ ĐỘNG BẬT VÀ TRỎ VÀO DỰ ÁN!\n✨ Cầu nối PC đã sẵn sàng phục vụ bro!`,
-                                threadId
+                                targetTId
                             );
                             continue;
                         } else {
-                            const expectedPin = lobby.getProjectPin(threadId);
+                            const expectedPin = lobby.getProjectPin(threadId || activeThreadId);
                             await sendMsg(
                                 chatId,
                                 `❌ <b>[SAI MÃ PIN DỰ ÁN]</b>\nMã <code>${code}</code> không chính xác! Vui lòng nhập lại mã 4 số (Mã dự án này: <code>${expectedPin}</code>):`,
-                                threadId
+                                targetTId
                             );
                             continue;
                         }

@@ -1,11 +1,11 @@
 {
-  "updated_at": "2026-11-05T05:56:55.660Z",
-  "file_id": "BQACAgUAAyEGAAMBCbVXbAACEkZq7BqkCUbewbpsaMOitVf6tjpJcAACHSMAAtSaYVcrdqcVxwUJkz0E",
-  "message_id": 4678,
+  "updated_at": "2026-11-05T06:10:14.321Z",
+  "file_id": "BQACAgUAAyEGAAMBCbVXbAACEltq7B3DWC7BwbYErz3drRGZAR1cbwACISMAAtSaYVdHC7_nrCTw4j0E",
+  "message_id": 4699,
   "topic": "General (#)",
   "file_count": 77,
-  "raw_bytes": 671169,
-  "gzipped_size": 169560,
+  "raw_bytes": 671630,
+  "gzipped_size": 169681,
   "file_tree": [
     {
       "path": "antigravity_ls.json",
@@ -33,7 +33,7 @@
     },
     {
       "path": "bridge_state.json",
-      "size": 547
+      "size": 548
     },
     {
       "path": "config.example.json",
@@ -41,7 +41,7 @@
     },
     {
       "path": "config.json",
-      "size": 1216
+      "size": 1253
     },
     {
       "path": "fast_bridge.cjs",
@@ -53,7 +53,7 @@
     },
     {
       "path": "gmcloud_manifest.json",
-      "size": 5477
+      "size": 5476
     },
     {
       "path": "index.html",
@@ -121,7 +121,7 @@
     },
     {
       "path": "lib/lobby.cjs",
-      "size": 42955
+      "size": 43077
     },
     {
       "path": "lib/menu.cjs",
@@ -197,7 +197,7 @@
     },
     {
       "path": "project_registry.json",
-      "size": 303
+      "size": 554
     },
     {
       "path": "README.md",
@@ -257,11 +257,11 @@
     },
     {
       "path": "sync_bridge.json",
-      "size": 6275
+      "size": 6327
     },
     {
       "path": "telecloud_manifest.json",
-      "size": 5477
+      "size": 5476
     },
     {
       "path": "test_copyscreen.ps1",
