@@ -836,26 +836,19 @@ async function pollUpdates() {
     // Thay vào đó, PC giữ chế độ Standby để Cloudflare Worker 24/7 đón nhận lệnh /pc và xác thực mã PIN.
     try {
         const whInfo = await tgApiRaw('getWebhookInfo');
-        const isDirectArg = process.argv.includes('--direct') || process.argv.includes('--connect');
-        if (!isDirectArg) {
-            console.log('[Bridge Startup] Che do Mac dinh: Thiet lap Webhook toi Cloudflare Worker 24/7 de tiep nhan lenh /pc...');
+        const isStandbyArg = process.argv.includes('--standby');
+        if (isStandbyArg) {
+            console.log('[Bridge Startup] Cờ --standby: Thiết lập Webhook tới Cloudflare Worker 24/7 để tiếp nhận lệnh /pc...');
             await setCloudWebhook(true);
             isCloudStandby = true;
-            console.log('[Bridge Startup] PC dang o che do Cho (Standby). Khi bro go /pc & nhap PIN 2726 tren Telegram, PC se tu dong mo Antigravity IDE!');
+            console.log('[Bridge Startup] PC đang ở chế độ Chờ (Standby). Khi bro gõ /pc & nhập PIN 2726, PC sẽ tự động mở Antigravity IDE!');
         } else {
-            console.log('[Bridge Startup] Co --direct: PC truc tiep tiep quan dieu khien!');
+            console.log('[Bridge Startup] Chế độ Mặc định: PC kết nối trực tiếp (Direct Mode), gỡ bỏ Webhook hoàn toàn!');
             await setCloudWebhook(false);
-            try {
-                await sendMsg(
-                    activeChatId,
-                    '🖥️ <b>[PC LOCAL BRIDGE - ĐÃ KẾT NỐI TRỰC TIẾP]</b>\n──────────────────────\n✅ <b>Cầu nối Antigravity PC đã kích hoạt thành công!</b>\n⚡ Sẵn sàng tiếp nhận lệnh và code trực tiếp từ điện thoại của bro!',
-                    activeThreadId
-                );
-            } catch (e) {}
             isCloudStandby = false;
         }
     } catch (e) {
-        console.warn('[Bridge Startup] Khong kiem tra duoc WebhookInfo:', e.message);
+        console.warn('[Bridge Startup] Không kiểm tra được WebhookInfo:', e.message);
     }
 
     const allowedList = [2029333412, -1004457846636];
