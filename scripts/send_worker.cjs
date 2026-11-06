@@ -58,49 +58,57 @@ function escapeHtml(str) {
 function mdToTgHtml(text) {
     if (!text) return "";
 
-    // Tạm lưu các thẻ HTML Telegram hợp lệ có sẵn (tránh bị escapeHtml làm hỏng thành &lt;b&gt;)
-    const htmlTags = [];
+    // 1. Tạm lưu các thẻ HTML Telegram hợp lệ có sẵn
+    const htmlTokens = [];
     text = text.replace(/<\/?(?:b|strong|i|em|u|ins|s|strike|del|span|tg-spoiler|code|pre|blockquote)(?:\s+[^>]*)?>|<a\s+href="[^"]*">|<\/a>/gi, (m) => {
-        const idx = htmlTags.length;
-        htmlTags.push(m);
-        return `___HTAG_${idx}___`;
+        const id = htmlTokens.length;
+        htmlTokens.push(m);
+        return `XYZHTMLTOKEN${id}ENDXYZ`;
     });
 
+    // 2. Tạm lưu Code Blocks ```...```
     const codeBlocks = [];
-    text = text.replace(/\`\`\`([a-zA-Z0-9_\\-\\+]*)\\r?\\n([\\s\\S]*?)\`\`\`/g, (m, lang, code) => {
+    text = text.replace(/```([a-zA-Z0-9_\-\+]*)\r?\n([\s\S]*?)```/g, (m, lang, code) => {
         const c = escapeHtml(code);
         const l = lang || 'text';
-        const idx = codeBlocks.length;
+        const id = codeBlocks.length;
         codeBlocks.push(`<pre><code class="language-${l}">${c}</code></pre>`);
-        return `___CODE_BLOCK_${idx}___`;
+        return `XYZCODEBLOCK${id}ENDXYZ`;
     });
 
+    // 3. Tạm lưu Inline Code `...`
     const inlineCodes = [];
-    text = text.replace(/\`([^\`\\r\\n]+)\`/g, (m, code) => {
+    text = text.replace(/`([^`\r\n]+)`/g, (m, code) => {
         const c = escapeHtml(code);
-        const idx = inlineCodes.length;
+        const id = inlineCodes.length;
         inlineCodes.push(`<code>${c}</code>`);
-        return `___INLINE_${idx}___`;
+        return `XYZINLINE${id}ENDXYZ`;
     });
 
+    // 4. Escape ký tự đặc biệt của phần text còn lại
     text = escapeHtml(text);
-    text = text.replace(/^###\\s+([^\\r\\n]+)/gm, '📌 <b>$1</b>');
-    text = text.replace(/^##\\s+([^\\r\\n]+)/gm, '🔹 <b>$1</b>');
-    text = text.replace(/^#\\s+([^\\r\\n]+)/gm, '🏷️ <b>$1</b>');
-    text = text.replace(/\\*\\*([^\\*\\r\\n]+)\\*\\*/g, '<b>$1</b>');
-    text = text.replace(/(?<!\\w)\\*([^\\*\\r\\n]+)\\*(?!\\w)/g, '<i>$1</i>');
-    text = text.replace(/(?<!\\w)__([^\\_\\r\\n]+)__(?!\\w)/g, '<u>$1</u>');
-    text = text.replace(/~~([^~\\r\\n]+)~~/g, '<s>$1</s>');
-    text = text.replace(/^-\\s+([^\\r\\n]+)/gm, '• $1');
 
+    // 5. Chuyển đổi Markdown chuẩn sang HTML Telegram
+    text = text.replace(/^###\s+([^\r\n]+)/gm, '📌 <b>$1</b>');
+    text = text.replace(/^##\s+([^\r\n]+)/gm, '🔹 <b>$1</b>');
+    text = text.replace(/^#\s+([^\r\n]+)/gm, '🏷️ <b>$1</b>');
+    text = text.replace(/\*\*([^*\r\n]+)\*\*/g, '<b>$1</b>');
+    text = text.replace(/(?<!\w)\*([^*\r\n]+)\*(?!\w)/g, '<i>$1</i>');
+    text = text.replace(/(?<!\w)__([^_\r\n]+)__(?!\w)/g, '<u>$1</u>');
+    text = text.replace(/~~([^~\r\n]+)~~/g, '<s>$1</s>');
+    text = text.replace(/^-\s+([^\r\n]+)/gm, '• $1');
+
+    // 6. Phục hồi Inline Code & Code Blocks
     for (let i = 0; i < inlineCodes.length; i++) {
-        text = text.replace(`___INLINE_${i}___`, inlineCodes[i]);
+        text = text.replace(`XYZINLINE${i}ENDXYZ`, inlineCodes[i]);
     }
     for (let i = 0; i < codeBlocks.length; i++) {
-        text = text.replace(`___CODE_BLOCK_${i}___`, codeBlocks[i]);
+        text = text.replace(`XYZCODEBLOCK${i}ENDXYZ`, codeBlocks[i]);
     }
-    for (let i = 0; i < htmlTags.length; i++) {
-        text = text.replace(`___HTAG_${i}___`, htmlTags[i]);
+
+    // 7. Phục hồi các thẻ HTML hợp lệ
+    for (let i = 0; i < htmlTokens.length; i++) {
+        text = text.replace(`XYZHTMLTOKEN${i}ENDXYZ`, htmlTokens[i]);
     }
     return text;
 }
