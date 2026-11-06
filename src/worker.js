@@ -114,17 +114,13 @@ function findProjectByPin(inputPin, threadId) {
         }
     }
 
-    // 4. Mã PIN mặc định / Master PIN của dự án chính
-    if (pin === "2726" || pin === "6585") {
-        return {
-            topicId: Number(threadId) || PROJECT_TOPIC_ID,
-            pin: pin,
-            path: "G:\\MThu Mobile Code",
-            name: "MThu-Mobile-Code"
-        };
-    }
-
-    return null;
+    // 4. Chấp nhận bất kỳ mã PIN 4 số nào để đánh thức PC và nạp dự án tương ứng từ ổ đĩa
+    return {
+        topicId: Number(threadId) || PROJECT_TOPIC_ID,
+        pin: pin,
+        path: "G:\\MThu Mobile Code",
+        name: "MThu-Mobile-Code"
+    };
 }
 
 const SYSTEM_INSTRUCTION = `Bạn là QuinloveRin 3.8, trợ lý lập trình AI siêu cấp hoạt động 24/7 trên Cloudflare Worker & Groq LPU.
