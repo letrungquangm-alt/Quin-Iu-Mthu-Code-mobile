@@ -1,11 +1,11 @@
 {
-  "updated_at": "2026-11-06T13:05:32.790Z",
-  "file_id": "BQACAgUAAyEGAAMBCbVXbAACFU9q7dCc94TT2mndVPALeHSse-BnegACVyUAAtSacVdDzPzDUZN3mT0E",
-  "message_id": 5455,
+  "updated_at": "2026-11-06T15:06:31.102Z",
+  "file_id": "BQACAgUAAyEGAAMBCbVXbAACFgpq7ez23QABxwGaaPVPmuf7o7nveoYAAq4lAALUmnFX8kEKCXujxq89BA",
+  "message_id": 5642,
   "topic": "General (#)",
-  "file_count": 82,
-  "raw_bytes": 735895,
-  "gzipped_size": 186865,
+  "file_count": 84,
+  "raw_bytes": 799854,
+  "gzipped_size": 203364,
   "file_tree": [
     {
       "path": "antigravity_ls.json",
@@ -33,7 +33,7 @@
     },
     {
       "path": "bridge_state.json",
-      "size": 2458
+      "size": 637
     },
     {
       "path": "config.example.json",
@@ -45,7 +45,7 @@
     },
     {
       "path": "fast_bridge.cjs",
-      "size": 105292
+      "size": 116357
     },
     {
       "path": "GEMINI.md",
@@ -53,7 +53,7 @@
     },
     {
       "path": "gmcloud_manifest.json",
-      "size": 5835
+      "size": 5836
     },
     {
       "path": "index.html",
@@ -92,12 +92,16 @@
       "size": 5723
     },
     {
+      "path": "lib/github_scanner.cjs",
+      "size": 6238
+    },
+    {
       "path": "lib/gmcloud.cjs",
-      "size": 27381
+      "size": 31458
     },
     {
       "path": "lib/gmcloud_storage.cjs",
-      "size": 8883
+      "size": 9906
     },
     {
       "path": "lib/groq.cjs",
@@ -125,11 +129,15 @@
     },
     {
       "path": "lib/lobby.cjs",
-      "size": 43186
+      "size": 55839
     },
     {
       "path": "lib/menu.cjs",
       "size": 6092
+    },
+    {
+      "path": "lib/mtproto_auth.cjs",
+      "size": 8233
     },
     {
       "path": "lib/numpad.cjs",
@@ -169,7 +177,7 @@
     },
     {
       "path": "lib/telegram.cjs",
-      "size": 13584
+      "size": 13818
     },
     {
       "path": "lib/transcript.cjs",
@@ -193,11 +201,11 @@
     },
     {
       "path": "package-lock.json",
-      "size": 11622
+      "size": 31462
     },
     {
       "path": "package.json",
-      "size": 251
+      "size": 279
     },
     {
       "path": "preview_tunnel.ps1",
@@ -237,7 +245,7 @@
     },
     {
       "path": "scripts/send_worker.cjs",
-      "size": 19929
+      "size": 20163
     },
     {
       "path": "scripts/switch_cloud.bat",
@@ -265,7 +273,7 @@
     },
     {
       "path": "src/worker.js",
-      "size": 80052
+      "size": 80286
     },
     {
       "path": "start.bat",
@@ -277,11 +285,11 @@
     },
     {
       "path": "sync_bridge.json",
-      "size": 15313
+      "size": 17232
     },
     {
       "path": "telecloud_manifest.json",
-      "size": 5835
+      "size": 5836
     },
     {
       "path": "test_copyscreen.ps1",

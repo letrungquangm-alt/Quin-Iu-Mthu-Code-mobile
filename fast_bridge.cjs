@@ -64,6 +64,12 @@ const {
     getMainMenuText
 } = lobby;
 
+function isGmCloudStorageTopic(threadId) {
+    return threadId === null || Number(threadId) === 1;
+}
+
+mtproto.resetAuthState();
+
 const rootDir = __dirname;
 const conversationId = '7f7131ce-dc72-490f-97bd-4a675f9dd0c7';
 const transcriptPath = `C:\\Users\\letru\\.gemini\\antigravity\\brain\\${conversationId}\\.system_generated\\logs\\transcript.jsonl`;
@@ -319,6 +325,7 @@ async function handleEmergencyCancel(chatId, threadId, source = '/cancel') {
     
     // 0. Xóa bộ giám sát watchdog
     clearWatchdog();
+    mtproto.resetAuthState();
 
     // 1. Dọn sạch hàng đợi (Queue)
     const clearedQueueCount = clearQueue();
@@ -1323,7 +1330,8 @@ async function pollUpdates() {
 
                     activeChatId = chatId;
                     if (threadId) activeThreadId = threadId;
-                    const targetTId = threadId || activeThreadId || 1160;
+                    const isGmCloudTopic = isGmCloudStorageTopic(threadId);
+                    const targetTId = isGmCloudTopic ? null : (threadId || activeThreadId || 1160);
 
                     // 🏛️ NẾU TIN NHẮN TẠI SẢNH LOBBY (threadId === null || lobby.isLobby(threadId)):
                     // 1. NGAY LẬP TỨC XÓA BẤT KỲ TIN NHẮN NÀO XUẤT HIỆN TẠI SẢNH (chữ, ảnh, sticker, voice, file...)
@@ -1412,85 +1420,152 @@ async function pollUpdates() {
 
                     console.log(`[Telegram Nhận Tin] (chat=${chatId}, thread=${threadId}): ${userText.substring(0, 60)}`);
 
-                    // 📱 XỬ LÝ QUY TRÌNH XÁC THỰC TÀI KHOẢN CHỦ MTPROTO (my.telegram.org)
-                    const mtState = mtproto.getAuthState();
-                    if (mtState.step === 'AWAITING_PHONE') {
-                        const cleanPhone = userText.trim();
-                        await sendMsg(chatId, `⏳ Đang gửi mã OTP đến Telegram của số điện thoại <code>${escapeHtml(cleanPhone)}</code>...`, targetTId);
-                        const authRes = await mtproto.startAuthFlow(cleanPhone);
-                        if (authRes.ok) {
-                            await sendMsg(
-                                chatId,
-                                `📱 <b>[ĐÃ GỬI MÃ OTP THÀNH CÔNG!]</b>\n──────────────────────\nTelegram đã gửi mã xác nhận đến ứng dụng của bro!\n\n👉 <b>Bro hãy nhập mã OTP (5 số)</b> vào ô chat:`,
-                                targetTId,
-                                'HTML',
-                                { inline_keyboard: [[{ text: '❌ Hủy xác thực', callback_data: 'gmcloud_dir:' }]] }
-                            );
-                        } else {
-                            await sendMsg(
-                                chatId,
-                                `❌ <b>[LỖI GỬI MÃ OTP]</b>\nLỗi: <code>${escapeHtml(authRes.error || 'Unknown error')}</code>\n\n👉 Bro kiểm tra lại số điện thoại (phải có mã quốc gia, ví dụ <code>+84912345678</code>) và gửi lại nhé:`,
-                                targetTId,
-                                'HTML',
-                                { inline_keyboard: [[{ text: '❌ Hủy', callback_data: 'gmcloud_dir:' }]] }
-                            );
+                    // 📱 XỬ LÝ TOÀN BỘ SỰ KIỆN TẠI TOPIC # (KHO GMCLOUD STORAGE VĨNH CỬU)
+                    if (isGmCloudTopic) {
+                        // Nếu là lệnh hủy phiên xác thực
+                        if (/^(?:\/cancel|\/stop|\/huy)$/i.test(userText.trim())) {
+                            mtproto.resetAuthState();
+                            await sendMsg(chatId, `🛑 Đã hủy bỏ phiên xác thực tại Kho GMCloud Storage!`, null);
+                            continue;
                         }
-                        continue;
-                    }
 
-                    if (mtState.step === 'AWAITING_OTP') {
-                        const cleanOtp = userText.trim();
-                        await sendMsg(chatId, `⏳ Đang xác thực mã OTP...`, targetTId);
-                        const verifyRes = await mtproto.verifyOtpCode(cleanOtp);
-                        if (verifyRes.ok && verifyRes.step === 'AWAITING_2FA') {
-                            await sendMsg(
-                                chatId,
-                                `🔐 <b>[YÊU CẦU MẬT KHẨU 2FA]</b>\n──────────────────────\nTài khoản của bro có kích hoạt bảo mật 2 bước (Cloud Password).\n\n👉 Bro hãy nhập <b>Mật khẩu 2FA</b> vào ô chat:`,
-                                targetTId,
-                                'HTML',
-                                { inline_keyboard: [[{ text: '❌ Hủy', callback_data: 'gmcloud_dir:' }]] }
-                            );
-                        } else if (verifyRes.ok && verifyRes.session) {
-                            await sendMsg(
-                                chatId,
-                                `✅ <b>[XÁC THỰC MTPROTO THÀNH CÔNG RỰC RỠ!]</b>\n──────────────────────\n👤 <b>Tài khoản chủ:</b> <code>${verifyRes.session.userName || verifyRes.session.userPhone}</code>\n📦 <b>Dung lượng lưu trữ:</b> ${verifyRes.session.isPremium ? '4GB / file' : '2GB / file'} (Không giới hạn)\n🏛️ <b>Kho GMCloud Storage:</b> Đã liên kết trực tiếp với tài khoản Telegram chính chủ vĩnh viễn!\n\n✨ Mọi file snapshot và mã nguồn từ nay sẽ được lưu vĩnh viễn an toàn tuyệt đối!`,
-                                targetTId,
-                                'HTML',
-                                { inline_keyboard: [[{ text: '☁️ Mở Kho GMCloud Storage', callback_data: 'hub_gmcloud' }]] }
-                            );
-                        } else {
-                            await sendMsg(
-                                chatId,
-                                `❌ <b>[MÃ OTP KHÔNG ĐÚNG HOẶC HẾT HẠN]</b>\nLỗi: <code>${escapeHtml(verifyRes.error || 'Sai OTP')}</code>\n\n👉 Bro vui lòng nhập lại mã OTP:`,
-                                targetTId,
-                                'HTML',
-                                { inline_keyboard: [[{ text: '❌ Hủy', callback_data: 'gmcloud_dir:' }]] }
-                            );
+                        // A. XỬ LÝ QUY TRÌNH XÁC THỰC MTPROTO USER ACCOUNT (CHỈ TRONG TOPIC #)
+                        const mtState = mtproto.getAuthState();
+                        if (mtState.step === 'AWAITING_PHONE') {
+                            const cleanPhone = userText.trim();
+                            await sendMsg(chatId, `⏳ Đang gửi mã OTP đến Telegram của số điện thoại <code>${escapeHtml(cleanPhone)}</code>...`, null);
+                            const authRes = await mtproto.startAuthFlow(cleanPhone);
+                            if (authRes.ok) {
+                                await sendMsg(
+                                    chatId,
+                                    `📱 <b>[ĐÃ GỬI MÃ OTP THÀNH CÔNG!]</b>\n──────────────────────\nTelegram đã gửi mã xác nhận đến ứng dụng của bro!\n\n👉 <b>Bro hãy nhập mã OTP (5 số)</b> vào ô chat Topic # này:`,
+                                    null,
+                                    'HTML',
+                                    { inline_keyboard: [[{ text: '❌ Hủy xác thực', callback_data: 'gmcloud_dir:' }]] }
+                                );
+                            } else {
+                                await sendMsg(
+                                    chatId,
+                                    `❌ <b>[LỖI GỬI MÃ OTP]</b>\nLỗi: <code>${escapeHtml(authRes.error || 'Unknown error')}</code>\n\n👉 Bro kiểm tra lại số điện thoại (phải có mã quốc gia, ví dụ <code>+84912345678</code>) và gửi lại nhé:`,
+                                    null,
+                                    'HTML',
+                                    { inline_keyboard: [[{ text: '❌ Hủy', callback_data: 'gmcloud_dir:' }]] }
+                                );
+                            }
+                            continue;
                         }
-                        continue;
-                    }
 
-                    if (mtState.step === 'AWAITING_2FA') {
-                        const pass = userText.trim();
-                        await sendMsg(chatId, `⏳ Đang kiểm tra mật khẩu 2FA...`, targetTId);
-                        const passRes = await mtproto.verify2FaPassword(pass);
-                        if (passRes.ok && passRes.session) {
-                            await sendMsg(
-                                chatId,
-                                `✅ <b>[XÁC THỰC MTPROTO THÀNH CÔNG RỰC RỠ!]</b>\n──────────────────────\n👤 <b>Tài khoản chủ:</b> <code>${passRes.session.userName || passRes.session.userPhone}</code>\n📦 <b>Dung lượng lưu trữ:</b> ${passRes.session.isPremium ? '4GB / file' : '2GB / file'} (Không giới hạn)\n🏛️ <b>Kho GMCloud Storage:</b> Đã liên kết trực tiếp với tài khoản Telegram chính chủ vĩnh viễn!\n\n✨ Mọi file snapshot và mã nguồn từ nay sẽ được lưu vĩnh viễn an toàn tuyệt đối!`,
-                                targetTId,
-                                'HTML',
-                                { inline_keyboard: [[{ text: '☁️ Mở Kho GMCloud Storage', callback_data: 'hub_gmcloud' }]] }
-                            );
-                        } else {
-                            await sendMsg(
-                                chatId,
-                                `❌ <b>[MẬT KHẨU 2FA KHÔNG CHÍNH XÁC]</b>\nLỗi: <code>${escapeHtml(passRes.error || 'Sai mật khẩu')}</code>\n\n👉 Bro vui lòng nhập lại mật khẩu 2FA:`,
-                                targetTId,
-                                'HTML',
-                                { inline_keyboard: [[{ text: '❌ Hủy', callback_data: 'gmcloud_dir:' }]] }
-                            );
+                        if (mtState.step === 'AWAITING_OTP') {
+                            const cleanOtp = userText.trim();
+                            await sendMsg(chatId, `⏳ Đang xác thực mã OTP...`, null);
+                            const verifyRes = await mtproto.verifyOtpCode(cleanOtp);
+                            if (verifyRes.ok && verifyRes.step === 'AWAITING_2FA') {
+                                await sendMsg(
+                                    chatId,
+                                    `🔐 <b>[YÊU CẦU MẬT KHẨU 2FA]</b>\n──────────────────────\nTài khoản của bro có kích hoạt bảo mật 2 bước (Cloud Password).\n\n👉 Bro hãy nhập <b>Mật khẩu 2FA</b> vào ô chat Topic # này:`,
+                                    null,
+                                    'HTML',
+                                    { inline_keyboard: [[{ text: '❌ Hủy', callback_data: 'gmcloud_dir:' }]] }
+                                );
+                            } else if (verifyRes.ok && verifyRes.session) {
+                                await sendMsg(
+                                    chatId,
+                                    `✅ <b>[XÁC THỰC MTPROTO THÀNH CÔNG RỰC RỠ!]</b>\n──────────────────────\n👤 <b>Tài khoản chủ:</b> <code>${verifyRes.session.userName || verifyRes.session.userPhone}</code>\n📦 <b>Dung lượng lưu trữ:</b> ${verifyRes.session.isPremium ? '4GB / file' : '2GB / file'} (Không giới hạn)\n🏛️ <b>Kho GMCloud Storage:</b> Đã liên kết trực tiếp với tài khoản Telegram chính chủ vĩnh viễn!\n\n✨ Mọi file snapshot và mã nguồn từ nay sẽ được lưu vĩnh viễn an toàn tuyệt đối!`,
+                                    null,
+                                    'HTML',
+                                    { inline_keyboard: [[{ text: '☁️ Mở Kho GMCloud Storage', callback_data: 'hub_gmcloud' }]] }
+                                );
+                            } else {
+                                await sendMsg(
+                                    chatId,
+                                    `❌ <b>[MÃ OTP KHÔNG ĐÚNG HOẶC HẾT HẠN]</b>\nLỗi: <code>${escapeHtml(verifyRes.error || 'Sai OTP')}</code>\n\n👉 Bro vui lòng nhập lại đúng mã OTP 5 số:`,
+                                    null,
+                                    'HTML',
+                                    { inline_keyboard: [[{ text: '❌ Hủy', callback_data: 'gmcloud_dir:' }]] }
+                                );
+                            }
+                            continue;
                         }
+
+                        if (mtState.step === 'AWAITING_2FA') {
+                            const pass = userText.trim();
+                            await sendMsg(chatId, `⏳ Đang kiểm tra mật khẩu 2FA...`, null);
+                            const passRes = await mtproto.verify2FaPassword(pass);
+                            if (passRes.ok && passRes.session) {
+                                await sendMsg(
+                                    chatId,
+                                    `✅ <b>[XÁC THỰC MTPROTO THÀNH CÔNG RỰC RỠ!]</b>\n──────────────────────\n👤 <b>Tài khoản chủ:</b> <code>${passRes.session.userName || passRes.session.userPhone}</code>\n📦 <b>Dung lượng lưu trữ:</b> ${passRes.session.isPremium ? '4GB / file' : '2GB / file'} (Không giới hạn)\n🏛️ <b>Kho GMCloud Storage:</b> Đã liên kết trực tiếp với tài khoản Telegram chính chủ vĩnh viễn!\n\n✨ Mọi file snapshot và mã nguồn từ nay sẽ được lưu vĩnh viễn an toàn tuyệt đối!`,
+                                    null,
+                                    'HTML',
+                                    { inline_keyboard: [[{ text: '☁️ Mở Kho GMCloud Storage', callback_data: 'hub_gmcloud' }]] }
+                                );
+                            } else {
+                                await sendMsg(
+                                    chatId,
+                                    `❌ <b>[MẬT KHẨU 2FA KHÔNG CHÍNH XÁC]</b>\nLỗi: <code>${escapeHtml(passRes.error || 'Sai mật khẩu')}</code>\n\n👉 Bro vui lòng nhập lại mật khẩu 2FA:`,
+                                    null,
+                                    'HTML',
+                                    { inline_keyboard: [[{ text: '❌ Hủy', callback_data: 'gmcloud_dir:' }]] }
+                                );
+                            }
+                            continue;
+                        }
+
+                        // B. LỆNH MỞ GMCLOUD EXPLORER TRONG TOPIC #
+                        if (/^(?:\/gmcloud|gmcloud|\/telecloud)$/i.test(userText.trim())) {
+                            const { handleGmCloudCallback } = require('./lib/gmcloud.cjs');
+                            await handleGmCloudCallback({
+                                data: 'hub_gmcloud',
+                                message: { chat: { id: chatId }, message_thread_id: null, message_id: (msg ? msg.message_id : null) },
+                                id: 'cmd_' + Date.now()
+                            }, {
+                                sendMsg: (c, t, th, p, k) => sendMsg(c, t, null, p, k),
+                                editMsg,
+                                tgApiRaw,
+                                botToken,
+                                isLobby: lobby.isLobby
+                            });
+                            continue;
+                        }
+
+                        // C. LỆNH ĐỒNG BỘ TRONG TOPIC #
+                        if (/^(?:\/sync_gmcloud|\/gmcloud_sync|\/sync_telecloud|\/telecloud|đồng\s+bộ\s+gmcloud|dong\s+bo\s+gmcloud)$/i.test(userText.trim())) {
+                            await sendMsg(chatId, `⏳ <b>[ĐANG ĐÓNG GÓI & ĐỒNG BỘ KHO GMCLOUD STORAGE...]</b>\n<i>Đang nén toàn bộ mã nguồn repo và tải lên Topic #...</i>`, null);
+                            try {
+                                const res = await syncRepoToGmCloud(botToken, chatId, null, CLOUD_WORKER_URL, rootDir);
+                                await sendMsg(
+                                    chatId,
+                                    `✅ <b>[ĐỒNG BỘ GMCLOUD THÀNH CÔNG RỰC RỠ!]</b>\n──────────────────────\n🏛️ <b>Kênh lưu trữ:</b> Topic # (<code>☁️ Kho GMCloud Storage</code>)\n📦 <b>Số lượng:</b> ${res.fileCount} files mã nguồn\n⚡ <b>Dung lượng nén:</b> ${(res.gzippedSize / 1024).toFixed(1)} KB (Gzip)\n🆔 <b>File ID:</b> <code>${res.file_id}</code>\n\n☁️ Toàn bộ mã nguồn đã cập nhật vĩnh viễn an toàn!`,
+                                    null
+                                );
+                            } catch (e) {
+                                await sendMsg(chatId, `❌ Lỗi đồng bộ GMCloud: ${escapeHtml(e.message)}`, null);
+                            }
+                            continue;
+                        }
+
+                        // D. NẾU LÀ MÃ PIN 4 SỐ CHO GMCLOUD
+                        if (/^\d{4}$/.test(userText.trim())) {
+                            const code = userText.trim();
+                            if (lobby.verifyProjectPin(code, 1160)) {
+                                const { unlockGmCloud, buildExplorerMarkup } = require('./lib/gmcloud.cjs');
+                                unlockGmCloud(fromId, chatId);
+                                const explorer = buildExplorerMarkup('', 0);
+                                await sendMsg(chatId, explorer.text, null, 'HTML', explorer.markup);
+                            } else {
+                                await sendMsg(chatId, `❌ Mã PIN không chính xác! Vui lòng nhập lại mã PIN dự án (<code>2726</code>):`, null);
+                            }
+                            continue;
+                        }
+
+                        // E. MỌI TIN NHẮN KHÁC TẠI TOPIC # KHÔNG ĐƯỢC CHẠY CODE PC
+                        await sendMsg(
+                            chatId,
+                            `☁️ <b>[KHO GMCLOUD STORAGE VĨNH CỬU]</b>\n──────────────────────\n🏛️ <b>Vị trí:</b> Topic # (General Topic lưu trữ vĩnh cửu không thể bị xoá)\n👉 Gõ <code>/gmcloud</code> để mở bảng điều khiển kho lưu trữ và xác thực MTProto!`,
+                            null,
+                            'HTML',
+                            { inline_keyboard: [[{ text: '☁️ Mở Kho GMCloud Storage', callback_data: 'hub_gmcloud' }]] }
+                        );
                         continue;
                     }
 
@@ -1763,20 +1838,19 @@ async function pollUpdates() {
                         }
                     }
 
-                    // ☁️ LỆNH MỞ GMCLOUD VIRTUAL REPO EXPLORER
+                    // ☁️ LỆNH MỞ GMCLOUD VIRTUAL REPO EXPLORER TỪ CÁC TOPIC DỰ ÁN
                     if (/^(?:\/gmcloud|gmcloud|\/telecloud)$/i.test(userText.trim())) {
-                        const { handleGmCloudCallback } = require('./lib/gmcloud.cjs');
-                        await handleGmCloudCallback({
-                            data: 'hub_gmcloud',
-                            message: { chat: { id: chatId }, message_thread_id: threadId, message_id: (msg ? msg.message_id : null) },
-                            id: 'cmd_' + Date.now()
-                        }, {
-                            sendMsg,
-                            editMsg,
-                            tgApiRaw,
-                            botToken,
-                            isLobby: lobby.isLobby
-                        });
+                        await sendMsg(
+                            chatId,
+                            `☁️ <b>[KHO GMCLOUD STORAGE NẰM TẠI TOPIC #]</b>\n──────────────────────\nKho GMCloud Storage và quy trình xác thực tài khoản chủ chỉ hoạt động tại <b>Topic # (☁️ Kho GMCloud Storage)</b> để bảo đảm an toàn vĩnh viễn!\n\n👉 <i>Bro hãy bấm nút bên dưới để vào kho nhé:</i>`,
+                            targetTId,
+                            'HTML',
+                            {
+                                inline_keyboard: [
+                                    [{ text: '☁️ Vào Kho GMCloud Storage (Topic #)', url: 'https://t.me/c/4457846636/1' }]
+                                ]
+                            }
+                        );
                         continue;
                     }
 
