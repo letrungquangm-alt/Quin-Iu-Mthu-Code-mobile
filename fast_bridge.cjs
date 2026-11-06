@@ -101,7 +101,7 @@ process.on('exit', () => {
 // --- STATE MANAGEMENT ---
 
 let activeChatId = -1004457846636;
-let activeThreadId = 4692;
+let activeThreadId = 4880;
 
 if (fs.existsSync(syncBridgePath)) {
     try {
@@ -1057,7 +1057,7 @@ async function pollUpdates() {
 
                     activeChatId = chatId;
                     if (threadId) activeThreadId = threadId;
-                    const targetTId = threadId || activeThreadId || 4692;
+                    const targetTId = threadId || activeThreadId || 4880;
 
                     // 🏛️ NẾU TIN NHẮN TẠI SẢNH LOBBY (threadId === null || lobby.isLobby(threadId)):
                     // 1. NGAY LẬP TỨC XÓA BẤT KỲ TIN NHẮN NÀO XUẤT HIỆN TẠI SẢNH (chữ, ảnh, sticker, voice, file...)

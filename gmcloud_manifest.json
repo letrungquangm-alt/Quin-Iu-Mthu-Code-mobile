@@ -1,11 +1,11 @@
 {
-  "updated_at": "2026-11-05T06:10:14.321Z",
-  "file_id": "BQACAgUAAyEGAAMBCbVXbAACEltq7B3DWC7BwbYErz3drRGZAR1cbwACISMAAtSaYVdHC7_nrCTw4j0E",
-  "message_id": 4699,
+  "updated_at": "2026-11-06T08:14:37.840Z",
+  "file_id": "BQACAgUAAyEGAAMBCbVXbAACEw9q7YxtYvNtF12_2lFrJHw7yG6pgAACjSMAAtSaaVeQNLg5vxt6ID0E",
+  "message_id": 4879,
   "topic": "General (#)",
-  "file_count": 77,
-  "raw_bytes": 671630,
-  "gzipped_size": 169681,
+  "file_count": 78,
+  "raw_bytes": 679824,
+  "gzipped_size": 172632,
   "file_tree": [
     {
       "path": "antigravity_ls.json",
@@ -33,7 +33,7 @@
     },
     {
       "path": "bridge_state.json",
-      "size": 548
+      "size": 552
     },
     {
       "path": "config.example.json",
@@ -45,7 +45,7 @@
     },
     {
       "path": "fast_bridge.cjs",
-      "size": 90103
+      "size": 90226
     },
     {
       "path": "GEMINI.md",
@@ -109,7 +109,7 @@
     },
     {
       "path": "lib/ipc.cjs",
-      "size": 8287
+      "size": 8380
     },
     {
       "path": "lib/launcher.cjs",
@@ -121,7 +121,7 @@
     },
     {
       "path": "lib/lobby.cjs",
-      "size": 43077
+      "size": 43049
     },
     {
       "path": "lib/menu.cjs",
@@ -145,7 +145,7 @@
     },
     {
       "path": "lib/run_antigravity.bat",
-      "size": 132
+      "size": 130
     },
     {
       "path": "lib/run_launch.bat",
@@ -208,6 +208,10 @@
       "size": 5503
     },
     {
+      "path": "scripts/check_updates.cjs",
+      "size": 706
+    },
+    {
       "path": "scripts/clean_temp.bat",
       "size": 520
     },
@@ -245,7 +249,7 @@
     },
     {
       "path": "src/worker.js",
-      "size": 62922
+      "size": 69258
     },
     {
       "path": "start.bat",
@@ -257,7 +261,7 @@
     },
     {
       "path": "sync_bridge.json",
-      "size": 6327
+      "size": 7289
     },
     {
       "path": "telecloud_manifest.json",
