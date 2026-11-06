@@ -25,7 +25,7 @@ const BOT_2_TOKEN = "9071172098:AAGv73GInLFd5eIdI6rzw5gmWEfKCcouLJc";
 const BOT_3_TOKEN = "9061913738:AAFLW7cMTUT1jNtF6ZDu5K1DpQUZ4I8kpEM";
 const ADMIN_USER_ID = 2029333412;
 const SUPERGROUP_ID = "-1004457846636";
-const PROJECT_TOPIC_ID = 4880;
+const PROJECT_TOPIC_ID = 1160;
 const MASTER_PASSWORD = "270927-260626-ltqlovepmt";
 const PROJECT_PIN = "2726";
 
@@ -266,7 +266,7 @@ export default {
                     ctx.waitUntil(deleteTg(reg.dmBotToken, ADMIN_USER_ID, reg.dmMsgId));
                     const jumpMarkup = {
                         inline_keyboard: [
-                            [{ text: "🚀 Bấm Vào Topic Dự Án #4880", url: "https://t.me/c/1004457846636/4880" }]
+                            [{ text: "🚀 Bấm Vào Topic Dự Án #1160", url: "https://t.me/c/1004457846636/1160" }]
                         ]
                     };
                     const successDm = `✅ <b>[KẾT NỐI MÁY PHỤ THÀNH CÔNG RỰC RỠ]</b>\n──────────────────────\n🏷️ <b>Mã phiên:</b> <code>${sessionId}</code>\n💻 <b>Thiết bị:</b> <code>${reg.hostname}</code> (Ổ ${reg.drive})\n⚡ Cửa sổ Cloud 24/7 độc lập đã kích hoạt!\n\nBro bấm nút bên dưới để vào Topic dự án nhé! 👇`;
@@ -528,7 +528,7 @@ async function handleTelegramUpdate(update, env, ctx) {
                 await sendTg(
                     botToken,
                     chatId,
-                    `🖥️ <b>[ĐÃ XÁC THỰC MÃ PIN & BÀN GIAO CHO PC]</b>\n──────────────────────\n🔑 <b>Mã PIN:</b> <code>${providedCode}</code> (Khớp cửa sổ dự án #${threadId || 4880})\n⚡ <b>Hành động:</b> Đã gửi tín hiệu đánh thức Terminal Node của PC!\n🚀 Ứng dụng Antigravity IDE trên PC sẽ tự động mở và trỏ vào dự án!`,
+                    `🖥️ <b>[ĐÃ XÁC THỰC MÃ PIN & BÀN GIAO CHO PC]</b>\n──────────────────────\n🔑 <b>Mã PIN:</b> <code>${providedCode}</code> (Khớp cửa sổ dự án #${threadId || 1160})\n⚡ <b>Hành động:</b> Đã gửi tín hiệu đánh thức Terminal Node của PC!\n🚀 Ứng dụng Antigravity IDE trên PC sẽ tự động mở và trỏ vào dự án!`,
                     threadId
                 );
                 return;
@@ -539,7 +539,7 @@ async function handleTelegramUpdate(update, env, ctx) {
             await sendTg(
                 botToken,
                 chatId,
-                `📟 <b>[XÁC THỰC KẾT NỐI MÁY PC - QUINLOVERIN]</b>\n──────────────────────\n🔑 <b>Dự án:</b> Topic #${threadId || 4880}\n👉 Bro hãy nhập <b>Mã PIN (Mã cửa sổ repo)</b> của dự án để đánh thức PC:`,
+                `📟 <b>[XÁC THỰC KẾT NỐI MÁY PC - QUINLOVERIN]</b>\n──────────────────────\n🔑 <b>Dự án:</b> Topic #${threadId || 1160}\n👉 Bro hãy nhập <b>Mã PIN (Mã cửa sổ repo)</b> của dự án để đánh thức PC:`,
                 threadId
             );
             return;
@@ -557,7 +557,7 @@ async function handleTelegramUpdate(update, env, ctx) {
                 await sendTg(
                     botToken,
                     chatId,
-                    `🖥️ <b>[ĐÃ XÁC THỰC MÃ PIN & BÀN GIAO CHO PC]</b>\n──────────────────────\n🔑 <b>Mã PIN:</b> <code>${inputPin}</code> (Khớp cửa sổ dự án #${threadId || 4880})\n⚡ <b>Hành động:</b> Đã gửi tín hiệu đánh thức Terminal Node của PC!\n🚀 Ứng dụng Antigravity IDE trên PC sẽ tự động mở và trỏ vào dự án!`,
+                    `🖥️ <b>[ĐÃ XÁC THỰC MÃ PIN & BÀN GIAO CHO PC]</b>\n──────────────────────\n🔑 <b>Mã PIN:</b> <code>${inputPin}</code> (Khớp cửa sổ dự án #${threadId || 1160})\n⚡ <b>Hành động:</b> Đã gửi tín hiệu đánh thức Terminal Node của PC!\n🚀 Ứng dụng Antigravity IDE trên PC sẽ tự động mở và trỏ vào dự án!`,
                     threadId
                 );
                 return;
@@ -621,8 +621,8 @@ async function handleTelegramUpdate(update, env, ctx) {
                 await sendTg(botToken, chatId, "⚠️ <b>[KHO GMCLOUD VĨNH CỬU ĐƯỢC BẢO VỆ]</b>\n──────────────────────\nTopic # (Kho GMCloud Storage) là kho lưu trữ vĩnh cửu của Telegram, tuyệt đối không thể xóa!", threadId);
             } else if (Number(threadId) === 3562) {
                 await sendTg(botToken, chatId, "⚠️ <b>[KHÔNG THỂ XOÁ SẢNH LOBBY]</b>\n──────────────────────\nSảnh Lobby là kênh điều khiển trung tâm, tuyệt đối không thể xoá!", threadId);
-            } else if (Number(threadId) === 4880 || Number(threadId) === 1160) {
-                await sendTg(botToken, chatId, "🛡️ <b>[DỰ ÁN CỐT LÕI #4880 ĐƯỢC BẢO VỆ]</b>\n──────────────────────\nTopic dự án chính không thể xoá tự động để tránh mất dữ liệu liên kết!", threadId);
+            } else if (Number(threadId) === 1160 || Number(threadId) === 4692) {
+                await sendTg(botToken, chatId, "🛡️ <b>[DỰ ÁN CỐT LÕI #1160 ĐƯỢC BẢO VỆ]</b>\n──────────────────────\nTopic dự án chính không thể xoá tự động để tránh mất dữ liệu liên kết!", threadId);
             } else {
                 try {
                     await fetch(`https://api.telegram.org/bot${botToken}/deleteForumTopic`, {

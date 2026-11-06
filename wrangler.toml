@@ -7,4 +7,4 @@ compatibility_flags = ["nodejs_compat"]
 CURRENT_REPO = "Quin-Iu-Mthu-Code-mobile"
 GITHUB_OWNER = "letrungquangm-alt"
 ALLOWED_CHAT_ID = "-1004457846636"
-DEFAULT_THREAD_ID = "4880"
+DEFAULT_THREAD_ID = "1160"
