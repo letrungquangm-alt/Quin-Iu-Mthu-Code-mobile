@@ -1,11 +1,11 @@
 {
-  "updated_at": "2026-11-06T09:50:42.530Z",
-  "file_id": "BQACAgUAAyEGAAMBCbVXbAACE1Zq7aLywXyYBT8X8linIGA-NxpzrAACxiQAAtSacVebdf-8ONhXhT0E",
-  "message_id": 4950,
+  "updated_at": "2026-11-06T10:21:50.713Z",
+  "file_id": "BQACAgUAAyEGAAMBCbVXbAACE7Nq7ao-8c8QLkK1hsZpWEtHI6wg1wAC5CQAAtSacVc3-ZC7z5OFAT0E",
+  "message_id": 5043,
   "topic": "General (#)",
-  "file_count": 78,
-  "raw_bytes": 687669,
-  "gzipped_size": 174502,
+  "file_count": 80,
+  "raw_bytes": 697683,
+  "gzipped_size": 177512,
   "file_tree": [
     {
       "path": "antigravity_ls.json",
@@ -33,7 +33,7 @@
     },
     {
       "path": "bridge_state.json",
-      "size": 1366
+      "size": 921
     },
     {
       "path": "config.example.json",
@@ -45,7 +45,7 @@
     },
     {
       "path": "fast_bridge.cjs",
-      "size": 94009
+      "size": 94732
     },
     {
       "path": "GEMINI.md",
@@ -53,7 +53,7 @@
     },
     {
       "path": "gmcloud_manifest.json",
-      "size": 5550
+      "size": 5551
     },
     {
       "path": "index.html",
@@ -78,6 +78,10 @@
     {
       "path": "lib/close_app.ps1",
       "size": 1323
+    },
+    {
+      "path": "lib/device_passport.cjs",
+      "size": 2958
     },
     {
       "path": "lib/discover_ls.ps1",
@@ -156,12 +160,16 @@
       "size": 2777
     },
     {
+      "path": "lib/system_control.cjs",
+      "size": 2328
+    },
+    {
       "path": "lib/telecloud.cjs",
       "size": 466
     },
     {
       "path": "lib/telegram.cjs",
-      "size": 11839
+      "size": 12790
     },
     {
       "path": "lib/transcript.cjs",
@@ -249,7 +257,7 @@
     },
     {
       "path": "src/worker.js",
-      "size": 71795
+      "size": 75033
     },
     {
       "path": "start.bat",
@@ -261,11 +269,11 @@
     },
     {
       "path": "sync_bridge.json",
-      "size": 8141
+      "size": 8400
     },
     {
       "path": "telecloud_manifest.json",
-      "size": 5550
+      "size": 5551
     },
     {
       "path": "test_copyscreen.ps1",

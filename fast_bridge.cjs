@@ -560,6 +560,105 @@ async function triggerAutonomousCloudFallback(reason = 'timeout') {
     }
 }
 
+
+// --- DEBOUNCED MULTI-PHOTO & ALBUM BATCH COLLECTOR ---
+let photoBatchTimer = null;
+let photoBatchQueue = [];
+let photoBatchChatId = null;
+let photoBatchThreadId = null;
+let photoBatchTargetTId = null;
+let photoBatchCaption = '';
+let photoBatchReplyContext = '';
+
+async function flushPhotoBatch() {
+    if (photoBatchQueue.length === 0) return;
+
+    const items = [...photoBatchQueue];
+    const bCaption = photoBatchCaption;
+    const bChatId = photoBatchChatId;
+    const bThreadId = photoBatchThreadId;
+    const bTargetTId = photoBatchTargetTId;
+    const bReply = photoBatchReplyContext;
+
+    photoBatchQueue = [];
+    photoBatchCaption = '';
+    photoBatchReplyContext = '';
+    photoBatchTimer = null;
+
+    console.log(`[Photo Batch Flush] Đang xử lý gom chùm ${items.length} ảnh...`);
+
+    // Tải tất cả các ảnh về đĩa
+    const downloadedPaths = [];
+    for (let i = 0; i < items.length; i++) {
+        const filename = items.length === 1 ? 'incoming_photo.jpg' : `incoming_photo_${i + 1}.jpg`;
+        const localPath = path.join(rootDir, filename);
+        try {
+            const p = await downloadTelegramPhoto(items[i].fileId, localPath);
+            if (p) downloadedPaths.push(p);
+        } catch (e) {
+            console.error(`[Photo Download Error ${i + 1}]:`, e.message);
+        }
+    }
+
+    // Xác định nội dung prompt duy nhất:
+    // 1. Nếu người dùng CÓ gõ caption/prompt đi kèm -> Dùng ĐÚNG prompt đó, KHÔNG sinh prompt thừa!
+    // 2. Nếu người dùng KHÔNG gõ caption -> Chỉ sinh DUY NHẤT 1 prompt cho toàn bộ chùm ảnh!
+    let finalUserText = bCaption;
+    if (!finalUserText) {
+        finalUserText = items.length > 1
+            ? `Phân tích ${items.length} hình ảnh này`
+            : 'Phân tích hình ảnh này';
+    }
+
+    const photoPathsDesc = downloadedPaths.length > 1
+        ? `(Đã tải ${downloadedPaths.length} ảnh về máy tại: ${downloadedPaths.join(', ')})`
+        : `(Đã tải ảnh về máy tại: ${downloadedPaths[0] || path.join(rootDir, 'incoming_photo.jpg')})`;
+
+    const forwardPrompt = `${bReply}[Topic #${bThreadId}][Điện thoại gửi ${downloadedPaths.length} ảnh]: ${finalUserText} ${photoPathsDesc}`;
+
+    const previewClean = finalUserText.replace(/[<>]/g, '');
+    showScreenToast(`📷 Telegram -> ${downloadedPaths.length} Ảnh`, previewClean);
+    recordSyncMessage(syncBridgePath, conversationId, 'phone', `[${downloadedPaths.length} ảnh]: ${finalUserText}`);
+
+    // Bảo vệ repo
+    const isProtectedRepoAction = /(?:sửa|edit|thay đổi|update|chỉnh sửa|commit|push|pull|tạo file|xóa file|ghi đè)\s+(?:code|file|repo|mã nguồn)?\s*(?:mthu|fast_bridge|lobby|worker|config\.json|của bot|của hệ thống|máy chủ)/i.test(finalUserText);
+    if (isProtectedRepoAction && !lobby.isSuperAdmin()) {
+        await sendMsg(
+            bChatId,
+            `👑 <b>[YÊU CẦU MẬT KHẨU QUẢN TRỊ]</b>\n──────────────────────\n⚠️ <b>Nghiêm cấm hành vi tạo cửa sổ để code / bypass hoặc chỉnh sửa repo Mthu Code Mobile khi chưa có quyền quản trị!</b>\n\n👉 Để mở khóa toàn quyền, bro hãy vào Sảnh dùng cách bạn bảo tôi nhé!`,
+            bThreadId,
+            'HTML'
+        );
+        return;
+    }
+
+    // Nếu máy tính đang bận: Đưa ĐÚNG 1 prompt duy nhất vào hàng đợi!
+    if (currentPhase !== 'IDLE' && currentPhase !== 'CANCELED') {
+        const qId = 'q_' + Date.now();
+        addPrompt({
+            id: qId,
+            text: forwardPrompt,
+            preview: finalUserText,
+            chatId: bChatId,
+            threadId: bThreadId,
+            timestamp: Date.now()
+        });
+
+        sendViaBat({
+            action: 'queue',
+            chat_id: bChatId,
+            message_thread_id: bThreadId,
+            preview: finalUserText,
+            queueId: qId,
+            queuePos: promptQueue.length
+        });
+        return;
+    }
+
+    // Nếu máy tính đang IDLE: Thực thi ngay lập tức ĐÚNG 1 prompt duy nhất!
+    await executePromptImmediately(bChatId, bThreadId, forwardPrompt, finalUserText, false, true);
+}
+
 // --- START PROMPT EXECUTION HELPER ---
 
 async function executePromptImmediately(chatId, threadId, promptText, previewText, isEdit = false, isPhoto = false) {
@@ -1139,6 +1238,38 @@ async function pollUpdates() {
                         continue;
                     }
 
+                    // 📸 XỬ LÝ GỘP NHIỀU ẢNH / ALBUM (MULTI-PHOTO & MEDIA GROUP BATCH COLLECTOR)
+                    // Gom toàn bộ ảnh gửi liên tiếp hoặc album thành DUY NHẤT 1 prompt, triệt tiêu hoàn toàn prompt vô hình thừa thãi!
+                    if (msg.photo && Array.isArray(msg.photo) && msg.photo.length > 0) {
+                        const pId = msg.photo[msg.photo.length - 1].file_id;
+                        photoBatchChatId = chatId;
+                        photoBatchThreadId = threadId;
+                        photoBatchTargetTId = targetTId;
+
+                        if (msg.caption && msg.caption.trim()) {
+                            photoBatchCaption = msg.caption.trim();
+                        }
+                        if (msg.reply_to_message) {
+                            const rm = msg.reply_to_message;
+                            const rSender = rm.from ? (rm.from.first_name || 'Bot') : 'Bot';
+                            const rText = rm.text || rm.caption || '[Đoạn mã / Hình ảnh / Tin nhắn hệ thống]';
+                            photoBatchReplyContext = `[NGƯỜI DÙNG REPLY TIN NHẮN CỦA ${rSender} (#${rm.message_id})]:\n"""\n${rText.substring(0, 500)}\n"""\n↳ `;
+                        }
+                        photoBatchQueue.push({ fileId: pId, messageId: msg.message_id });
+
+                        if (photoBatchTimer) clearTimeout(photoBatchTimer);
+                        photoBatchTimer = setTimeout(async () => {
+                            try {
+                                await flushPhotoBatch();
+                            } catch (e) {
+                                console.error('[Flush Photo Batch Error]:', e.message);
+                            }
+                        }, 2200);
+
+                        console.log(`[Photo Batch] Đã gom ảnh #${photoBatchQueue.length} (msg #${msg.message_id}). Đang chờ thêm ảnh trong chùm...`);
+                        continue; // BỎ QUA VÒNG LẶP, KHÔNG TẠO BẤT KỲ PROMPT LẺ TẺ NÀO!
+                    }
+
                     let userText = '';
                     let isPhoto = false;
                     let photoFileId = null;
@@ -1149,13 +1280,7 @@ async function pollUpdates() {
                         userText = msg.caption.trim();
                     }
 
-                    if (msg.photo && Array.isArray(msg.photo) && msg.photo.length > 0) {
-                        isPhoto = true;
-                        photoFileId = msg.photo[msg.photo.length - 1].file_id;
-                        if (!userText) userText = 'Phân tích hình ảnh này';
-                    }
-
-                    if (!userText && !isPhoto) continue;
+                    if (!userText) continue;
 
                     console.log(`[Telegram Nhận Tin] (chat=${chatId}, thread=${threadId}): ${userText.substring(0, 60)}`);
 

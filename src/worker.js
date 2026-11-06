@@ -12,6 +12,62 @@ function escapeHtml(str) {
         .replace(/'/g, "&#039;");
 }
 
+
+function mdToTgHtml(text) {
+    if (!text) return "";
+    const codeBlocks = [];
+    text = text.replace(/```([a-zA-Z0-9_\-\+]*)\r?\n([\s\S]*?)```/g, (m, lang, code) => {
+        const c = escapeHtml(code);
+        const l = lang || 'text';
+        const idx = codeBlocks.length;
+        codeBlocks.push(`<pre><code class="language-${l}">${c}</code></pre>`);
+        return `___CODE_BLOCK_${idx}___`;
+    });
+
+    const inlineCodes = [];
+    text = text.replace(/`([^`\r\n]+)`/g, (m, code) => {
+        const c = escapeHtml(code);
+        const idx = inlineCodes.length;
+        inlineCodes.push(`<code>${c}</code>`);
+        return `___INLINE_${idx}___`;
+    });
+
+    text = escapeHtml(text);
+    text = text.replace(/^###\s+([^\r\n]+)/gm, '📌 <b>$1</b>');
+    text = text.replace(/^##\s+([^\r\n]+)/gm, '🔹 <b>$1</b>');
+    text = text.replace(/^#\s+([^\r\n]+)/gm, '🏷️ <b>$1</b>');
+    text = text.replace(/\*\*([^\*\r\n]+)\*\*/g, '<b>$1</b>');
+    text = text.replace(/(?<!\w)\*([^\*\r\n]+)\*(?!\w)/g, '<i>$1</i>');
+    text = text.replace(/(?<!\w)__([^\_\r\n]+)__(?!\w)/g, '<u>$1</u>');
+    text = text.replace(/~~([^~\r\n]+)~~/g, '<s>$1</s>');
+    text = text.replace(/^-\s+([^\r\n]+)/gm, '• $1');
+
+    for (let i = 0; i < inlineCodes.length; i++) {
+        text = text.replace(`___INLINE_${i}___`, inlineCodes[i]);
+    }
+    for (let i = 0; i < codeBlocks.length; i++) {
+        text = text.replace(`___CODE_BLOCK_${i}___`, codeBlocks[i]);
+    }
+    return text;
+}
+
+function chunkText(text, maxLen = 3800) {
+    if (!text || text.length <= maxLen) return [text];
+    const paragraphs = text.split(/\r?\n\r?\n/);
+    const chunks = [];
+    let currentChunk = '';
+    for (const p of paragraphs) {
+        if ((currentChunk + '\n\n' + p).length > maxLen) {
+            if (currentChunk) chunks.push(currentChunk.trim());
+            currentChunk = p;
+        } else {
+            currentChunk = currentChunk ? currentChunk + '\n\n' + p : p;
+        }
+    }
+    if (currentChunk) chunks.push(currentChunk.trim());
+    return chunks;
+}
+
 function fromHex(hex) {
     let str = "";
     for (let i = 0; i < hex.length; i += 2) {
