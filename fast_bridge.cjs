@@ -219,7 +219,13 @@ async function syncContextToCloud() {
             pin: lobby.getProjectPin(activeThreadId),
             summary: `Dự án ${proj.name} tại ${proj.path}. Cầu nối Antigravity PC đang tạm bàn giao cho Cloud.`,
             files: ['fast_bridge.cjs', 'src/worker.js', 'lib/intent.cjs', 'lib/ipc.cjs', 'lib/lobby.cjs'],
-            history: history
+            history: history,
+            projects: (function() {
+                try {
+                    const rf = path.join(path.resolve(__dirname, '..'), 'project_registry.json');
+                    return fs.existsSync(rf) ? JSON.parse(fs.readFileSync(rf, 'utf8')).projects || [] : [];
+                } catch (e) { return []; }
+            })()
         };
         const res = await fetch(`${CLOUD_WORKER_URL}/sync/context`, {
             method: 'POST',
@@ -764,7 +770,59 @@ async function pollUpdates() {
                         const whInfo = await tgApiRaw('getWebhookInfo');
                         if (whInfo && whInfo.result && !whInfo.result.url) {
                             isCloudStandby = false;
-                            console.log('[Bridge Wakeup] ⚡ Cloudflare da nhuong quyen cho PC! Tiep quan Telegram & khoi chay Antigravity IDE...');
+                            console.log('[Bridge Wakeup] ⚡ Cloudflare da nhuong quyen cho PC!');
+
+                            // Kiểm tra xem có lệnh thực thi từ xa (Shutdown / Close App / Wake) từ Cloud hay không
+                            let pendingCmds = [];
+                            try {
+                                const pcCmdRes = await fetch(`${CLOUD_WORKER_URL}/pc/pending_commands`);
+                                const pcCmdJson = await pcCmdRes.json();
+                                if (pcCmdJson && Array.isArray(pcCmdJson.commands) && pcCmdJson.commands.length > 0) {
+                                    pendingCmds = pcCmdJson.commands;
+                                    await fetch(`${CLOUD_WORKER_URL}/pc/pending_commands`, { method: 'POST' }); // ACK / clear
+                                }
+                            } catch (e) {}
+
+                            // 1. Xử lý lệnh tắt máy từ xa
+                            const shutdownCmd = pendingCmds.find(c => c.type === 'shutdown_pc');
+                            if (shutdownCmd) {
+                                console.log('[Remote Shutdown] Tiếp nhận lệnh tắt nguồn từ Cloud!');
+                                const targetT = shutdownCmd.threadId || activeThreadId;
+                                await sendMsg(
+                                    activeChatId,
+                                    `🔌 <b>[PC ĐÃ TIẾP NHẬN LỆNH TẮT NGUỒN TỪ XA]</b>\n──────────────────────\n✅ Máy tính PC đang tiến hành tắt máy trong 10 giây!\n💤 Chúc bro nghỉ ngơi! Khi cần mở lại, bật máy tính và gõ <code>/pc</code> nhé!`,
+                                    targetT
+                                );
+                                await setCloudWebhook(true);
+                                isCloudStandby = true;
+                                setTimeout(() => {
+                                    const cp = require('child_process');
+                                    cp.exec('shutdown.exe /s /t 10 /c "QuinloveRin Remote Shutdown"');
+                                }, 1500);
+                                continue;
+                            }
+
+                            // 2. Xử lý lệnh đóng ứng dụng từ xa
+                            const closeCmd = pendingCmds.find(c => c.type === 'close_app');
+                            if (closeCmd) {
+                                console.log(`[Remote Close] Đóng ứng dụng: ${closeCmd.target}`);
+                                const res = closeAppOrProcess(closeCmd.target);
+                                const targetT = closeCmd.threadId || activeThreadId;
+                                await sendMsg(
+                                    activeChatId,
+                                    `🛑 <b>[ĐÃ ĐÓNG ỨNG DỤNG THEO LỆNH TỪ XA]</b>\n──────────────────────\n✅ <b>${res.desc}</b>`,
+                                    targetT
+                                );
+                                await setCloudWebhook(true);
+                                isCloudStandby = true;
+                                continue;
+                            }
+
+                            // 3. Xử lý lệnh đánh thức & mở dự án
+                            const wakeCmd = pendingCmds.find(c => c.type === 'wake_and_open');
+                            if (wakeCmd && wakeCmd.project && wakeCmd.project.topicId) {
+                                activeThreadId = wakeCmd.project.topicId;
+                            }
                             const proj = lobby.getProjectInfo(activeThreadId);
                             launchOrFocusAntigravity(proj.path);
                             await sendMsg(
@@ -1441,7 +1499,7 @@ async function pollUpdates() {
                     }
 
                     // Kiểm tra nếu đang chờ mã 4 số kết nối lại
-                    if ((waitingForPairCode && /^\d{4}$/.test(userText.trim())) || /^(?:2726|6585)$/.test(userText.trim())) {
+                    if (/^\d{4}$/.test(userText.trim())) {
                         const code = userText.trim();
                         if (lobby.verifyProjectPin(code, threadId || activeThreadId)) {
                             waitingForPairCode = false;

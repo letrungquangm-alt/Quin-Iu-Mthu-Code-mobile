@@ -36,6 +36,12 @@ const DEFAULT_GEMINI_KEYS = JSON.parse(fromHex("5b2241512e416238524e364c5f524e75
 // Hàng đợi đăng ký máy net: cmdCode -> { hostname, drive, time, teleCode, dmBotToken, dmMsgId }
 let netRegistrations = new Map();
 
+// Hàng đợi lệnh điều khiển PC từ xa (Shutdown / Close App / Wake PC):
+let pendingPcCommands = [];
+
+// Danh sách dự án đã đăng ký động từ PC (Đồng bộ đa máy, đa cửa sổ):
+let registeredProjects = [];
+
 // Trạng thái Admin xác thực kép tại Sảnh: userId -> { step: 'AWAIT_PIN' | 'AWAIT_PASS' | 'AWAIT_PC_PIN', enteredPin: false, enteredPass: false }
 let adminAuthStates = new Map();
 
@@ -79,6 +85,46 @@ function isConversationalPrompt(text) {
     }
 
     return false;
+}
+
+function findProjectByPin(inputPin, threadId) {
+    const pin = String(inputPin || '').trim();
+    if (!pin) return null;
+
+    // 1. Kiểm tra trong topicMemory của topic hiện tại
+    if (threadId && topicMemory.has(Number(threadId))) {
+        const mem = topicMemory.get(Number(threadId));
+        if (mem && String(mem.pin) === pin) {
+            return { topicId: Number(threadId), name: mem.repo, path: mem.path, pin: mem.pin };
+        }
+    }
+
+    // 2. Tìm kiếm trong tất cả topicMemory
+    for (const [tId, mem] of topicMemory.entries()) {
+        if (String(mem.pin) === pin) {
+            return { topicId: tId, name: mem.repo, path: mem.path, pin: mem.pin };
+        }
+    }
+
+    // 3. Tìm kiếm trong danh sách dự án động đã đăng ký (registeredProjects)
+    if (Array.isArray(registeredProjects)) {
+        const found = registeredProjects.find(p => String(p.pin) === pin || (threadId && Number(p.topicId) === Number(threadId) && String(p.pin) === pin));
+        if (found) {
+            return { topicId: Number(found.topicId) || Number(threadId) || PROJECT_TOPIC_ID, name: found.name, path: found.path, pin: found.pin };
+        }
+    }
+
+    // 4. Mã PIN mặc định / Master PIN của dự án chính
+    if (pin === "2726" || pin === "6585") {
+        return {
+            topicId: Number(threadId) || PROJECT_TOPIC_ID,
+            pin: pin,
+            path: "G:\\MThu Mobile Code",
+            name: "MThu-Mobile-Code"
+        };
+    }
+
+    return null;
 }
 
 const SYSTEM_INSTRUCTION = `Bạn là QuinloveRin 3.8, trợ lý lập trình AI siêu cấp hoạt động 24/7 trên Cloudflare Worker & Groq LPU.
@@ -148,6 +194,10 @@ export default {
                     const incomingHist = Array.isArray(data.history) ? data.history : [];
                     const mergedHist = [...existing.history, ...incomingHist].slice(-20);
 
+                    if (Array.isArray(data.projects)) {
+                        registeredProjects = data.projects;
+                    }
+
                     topicMemory.set(tId, {
                         repo: data.repo || "Quin-Iu-Mthu-Code-mobile",
                         path: data.path || "G:\\MThu Mobile Code",
@@ -158,7 +208,7 @@ export default {
                         lastSync: Date.now()
                     });
 
-                    return new Response(JSON.stringify({ ok: true, synced_topic: tId, history_count: mergedHist.length }), {
+                    return new Response(JSON.stringify({ ok: true, synced_topic: tId, history_count: mergedHist.length, projects_count: registeredProjects.length }), {
                         headers: { "Content-Type": "application/json" }
                     });
                 } catch (e) {
@@ -167,7 +217,22 @@ export default {
             } else if (request.method === "GET") {
                 const allMem = {};
                 for (const [k, v] of topicMemory.entries()) allMem[k] = v;
-                return new Response(JSON.stringify({ ok: true, memory: allMem }, null, 2), {
+                return new Response(JSON.stringify({ ok: true, memory: allMem, registered_projects: registeredProjects }, null, 2), {
+                    headers: { "Content-Type": "application/json" }
+                });
+            }
+        }
+
+        // 2c2. Hàng đợi lệnh điều khiển PC từ xa (Shutdown / Close App / Wake PC): /pc/pending_commands
+        if (url.pathname === "/pc/pending_commands") {
+            if (request.method === "GET") {
+                return new Response(JSON.stringify({ ok: true, commands: pendingPcCommands }), {
+                    headers: { "Content-Type": "application/json" }
+                });
+            } else if (request.method === "POST") {
+                const clearedCount = pendingPcCommands.length;
+                pendingPcCommands = [];
+                return new Response(JSON.stringify({ ok: true, cleared_count: clearedCount }), {
                     headers: { "Content-Type": "application/json" }
                 });
             }
@@ -520,18 +585,22 @@ async function handleTelegramUpdate(update, env, ctx) {
             const match = text.trim().match(/^(?:\/pc|\/connect|\/ketnoi|ket\s*noi\s*pc|bật\s+antigravity|mở\s+antigravity|khởi\s+động\s+antigravity)(?:\s+(\d{3,4}))?$/i);
             const providedCode = match ? match[1] : null;
 
-            if (providedCode && (providedCode === PROJECT_PIN || providedCode === "2726" || providedCode === "6585")) {
-                adminAuthStates.delete(userId);
-                try {
-                    await fetch(`https://api.telegram.org/bot${botToken}/deleteWebhook`);
-                } catch (e) {}
-                await sendTg(
-                    botToken,
-                    chatId,
-                    `🖥️ <b>[ĐÃ XÁC THỰC MÃ PIN & BÀN GIAO CHO PC]</b>\n──────────────────────\n🔑 <b>Mã PIN:</b> <code>${providedCode}</code> (Khớp cửa sổ dự án #${threadId || 1160})\n⚡ <b>Hành động:</b> Đã gửi tín hiệu đánh thức Terminal Node của PC!\n🚀 Ứng dụng Antigravity IDE trên PC sẽ tự động mở và trỏ vào dự án!`,
-                    threadId
-                );
-                return;
+            if (providedCode) {
+                const proj = findProjectByPin(providedCode, threadId);
+                if (proj) {
+                    adminAuthStates.delete(userId);
+                    pendingPcCommands.push({ type: 'wake_and_open', pin: providedCode, project: proj, chatId, threadId: proj.topicId, time: Date.now() });
+                    try {
+                        await fetch(`https://api.telegram.org/bot${botToken}/deleteWebhook`);
+                    } catch (e) {}
+                    await sendTg(
+                        botToken,
+                        chatId,
+                        `🖥️ <b>[ĐÃ XÁC THỰC MÃ PIN & BÀN GIAO CHO PC]</b>\n──────────────────────\n🔑 <b>Mã PIN:</b> <code>${providedCode}</code> (Cửa sổ: <b>${proj.name}</b> #${proj.topicId})\n📂 <b>Thư mục:</b> <code>${proj.path}</code>\n⚡ <b>Hành động:</b> Đã gửi tín hiệu đánh thức PC!\n🚀 Ứng dụng Antigravity IDE trên PC sẽ tự động mở và trỏ vào dự án!`,
+                        proj.topicId || threadId
+                    );
+                    return;
+                }
             }
 
             // Chưa có mã PIN hoặc mã PIN không khớp: BẮT BUỘC HỎI MÃ PIN DỰ ÁN
@@ -539,7 +608,7 @@ async function handleTelegramUpdate(update, env, ctx) {
             await sendTg(
                 botToken,
                 chatId,
-                `📟 <b>[XÁC THỰC KẾT NỐI MÁY PC - QUINLOVERIN]</b>\n──────────────────────\n🔑 <b>Dự án:</b> Topic #${threadId || 1160}\n👉 Bro hãy nhập <b>Mã PIN (Mã cửa sổ repo)</b> của dự án để đánh thức PC:`,
+                `📟 <b>[XÁC THỰC KẾT NỐI MÁY PC - QUINLOVERIN]</b>\n──────────────────────\n🔑 <b>Cửa sổ:</b> Topic #${threadId || 1160}\n👉 Bro hãy nhập <b>Mã PIN (Mã cửa sổ repo / máy kết nối)</b> để đánh thức PC:`,
                 threadId
             );
             return;
@@ -549,23 +618,25 @@ async function handleTelegramUpdate(update, env, ctx) {
         let authState = adminAuthStates.get(userId) || { step: null, enteredPin: false, enteredPass: false };
         if (authState.step === "AWAIT_PC_PIN" || (/^\d{4}$/.test(text.trim()) && Number(threadId) !== 3562)) {
             const inputPin = text.trim();
-            if (inputPin === PROJECT_PIN || inputPin === "2726" || inputPin === "6585") {
+            const proj = findProjectByPin(inputPin, threadId);
+            if (proj) {
                 adminAuthStates.delete(userId);
+                pendingPcCommands.push({ type: 'wake_and_open', pin: inputPin, project: proj, chatId, threadId: proj.topicId, time: Date.now() });
                 try {
                     await fetch(`https://api.telegram.org/bot${botToken}/deleteWebhook`);
                 } catch (e) {}
                 await sendTg(
                     botToken,
                     chatId,
-                    `🖥️ <b>[ĐÃ XÁC THỰC MÃ PIN & BÀN GIAO CHO PC]</b>\n──────────────────────\n🔑 <b>Mã PIN:</b> <code>${inputPin}</code> (Khớp cửa sổ dự án #${threadId || 1160})\n⚡ <b>Hành động:</b> Đã gửi tín hiệu đánh thức Terminal Node của PC!\n🚀 Ứng dụng Antigravity IDE trên PC sẽ tự động mở và trỏ vào dự án!`,
-                    threadId
+                    `🖥️ <b>[ĐÃ XÁC THỰC MÃ PIN & BÀN GIAO CHO PC]</b>\n──────────────────────\n🔑 <b>Mã PIN:</b> <code>${inputPin}</code> (Cửa sổ: <b>${proj.name}</b> #${proj.topicId})\n📂 <b>Thư mục:</b> <code>${proj.path}</code>\n⚡ <b>Hành động:</b> Đã gửi tín hiệu đánh thức PC!\n🚀 Ứng dụng Antigravity IDE trên PC sẽ tự động mở và trỏ vào dự án!`,
+                    proj.topicId || threadId
                 );
                 return;
             } else if (/^\d{3,4}$/.test(inputPin)) {
                 await sendTg(
                     botToken,
                     chatId,
-                    `❌ <b>[MÃ PIN DỰ ÁN KHÔNG ĐÚNG]</b>\nMã <code>${inputPin}</code> không chính xác! Bro hãy nhập lại đúng mã PIN 4 số của dự án này:`,
+                    `❌ <b>[MÃ PIN DỰ ÁN / MÁY KHÔNG ĐÚNG]</b>\nMã <code>${inputPin}</code> không chính xác! Bro hãy nhập lại đúng mã PIN của dự án này hoặc máy tính cần kết nối:`,
                     threadId
                 );
                 return;
@@ -635,45 +706,43 @@ async function handleTelegramUpdate(update, env, ctx) {
             return;
         }
 
-        // G. LỆNH ĐIỀU KHIỂN TẮT ỨNG DỤNG TRÊN PC: /TAT, /DONG, /CLOSE
+        // G. LỆNH ĐIỀU KHIỂN TẮT ỨNG DỤNG TRÊN PC TỪ XA: /TAT, /DONG, /CLOSE
         if (/^\/(?:close_antigravity|tat_antigravity|kill_antigravity)$/i.test(text.trim()) ||
             /^(?:tắt|đóng|tat|dong)\s+antigravity$/i.test(text.trim())) {
+            pendingPcCommands.push({ type: 'close_app', target: 'antigravity', chatId, threadId, time: Date.now() });
+            try { await fetch(`https://api.telegram.org/bot${botToken}/deleteWebhook`); } catch (e) {}
             await sendTg(
                 botToken,
                 chatId,
-                `☁️ <b>[ANTIGRAVITY ĐÃ TẮT & CLOUD 24/7 ĐANG TRỰC CHIẾN]</b>\n──────────────────────\n✅ Ứng dụng Antigravity IDE trên PC hiện đã tắt để tiết kiệm tài nguyên.\n⚡ Cloudflare Worker 24/7 đang trực tiếp tiếp nhận mọi yêu cầu của bro!\n\n💡 <i>Khi nào muốn mở lại Antigravity trên PC, bro chỉ cần gõ <code>/pc</code> và nhập mã PIN nhé!</i>`,
+                `🛑 <b>[ĐANG ĐIỀU KHIỂN TẮT ANTIGRAVITY TRÊN PC]</b>\n──────────────────────\n⚡ Đã gửi lệnh đóng Antigravity IDE tới máy tính PC để tiết kiệm RAM & CPU!\n☁️ Cloudflare Worker 24/7 tiếp tục trực chiến phục vụ bro!`,
                 threadId
             );
             return;
         }
 
-        if (/^\/(?:tat|dong|close|kill)\s+([a-zA-Z0-9_\-\.]+)$/i.test(text.trim())) {
-            const matchApp = text.trim().match(/^\/(?:tat|dong|close|kill)\s+([a-zA-Z0-9_\-\.]+)$/i);
+        if (/^\/(?:tat|dong|close|kill)\s+([a-zA-Z0-9_\-\.]+)$/i.test(text.trim()) ||
+            /^(?:tắt|đóng|tat|dong)\s+([a-zA-Z0-9_\-\.]+)$/i.test(text.trim())) {
+            const matchApp = text.trim().match(/^(?:\/tat|\/dong|\/close|\/kill|tắt|đóng|tat|dong)\s+([a-zA-Z0-9_\-\.]+)$/i);
             const closeTarget = matchApp ? matchApp[1].toLowerCase() : '';
-            if (closeTarget.includes('antigravity') || closeTarget.includes('agy') || closeTarget.includes('ide')) {
-                await sendTg(
-                    botToken,
-                    chatId,
-                    `☁️ <b>[ANTIGRAVITY ĐÃ TẮT & CLOUD 24/7 ĐANG TRỰC CHIẾN]</b>\n──────────────────────\n✅ Ứng dụng Antigravity IDE trên PC hiện đã tắt để tiết kiệm tài nguyên.\n⚡ Cloudflare Worker 24/7 đang trực tiếp tiếp nhận mọi yêu cầu của bro!\n\n💡 <i>Khi nào muốn mở lại Antigravity trên PC, bro chỉ cần gõ <code>/pc</code> và nhập mã PIN nhé!</i>`,
-                    threadId
-                );
-                return;
-            }
+            pendingPcCommands.push({ type: 'close_app', target: closeTarget, chatId, threadId, time: Date.now() });
+            try { await fetch(`https://api.telegram.org/bot${botToken}/deleteWebhook`); } catch (e) {}
             await sendTg(
                 botToken,
                 chatId,
-                `🖥️ <b>[LỆNH ĐIỀU KHIỂN ỨNG DỤNG MÁY TÍNH]</b>\n──────────────────────\nℹ️ Lệnh <code>${text}</code> yêu cầu thực thi trực tiếp trên PC.\n👉 Hiện tại bot đang ở chế độ Cloud 24/7. Bro hãy gõ <code>/pc</code> và nhập mã PIN để kết nối máy tính trước nhé!`,
+                `🛑 <b>[ĐANG ĐIỀU KHIỂN ĐÓNG ỨNG DỤNG TRÊN PC]</b>\n──────────────────────\n⚡ Đã chuyển tiếp lệnh đóng <code>${closeTarget}</code> tới máy tính PC để thực thi ngay!`,
                 threadId
             );
             return;
         }
 
-        // G2. LỆNH TẮT MÁY (REMOTE SHUTDOWN) KHI ĐANG Ở CLOUD
+        // G2. LỆNH TẮT MÁY (REMOTE SHUTDOWN PC) KHI ĐANG Ở CLOUD
         if (/^(?:\/shutdown|\/tatmay|\/tat_pc|\/tat_may|(?:tắt|tat)\s+(?:máy|may|máy\s+tính|may\s+tinh|pc|nguồn|nguon)(?:\s+(?:đi|nhe|nhé|nha|thôi|thoi|giúp|giup|hộ|ho)?(?:\s+(?:bro|bạn|ban|ad|em))?)?)$/i.test(text.trim())) {
+            pendingPcCommands.push({ type: 'shutdown_pc', chatId, threadId, time: Date.now() });
+            try { await fetch(`https://api.telegram.org/bot${botToken}/deleteWebhook`); } catch (e) {}
             await sendTg(
                 botToken,
                 chatId,
-                `☁️ <b>[CLOUDFLARE WORKER 24/7 - KHÔNG THỂ TẮT NGUỒN VẬT LÝ]</b>\n──────────────────────\n😄 <b>Haha bro ơi:</b>\n• Hiện tại bro đang chat trực tiếp với <b>Cloudflare Worker trên Đám Mây</b>, máy tính PC ở nhà của bro đã tắt nguồn (hoặc đang ở chế độ Chờ) rồi!\n• Cloudflare Worker là <i>Serverless Edge</i> chạy trên hàng trăm trung tâm dữ liệu toàn cầu nên <b>không có nút nguồn vật lý để "tắt máy"</b> :v\n• Khi bro không nhắn tin, Cloud tự động nằm im ở <b>0% CPU, 0đ tiền điện</b> và kiên nhẫn trực chiến 24/7 chờ bro.\n\n💡 <i>Nếu bro muốn đóng cửa sổ làm việc này trên điện thoại, hãy gõ <code>/dongtopic</code> nhé! Chúc bro nghỉ ngơi vui vẻ!</i>`,
+                `🔌 <b>[ĐÃ TIẾP NHẬN LỆNH TẮT NGUỒN PC TỪ XA]</b>\n──────────────────────\n⚡ <b>Đã phát tín hiệu ngắt nguồn tới máy tính PC!</b>\n🖥️ PC đang thực thi lệnh đóng ứng dụng và tắt nguồn hoàn toàn (Shut down trong 10 giây).\n☁️ Cloudflare Worker 24/7 tiếp tục trực chiến trên Đám Mây để chờ bro!`,
                 threadId
             );
             return;

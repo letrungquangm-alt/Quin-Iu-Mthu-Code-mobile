@@ -1,11 +1,11 @@
 {
-  "updated_at": "2026-11-06T08:29:11.283Z",
-  "file_id": "BQACAgUAAyEGAAMBCbVXbAACExlq7Y_XDqL9IONzYyMV2s5blReWCwACnCMAAtSaaVflgcS4REamNT0E",
-  "message_id": 4889,
+  "updated_at": "2026-11-06T08:36:14.265Z",
+  "file_id": "BQACAgUAAyEGAAMBCbVXbAACEytq7ZF-yLTSia0VDXZAreUebNs01AACpSMAAtSaaVfCx-WrzJOlbj0E",
+  "message_id": 4907,
   "topic": "General (#)",
   "file_count": 78,
-  "raw_bytes": 680018,
-  "gzipped_size": 172688,
+  "raw_bytes": 679691,
+  "gzipped_size": 172580,
   "file_tree": [
     {
       "path": "antigravity_ls.json",
@@ -121,7 +121,7 @@
     },
     {
       "path": "lib/lobby.cjs",
-      "size": 43095
+      "size": 43049
     },
     {
       "path": "lib/menu.cjs",
@@ -197,7 +197,7 @@
     },
     {
       "path": "project_registry.json",
-      "size": 554
+      "size": 273
     },
     {
       "path": "README.md",
