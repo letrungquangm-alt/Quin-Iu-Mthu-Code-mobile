@@ -39,6 +39,7 @@ const { classifyUserIntent, isConversationalPrompt } = require('./lib/intent.cjs
 const { syncRepoToGmCloud } = require('./lib/gmcloud_storage.cjs');
 const { getDevicePassport, formatPassportCard } = require('./lib/device_passport.cjs');
 // GMCloud storage integration
+const mtproto = require('./lib/mtproto_auth.cjs');
 
 const { askGroq } = require('./lib/groq.cjs');
 
@@ -1079,6 +1080,18 @@ async function pollUpdates() {
                         const isAllowed = allowedList.includes(Number(chatId)) || allowedList.includes(Number(fromId));
                         if (!isAllowed) continue;
 
+                        // 🔒 KIỂM TRA QUYỀN RIÊNG TƯ CỦA TOPIC (TOPIC ISOLATION CHO CALLBACK)
+                        if (cbThreadId && !lobby.isLobby(cbThreadId)) {
+                            if (!lobby.isTopicOwner(cbThreadId, fromId)) {
+                                await tgApiRaw('answerCallbackQuery', {
+                                    callback_query_id: cb.id,
+                                    text: '🔒 [TRUY CẬP BỊ TỪ CHỐI] Bạn không phải chủ sở hữu của topic này!',
+                                    show_alert: true
+                                });
+                                continue;
+                            }
+                        }
+
                         // XỬ LÝ TOÀN BỘ SỰ KIỆN NÚT BẤM SẢNH LOBBY QUA LIB/LOBBY.CJS
                         const lobbyHandled = await lobby.handleLobbyCallback(cb, {
                             sendMsg,
@@ -1384,7 +1397,102 @@ async function pollUpdates() {
                     }
                     if (!userText) continue;
 
+                    // 🔒 KIỂM TRA QUYỀN RIÊNG TƯ CỦA TOPIC (TOPIC ISOLATION CHO TIN NHẮN)
+                    if (threadId && !lobby.isLobby(threadId)) {
+                        if (!lobby.isTopicOwner(threadId, fromId)) {
+                            console.warn(`[Topic Isolation] Chặn tin nhắn từ user ${fromId} tại Topic #${threadId} (Không phải chủ sở hữu)`);
+                            if (msg.message_id) {
+                                try {
+                                    await tgApiRaw('deleteMessage', { chat_id: chatId, message_id: msg.message_id });
+                                } catch (e) {}
+                            }
+                            continue;
+                        }
+                    }
+
                     console.log(`[Telegram Nhận Tin] (chat=${chatId}, thread=${threadId}): ${userText.substring(0, 60)}`);
+
+                    // 📱 XỬ LÝ QUY TRÌNH XÁC THỰC TÀI KHOẢN CHỦ MTPROTO (my.telegram.org)
+                    const mtState = mtproto.getAuthState();
+                    if (mtState.step === 'AWAITING_PHONE') {
+                        const cleanPhone = userText.trim();
+                        await sendMsg(chatId, `⏳ Đang gửi mã OTP đến Telegram của số điện thoại <code>${escapeHtml(cleanPhone)}</code>...`, targetTId);
+                        const authRes = await mtproto.startAuthFlow(cleanPhone);
+                        if (authRes.ok) {
+                            await sendMsg(
+                                chatId,
+                                `📱 <b>[ĐÃ GỬI MÃ OTP THÀNH CÔNG!]</b>\n──────────────────────\nTelegram đã gửi mã xác nhận đến ứng dụng của bro!\n\n👉 <b>Bro hãy nhập mã OTP (5 số)</b> vào ô chat:`,
+                                targetTId,
+                                'HTML',
+                                { inline_keyboard: [[{ text: '❌ Hủy xác thực', callback_data: 'gmcloud_dir:' }]] }
+                            );
+                        } else {
+                            await sendMsg(
+                                chatId,
+                                `❌ <b>[LỖI GỬI MÃ OTP]</b>\nLỗi: <code>${escapeHtml(authRes.error || 'Unknown error')}</code>\n\n👉 Bro kiểm tra lại số điện thoại (phải có mã quốc gia, ví dụ <code>+84912345678</code>) và gửi lại nhé:`,
+                                targetTId,
+                                'HTML',
+                                { inline_keyboard: [[{ text: '❌ Hủy', callback_data: 'gmcloud_dir:' }]] }
+                            );
+                        }
+                        continue;
+                    }
+
+                    if (mtState.step === 'AWAITING_OTP') {
+                        const cleanOtp = userText.trim();
+                        await sendMsg(chatId, `⏳ Đang xác thực mã OTP...`, targetTId);
+                        const verifyRes = await mtproto.verifyOtpCode(cleanOtp);
+                        if (verifyRes.ok && verifyRes.step === 'AWAITING_2FA') {
+                            await sendMsg(
+                                chatId,
+                                `🔐 <b>[YÊU CẦU MẬT KHẨU 2FA]</b>\n──────────────────────\nTài khoản của bro có kích hoạt bảo mật 2 bước (Cloud Password).\n\n👉 Bro hãy nhập <b>Mật khẩu 2FA</b> vào ô chat:`,
+                                targetTId,
+                                'HTML',
+                                { inline_keyboard: [[{ text: '❌ Hủy', callback_data: 'gmcloud_dir:' }]] }
+                            );
+                        } else if (verifyRes.ok && verifyRes.session) {
+                            await sendMsg(
+                                chatId,
+                                `✅ <b>[XÁC THỰC MTPROTO THÀNH CÔNG RỰC RỠ!]</b>\n──────────────────────\n👤 <b>Tài khoản chủ:</b> <code>${verifyRes.session.userName || verifyRes.session.userPhone}</code>\n📦 <b>Dung lượng lưu trữ:</b> ${verifyRes.session.isPremium ? '4GB / file' : '2GB / file'} (Không giới hạn)\n🏛️ <b>Kho GMCloud Storage:</b> Đã liên kết trực tiếp với tài khoản Telegram chính chủ vĩnh viễn!\n\n✨ Mọi file snapshot và mã nguồn từ nay sẽ được lưu vĩnh viễn an toàn tuyệt đối!`,
+                                targetTId,
+                                'HTML',
+                                { inline_keyboard: [[{ text: '☁️ Mở Kho GMCloud Storage', callback_data: 'hub_gmcloud' }]] }
+                            );
+                        } else {
+                            await sendMsg(
+                                chatId,
+                                `❌ <b>[MÃ OTP KHÔNG ĐÚNG HOẶC HẾT HẠN]</b>\nLỗi: <code>${escapeHtml(verifyRes.error || 'Sai OTP')}</code>\n\n👉 Bro vui lòng nhập lại mã OTP:`,
+                                targetTId,
+                                'HTML',
+                                { inline_keyboard: [[{ text: '❌ Hủy', callback_data: 'gmcloud_dir:' }]] }
+                            );
+                        }
+                        continue;
+                    }
+
+                    if (mtState.step === 'AWAITING_2FA') {
+                        const pass = userText.trim();
+                        await sendMsg(chatId, `⏳ Đang kiểm tra mật khẩu 2FA...`, targetTId);
+                        const passRes = await mtproto.verify2FaPassword(pass);
+                        if (passRes.ok && passRes.session) {
+                            await sendMsg(
+                                chatId,
+                                `✅ <b>[XÁC THỰC MTPROTO THÀNH CÔNG RỰC RỠ!]</b>\n──────────────────────\n👤 <b>Tài khoản chủ:</b> <code>${passRes.session.userName || passRes.session.userPhone}</code>\n📦 <b>Dung lượng lưu trữ:</b> ${passRes.session.isPremium ? '4GB / file' : '2GB / file'} (Không giới hạn)\n🏛️ <b>Kho GMCloud Storage:</b> Đã liên kết trực tiếp với tài khoản Telegram chính chủ vĩnh viễn!\n\n✨ Mọi file snapshot và mã nguồn từ nay sẽ được lưu vĩnh viễn an toàn tuyệt đối!`,
+                                targetTId,
+                                'HTML',
+                                { inline_keyboard: [[{ text: '☁️ Mở Kho GMCloud Storage', callback_data: 'hub_gmcloud' }]] }
+                            );
+                        } else {
+                            await sendMsg(
+                                chatId,
+                                `❌ <b>[MẬT KHẨU 2FA KHÔNG CHÍNH XÁC]</b>\nLỗi: <code>${escapeHtml(passRes.error || 'Sai mật khẩu')}</code>\n\n👉 Bro vui lòng nhập lại mật khẩu 2FA:`,
+                                targetTId,
+                                'HTML',
+                                { inline_keyboard: [[{ text: '❌ Hủy', callback_data: 'gmcloud_dir:' }]] }
+                            );
+                        }
+                        continue;
+                    }
 
                     // 👉 XỬ LÝ PHẢN HỒI XÁC NHẬN BẰNG CHỮ CHO LỆNH HỆ THỐNG (CHẤP THUẬN / TỪ CHỐI)
                     if (pendingActions.size > 0) {
@@ -1392,7 +1500,7 @@ async function pollUpdates() {
                         if (latestEntry) {
                             const [actId, act] = latestEntry;
                             const cleanLower = userText.trim().toLowerCase();
-                            if (/^(?:chấp thuận|chap thuan|đồng ý|dong y|xác nhận|xac nhan|ok|yes|có|co)$/i.test(cleanLower)) {
+                            if (/^(?:chấp thuận|chap thuan|đồng ý|dong y|xác nhận|xac nhan|ok|yes|có|co|có làm đi|làm đi|triển đi|chạy đi)$/i.test(cleanLower)) {
                                 pendingActions.delete(actId);
                                 await sendMsg(chatId, `✅ <b>[ĐÃ XÁC NHẬN LỆNH]</b>\n──────────────────────\nĐang thực thi: <b>${act.name}</b>...`, targetTId);
                                 await executeActionDirect(act, act.chatId, act.threadId);

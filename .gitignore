@@ -25,3 +25,4 @@ keys.json
 .env
 
 bridge.pid
+mtproto_session.json
