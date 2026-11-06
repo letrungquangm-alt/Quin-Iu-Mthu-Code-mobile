@@ -135,6 +135,10 @@ let pinFailedCount = 0;
 let waitingForPairCode = false;
 let waitingForEditQueueId = null;
 
+// Hàng đợi xác nhận lệnh hệ thống nhạy cảm bằng nút bấm emoji:
+// actId -> { action, target, name, chatId, threadId, createdAt }
+const pendingActions = new Map();
+
 // --- UNIVERSAL OUTBOX SENDER (OFFLOADED TO STANDALONE .BAT WORKER) ---
 
 function sendViaBat(payloadData) {
@@ -826,6 +830,68 @@ const transcriptWatcher = createTranscriptWatcher({
     }
 });
 
+
+async function executeActionDirect(act, chatId, threadId) {
+    const targetTId = threadId || activeThreadId;
+
+    if (act.action === 'shutdown_pc') {
+        await sendMsg(
+            chatId,
+            `🔌 <b>[ĐÃ TIẾP NHẬN LỆNH TẮT NGUỒN PC]</b>\n──────────────────────\n✅ <b>Đã bàn giao quyền trực chiến 100% cho Cloudflare Worker 24/7!</b>\n⚡ Máy tính PC sẽ tự động ngắt nguồn hoàn toàn (Shut down) trong 10 giây.\n\n💡 <i>Nếu muốn hủy tắt máy, hãy gõ ngay: <code>hủy tắt máy</code> hoặc <code>/cancel_shutdown</code></i>\n💤 <i>Chúc bro nghỉ ngơi! Khi nào mở lại máy tính, chỉ cần vào Telegram gõ <code>/pc</code> và nhập mã PIN để mở lại Antigravity nhé!</i>`,
+            targetTId
+        );
+
+        // Chuyển giao ngay Webhook cho Cloudflare Worker 24/7
+        await setCloudWebhook(true);
+        isCloudStandby = true;
+
+        // Thực thi lệnh tắt máy Windows (đặt 10 giây để người dùng kịp hủy nếu vô tình ấn nhầm)
+        setTimeout(() => {
+            try {
+                const cp = require('child_process');
+                cp.exec('shutdown.exe /s /t 10 /c "QuinloveRin Remote Shutdown from Telegram"');
+            } catch (e) {}
+        }, 1500);
+        return;
+    }
+
+    if (act.action === 'disconnect_cloud') {
+        await handleDisconnectCloud(chatId, threadId);
+        return;
+    }
+
+    if (act.action === 'close_app') {
+        const rawTarget = act.target || 'antigravity';
+        const isAntigravity = /^(?:antigravity|agy|ide)$/i.test(rawTarget.trim()) || normalizeStr(rawTarget) === 'antigravity';
+
+        const res = closeAppOrProcess(rawTarget);
+        if (res.ok) {
+            if (isAntigravity) {
+                await sendMsg(
+                    chatId,
+                    `🛑 <b>[ĐÃ ĐÓNG ANTIGRAVITY & BÀN GIAO CHO CLOUD 24/7]</b>\n──────────────────────\n✅ <b>Đã tắt ứng dụng Antigravity IDE trên PC an toàn!</b>\n⚡ Đã giải phóng hoàn toàn tài nguyên CPU & RAM trên PC.\n☁️ <b>Quyền điều hành AI đã bàn giao cho Cloudflare Worker 24/7!</b>\n\n💡 <i>Bro có thể tiếp tục chat/code trên Cloud. Khi cần mở lại Antigravity PC, chỉ cần gõ <code>/pc</code> hoặc <code>bật antigravity</code> nhé!</i>`,
+                    targetTId
+                );
+                await setCloudWebhook(true);
+                isCloudStandby = true;
+            } else {
+                await sendMsg(
+                    chatId,
+                    `🛑 <b>[ĐÃ ĐÓNG TIẾN TRÌNH / CỬA SỔ TRÊN PC]</b>\n──────────────────────\n✅ <b>${res.desc}</b>\n⚡ Tiến trình đã được giải phóng khỏi máy tính.`,
+                    targetTId
+                );
+            }
+        } else {
+            await sendMsg(
+                chatId,
+                `ℹ️ <b>[KHÔNG TÌM THẤY TIẾN TRÌNH ĐỂ ĐÓNG]</b>\n──────────────────────\n${res.desc}`,
+                targetTId
+            );
+        }
+        return;
+    }
+}
+
 // --- TELEGRAM RAW POLLING & STANDBY DISPATCHER ---
 
 async function pollUpdates() {
@@ -1132,6 +1198,33 @@ async function pollUpdates() {
                             continue;
                         }
 
+                        // XỬ LÝ NÚT CHẤP THUẬN LỆNH HỆ THỐNG (EMOJI CHẤP THUẬN)
+                        if (cbData.startsWith('act_confirm:')) {
+                            const actId = cbData.replace('act_confirm:', '');
+                            const act = pendingActions.get(actId);
+                            if (act) {
+                                pendingActions.delete(actId);
+                                await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: '✅ Đã chấp thuận!' });
+                                await editMsg(chatId, cb.message.message_id, `✅ <b>[ĐÃ CHẤP THUẬN LỆNH]</b>\n──────────────────────\nĐang thực thi: <b>${act.name}</b>...`, 'HTML', { inline_keyboard: [] }, true);
+                                await executeActionDirect(act, act.chatId, act.threadId);
+                            } else {
+                                await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: 'Lệnh đã hết hạn hoặc đã được xử lý!' });
+                                await editMsg(chatId, cb.message.message_id, 'ℹ️ Lệnh đã hết hạn hoặc đã được xử lý.', 'HTML', { inline_keyboard: [] }, true);
+                            }
+                            continue;
+                        }
+
+                        // XỬ LÝ NÚT TỪ CHỐI LỆNH HỆ THỐNG (EMOJI TỪ CHỐI)
+                        if (cbData.startsWith('act_cancel:')) {
+                            const actId = cbData.replace('act_cancel:', '');
+                            const act = pendingActions.get(actId);
+                            pendingActions.delete(actId);
+                            await tgApiRaw('answerCallbackQuery', { callback_query_id: cb.id, text: '🛑 Đã từ chối lệnh!' });
+                            const actName = act ? act.name : 'hệ thống';
+                            await editMsg(chatId, cb.message.message_id, `🛑 <b>[ĐÃ TỪ CHỐI LỆNH]</b>\n──────────────────────\nBro đã từ chối lệnh <b>${actName}</b>. Hệ thống PC tiếp tục hoạt động bình thường!`, 'HTML', { inline_keyboard: [] }, true);
+                            continue;
+                        }
+
                         // F. XỬ LÝ HÀNG ĐỢI PROMPT: ƯU TIÊN CHẠY NGAY (SEND NOW)
                         if (cbData.startsWith('q_now:')) {
                             const qId = cbData.replace('q_now:', '');
@@ -1297,6 +1390,26 @@ async function pollUpdates() {
                     if (!userText) continue;
 
                     console.log(`[Telegram Nhận Tin] (chat=${chatId}, thread=${threadId}): ${userText.substring(0, 60)}`);
+
+                    // 👉 XỬ LÝ PHẢN HỒI XÁC NHẬN BẰNG CHỮ CHO LỆNH HỆ THỐNG (CHẤP THUẬN / TỪ CHỐI)
+                    if (pendingActions.size > 0) {
+                        const latestEntry = Array.from(pendingActions.entries()).pop();
+                        if (latestEntry) {
+                            const [actId, act] = latestEntry;
+                            const cleanLower = userText.trim().toLowerCase();
+                            if (/^(?:chấp thuận|chap thuan|đồng ý|dong y|xác nhận|xac nhan|ok|yes|có|co)$/i.test(cleanLower)) {
+                                pendingActions.delete(actId);
+                                await sendMsg(chatId, `✅ <b>[ĐÃ XÁC NHẬN LỆNH]</b>\n──────────────────────\nĐang thực thi: <b>${act.name}</b>...`, targetTId);
+                                await executeActionDirect(act, act.chatId, act.threadId);
+                                continue;
+                            }
+                            if (/^(?:từ chối|tu choi|hủy|huy|không|khong|cancel|no|thôi|thoi)$/i.test(cleanLower)) {
+                                pendingActions.delete(actId);
+                                await sendMsg(chatId, `🛑 <b>[ĐÃ TỪ CHỐI LỆNH]</b>\n──────────────────────\nBro đã từ chối lệnh <b>${act.name}</b>. Hệ thống PC tiếp tục hoạt động bình thường!`, targetTId);
+                                continue;
+                            }
+                        }
+                    }
 
                     // 👉 XỬ LÝ NẾU ĐANG CHỜ SỬA PROMPT TRONG HÀNG ĐỢI (TẠI CÁC TOPIC DỰ ÁN)
                     if (waitingForEditQueueId) {
@@ -1504,59 +1617,30 @@ async function pollUpdates() {
                                 }
                                 continue;
                             }
-                            // 6. Tắt / Đóng ứng dụng, phần mềm, tab hoặc Antigravity
-                            if (intent.action === 'close_app') {
-                                const rawTarget = intent.target || 'antigravity';
-                                const isAntigravity = /^(?:antigravity|agy|ide)$/i.test(rawTarget.trim()) ||
-                                    normalizeStr(rawTarget) === 'antigravity';
+                            // 6. CÁC LỆNH HỆ THỐNG NHẠY CẢM: BẮT BUỘC HỎI XÁC NHẬN KÈM 2 NÚT EMOJI CHẤP THUẬN / TỪ CHỐI
+                            const CRITICAL_ACTIONS = ['shutdown_pc', 'close_app', 'disconnect_cloud'];
+                            if (CRITICAL_ACTIONS.includes(intent.action)) {
+                                const actId = 'act_' + Date.now();
+                                const actionName = intent.name || (intent.action === 'shutdown_pc' ? 'Tắt nguồn máy tính PC' : 'Đóng ứng dụng');
+                                pendingActions.set(actId, {
+                                    action: intent.action,
+                                    target: intent.target,
+                                    name: actionName,
+                                    chatId: chatId,
+                                    threadId: threadId,
+                                    createdAt: Date.now()
+                                });
 
-                                const res = closeAppOrProcess(rawTarget);
-                                if (res.ok) {
-                                    if (isAntigravity) {
-                                        await sendMsg(
-                                            chatId,
-                                            `🛑 <b>[ĐÃ ĐÓNG ANTIGRAVITY & BÀN GIAO CHO CLOUD 24/7]</b>\n──────────────────────\n✅ <b>Đã tắt ứng dụng Antigravity IDE trên PC an toàn!</b>\n⚡ Đã giải phóng hoàn toàn tài nguyên CPU & RAM trên PC.\n☁️ <b>Quyền điều hành AI đã bàn giao cho Cloudflare Worker 24/7!</b>\n\n💡 <i>Bro có thể tiếp tục chat/code trên Cloud. Khi cần mở lại Antigravity PC, chỉ cần gõ <code>/pc</code> hoặc <code>bật antigravity</code> nhé!</i>`,
-                                            targetTId
-                                        );
-                                        await setCloudWebhook(true);
-                                        isCloudStandby = true;
-                                        continue;
-                                    } else {
-                                        await sendMsg(
-                                            chatId,
-                                            `🛑 <b>[ĐÃ ĐÓNG TIẾN TRÌNH / CỬA SỔ TRÊN PC]</b>\n──────────────────────\n✅ <b>${res.desc}</b>\n⚡ Tiến trình đã được giải phóng khỏi máy tính.`,
-                                            targetTId
-                                        );
-                                    }
-                                } else {
-                                    await sendMsg(
-                                        chatId,
-                                        `ℹ️ <b>[KHÔNG TÌM THẤY TIẾN TRÌNH ĐỂ ĐÓNG]</b>\n──────────────────────\n${res.desc}`,
-                                        targetTId
-                                    );
-                                }
-                                continue;
-                            }
-
-                            // 7. Tắt nguồn máy tính PC (Remote Shutdown)
-                            if (intent.action === 'shutdown_pc') {
-                                await sendMsg(
-                                    chatId,
-                                    `🔌 <b>[ĐÃ TIẾP NHẬN LỆNH TẮT NGUỒN PC]</b>\n──────────────────────\n✅ <b>Đã bàn giao quyền trực chiến 100% cho Cloudflare Worker 24/7!</b>\n⚡ Máy tính PC sẽ tự động ngắt nguồn hoàn toàn (Shut down) trong 10 giây.\n\n💡 <i>Nếu muốn hủy tắt máy, hãy gõ ngay: <code>hủy tắt máy</code> hoặc <code>/cancel_shutdown</code></i>\n💤 <i>Chúc bro nghỉ ngơi! Khi nào mở lại máy tính, chỉ cần vào Telegram gõ <code>/pc</code> và nhập mã PIN để mở lại Antigravity nhé!</i>`,
-                                    targetTId
-                                );
-
-                                // Chuyển giao ngay Webhook cho Cloudflare Worker 24/7
-                                await setCloudWebhook(true);
-                                isCloudStandby = true;
-
-                                // Thực thi lệnh tắt máy Windows (đặt 10 giây để người dùng kịp hủy nếu vô tình ấn nhầm)
-                                setTimeout(() => {
-                                    try {
-                                        const cp = require('child_process');
-                                        cp.exec('shutdown.exe /s /t 10 /c "QuinloveRin Remote Shutdown from Telegram"');
-                                    } catch (e) {}
-                                }, 1500);
+                                const confirmMsg = `⚠️ <b>[XÁC NHẬN THỰC THI LỆNH HỆ THỐNG]</b>\n──────────────────────\nTôi vừa ghi nhận lệnh <b>"${actionName}"</b>, bro có xác nhận không?\n\n👉 <i>Bro hãy bấm <b>Chấp thuận</b> để tiếp tục hoặc <b>Từ chối</b> để hủy nhé:</i>`;
+                                const confirmMarkup = {
+                                    inline_keyboard: [
+                                        [
+                                            { text: '✅ Chấp thuận', callback_data: `act_confirm:${actId}` },
+                                            { text: '❌ Từ chối', callback_data: `act_cancel:${actId}` }
+                                        ]
+                                    ]
+                                };
+                                await sendMsg(chatId, confirmMsg, threadId, 'HTML', confirmMarkup);
                                 continue;
                             }
 

@@ -805,14 +805,12 @@ async function handleTelegramUpdate(update, env, ctx) {
             return;
         }
 
-        // G2. LỆNH TẮT MÁY (REMOTE SHUTDOWN PC) KHI ĐANG Ở CLOUD
+        // G2. LỆNH TẮT MÁY (REMOTE SHUTDOWN PC) KHI ĐANG Ở CLOUD (KHÔNG TỰ XÓA WEBHOOK GÂY MẤT KẾT NỐI 24/7)
         if (/^(?:\/shutdown|\/tatmay|\/tat_pc|\/tat_may|(?:tắt|tat)\s+(?:máy|may|máy\s+tính|may\s+tinh|pc|nguồn|nguon)(?:\s+(?:đi|nhe|nhé|nha|thôi|thoi|giúp|giup|hộ|ho)?(?:\s+(?:bro|bạn|ban|ad|em))?)?)$/i.test(text.trim())) {
-            pendingPcCommands.push({ type: 'shutdown_pc', chatId, threadId, time: Date.now() });
-            try { await fetch(`https://api.telegram.org/bot${botToken}/deleteWebhook`); } catch (e) {}
             await sendTg(
                 botToken,
                 chatId,
-                `🔌 <b>[ĐÃ TIẾP NHẬN LỆNH TẮT NGUỒN PC TỪ XA]</b>\n──────────────────────\n⚡ <b>Đã phát tín hiệu ngắt nguồn tới máy tính PC!</b>\n🖥️ PC đang thực thi lệnh đóng ứng dụng và tắt nguồn hoàn toàn (Shut down trong 10 giây).\n☁️ Cloudflare Worker 24/7 tiếp tục trực chiến trên Đám Mây để chờ bro!`,
+                `🔌 <b>[MÁY TÍNH PC ĐÃ TẮT NGUỒN AN TOÀN]</b>\n──────────────────────\n🖥️ Máy tính PC hiện tại đang ở trạng thái ngắt nguồn (tắt máy).\n☁️ <b>Cloudflare Worker 24/7</b> vẫn đang tiếp quản toàn bộ kênh chat để hỗ trợ code cho bro!\n\n👉 <i>Khi nào muốn mở lại máy tính, bro chỉ cần bật máy và gõ <code>/pc</code> nhé!</i>`,
                 threadId
             );
             return;
