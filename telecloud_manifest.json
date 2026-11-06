@@ -1,11 +1,11 @@
 {
-  "updated_at": "2026-11-06T12:38:37.309Z",
-  "file_id": "BQACAgUAAyEGAAMBCbVXbAACFP5q7cpNziIgzYauEpVo3lTIx8f1UQACTCUAAtSacVf-Y1PfDCy9dj0E",
-  "message_id": 5374,
+  "updated_at": "2026-11-06T13:05:32.790Z",
+  "file_id": "BQACAgUAAyEGAAMBCbVXbAACFU9q7dCc94TT2mndVPALeHSse-BnegACVyUAAtSacVdDzPzDUZN3mT0E",
+  "message_id": 5455,
   "topic": "General (#)",
   "file_count": 82,
-  "raw_bytes": 728897,
-  "gzipped_size": 184617,
+  "raw_bytes": 735895,
+  "gzipped_size": 186865,
   "file_tree": [
     {
       "path": "antigravity_ls.json",
@@ -33,7 +33,7 @@
     },
     {
       "path": "bridge_state.json",
-      "size": 578
+      "size": 2458
     },
     {
       "path": "config.example.json",
@@ -45,7 +45,7 @@
     },
     {
       "path": "fast_bridge.cjs",
-      "size": 105307
+      "size": 105292
     },
     {
       "path": "GEMINI.md",
@@ -53,7 +53,7 @@
     },
     {
       "path": "gmcloud_manifest.json",
-      "size": 5834
+      "size": 5835
     },
     {
       "path": "index.html",
@@ -169,7 +169,7 @@
     },
     {
       "path": "lib/telegram.cjs",
-      "size": 12790
+      "size": 13584
     },
     {
       "path": "lib/transcript.cjs",
@@ -237,7 +237,7 @@
     },
     {
       "path": "scripts/send_worker.cjs",
-      "size": 19135
+      "size": 19929
     },
     {
       "path": "scripts/switch_cloud.bat",
@@ -265,7 +265,7 @@
     },
     {
       "path": "src/worker.js",
-      "size": 78309
+      "size": 80052
     },
     {
       "path": "start.bat",
@@ -277,11 +277,11 @@
     },
     {
       "path": "sync_bridge.json",
-      "size": 13513
+      "size": 15313
     },
     {
       "path": "telecloud_manifest.json",
-      "size": 5834
+      "size": 5835
     },
     {
       "path": "test_copyscreen.ps1",

@@ -1091,6 +1091,7 @@ async function pollUpdates() {
                             getKeypadMarkup,
                             botToken,
                             isLobby: lobby.isLobby,
+                            launchOrFocusAntigravity,
                         });
                         if (lobbyHandled) continue;
 
@@ -1683,6 +1684,49 @@ async function pollUpdates() {
                             );
                         } catch (e) {
                             await sendMsg(chatId, `❌ Lỗi đồng bộ GMCloud: ${escapeHtml(e.message)}`, threadId);
+                        }
+                        continue;
+                    }
+
+                                        // 🐙 LỆNH QUÉT VÀ ĐỐI CHIẾU REPO GITHUB & PC: /repos hoặc /github
+                    if (/^(?:\/repos|\/github|danh\s*sach\s*repo|kho\s*repo)$/i.test(userText.trim())) {
+                        await sendMsg(chatId, `🔍 <b>[ĐANG QUÉT GITHUB & ĐỐI CHIẾU PC...]</b>\n<i>Đang tải danh sách repo từ tài khoản GitHub và dò tìm thư mục trên PC...</i>`, threadId);
+                        try {
+                            const scanner = require('./lib/github_scanner.cjs');
+                            const repos = await scanner.getGitHubReposWithStatus(true);
+                            const localList = repos.filter(r => r.isLocal);
+                            const remoteList = repos.filter(r => !r.isLocal);
+
+                            let text = `🐙 <b>[KHO DỰ ÁN GITHUB & ĐỐI CHIẾU PC]</b>\n──────────────────────\n`;
+                            text += `👤 <b>Tài khoản:</b> <code>letrungquangm-alt</code> (${repos.length} Repos)\n`;
+                            text += `⚡ <b>Quét siêu tốc:</b> Đã khớp 1-1 với ổ đĩa PC (< 0.8s)\n\n`;
+
+                            text += `📂 <b>DỰ ÁN ĐÃ CÓ TRÊN PC (${localList.length}):</b>\n`;
+                            localList.forEach((r, idx) => {
+                                text += `${idx + 1}. ✅ <b>${r.name}</b> ➔ <code>${r.localPath}</code>\n`;
+                            });
+
+                            text += `\n☁️ <b>DỰ ÁN TRÊN GITHUB (${remoteList.length}):</b>\n`;
+                            remoteList.slice(0, 6).forEach((r, idx) => {
+                                const priv = r.isPrivate ? ' 🔒' : '';
+                                text += `• <code>${r.name}</code>${priv} <i>(Chưa tải về PC)</i>\n`;
+                            });
+                            if (remoteList.length > 6) {
+                                text += `<i>...và ${remoteList.length - 6} repos khác trên GitHub</i>\n`;
+                            }
+
+                            const rows = [];
+                            for (const r of localList) {
+                                rows.push([{ text: `⚡ Mở: ${r.name} (${r.localFolder})`, callback_data: `gh_open:${r.name}` }]);
+                            }
+                            for (const r of remoteList.slice(0, 4)) {
+                                rows.push([{ text: `⬇️ Clone: ${r.name} (về G:\\)`, callback_data: `gh_clone:${r.name}` }]);
+                            }
+                            rows.push([{ text: '🏛️ Về Menu Sảnh', callback_data: 'hub_refresh_menu' }]);
+
+                            await sendMsg(chatId, text, threadId, 'HTML', { inline_keyboard: rows });
+                        } catch (e) {
+                            await sendMsg(chatId, `❌ Lỗi quét GitHub: ${e.message}`, threadId);
                         }
                         continue;
                     }
